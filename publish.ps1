@@ -102,6 +102,13 @@ Write-Host "[INFO] VERSION file contents:" -ForegroundColor Green
 Get-Content "VERSION"
 Write-Host ""
 
+# Read version from VERSION file and set as environment variable
+$VERSION = Get-Content "VERSION" -Raw
+$VERSION = $VERSION.Trim()
+$env:PACKAGE_VERSION = $VERSION
+Write-Host "[INFO] Set PACKAGE_VERSION environment variable to: $VERSION" -ForegroundColor Green
+Write-Host ""
+
 # Commit version change
 Write-Host "[INFO] Committing version change..." -ForegroundColor Cyan
 git add VERSION
@@ -137,18 +144,18 @@ Write-Host ""
 
 # Verify built package version
 $wheelFile = Get-ChildItem -Path "dist" -Filter "*.whl" | Select-Object -First 1
-if ($wheelFile -and $wheelFile.Name -notmatch $NEW_VERSION) {
+if ($wheelFile -and $wheelFile.Name -notmatch $VERSION) {
     Write-Host "[ERROR] Built package version does not match requested version" -ForegroundColor Red
-    Write-Host "Expected version: $NEW_VERSION" -ForegroundColor Red
+    Write-Host "Expected version: $VERSION" -ForegroundColor Red
     Write-Host "Built package: $($wheelFile.Name)" -ForegroundColor Red
     exit 1
 }
 
 # Check if version already exists on TestPyPI
-Write-Host "[INFO] Checking if version $NEW_VERSION already exists on TestPyPI..." -ForegroundColor Cyan
+Write-Host "[INFO] Checking if version $VERSION already exists on TestPyPI..." -ForegroundColor Cyan
 $existingVersion = python -m pip index versions carla-driving-simulator-client --index-url https://test.pypi.org/simple/ 2>&1
-if ($existingVersion -match $NEW_VERSION) {
-    Write-Host "[WARNING] Version $NEW_VERSION already exists on TestPyPI" -ForegroundColor Yellow
+if ($existingVersion -match $VERSION) {
+    Write-Host "[WARNING] Version $VERSION already exists on TestPyPI" -ForegroundColor Yellow
     $response = Read-Host "Do you want to overwrite it? (y/N)"
     if ($response -ne "y") {
         Write-Host "[INFO] Aborting upload" -ForegroundColor Yellow
@@ -185,7 +192,7 @@ Write-Host "[INFO] Changes and tag pushed to remote" -ForegroundColor Green
 Write-Host ""
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "[INFO] Release $NEW_VERSION completed successfully!" -ForegroundColor Green
+Write-Host "[INFO] Release $VERSION completed successfully!" -ForegroundColor Green
 Write-Host "[INFO] Package uploaded to TestPyPI: https://test.pypi.org/project/carla-driving-simulator-client/" -ForegroundColor Cyan
 Write-Host "[INFO] Don't forget to create a release on GitHub with release notes." -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan

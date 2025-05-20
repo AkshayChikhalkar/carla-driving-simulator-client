@@ -10,9 +10,14 @@ import re
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-# Read version from VERSION file or git tag
+# Get version from environment variable or fallback to VERSION file
 def get_version():
-    # First try to read from VERSION file
+    # First try to get version from environment variable
+    version = os.environ.get('PACKAGE_VERSION')
+    if version:
+        return version
+
+    # If not in environment, try VERSION file
     try:
         with open('VERSION', 'r') as f:
             version = f.read().strip()
@@ -30,13 +35,10 @@ def get_version():
         version = re.sub(r'-.*$', '', version)
         return version
     except:
-        return "1.0.0"  # Default version if neither VERSION file nor git tag is available
+        return "1.0.0"  # Default version if nothing else is available
 
-# Get version and ensure VERSION file exists with correct version
+# Get version
 version = get_version()
-if not os.path.exists('VERSION') or open('VERSION', 'r').read().strip() != version:
-    with open('VERSION', 'w') as f:
-        f.write(version)
 
 setup(
     name="carla-driving-simulator-client",
