@@ -7,6 +7,9 @@
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![PyPI version](https://badge.fury.io/py/carla-driving-simulator-client.svg)](https://badge.fury.io/py/carla-driving-simulator-client)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases)
+[![GitHub issues](https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls)
 
 A personal project for experimenting with CARLA client, featuring vehicle control, sensor management, and visualization capabilities.
 
@@ -45,9 +48,9 @@ git clone https://github.com/akshaychikhalkar/carla-driving-simulator-client.git
 cd carla-driving-simulator-client
 ```
 
-2. Install dependencies:
+2. Install in development mode:
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 3. Install CARLA:
@@ -55,6 +58,10 @@ pip install -r requirements.txt
 - Extract the package and set the CARLA_ROOT environment variable
 - Add CARLA Python API to your PYTHONPATH:
 ```bash
+# For Windows
+set PYTHONPATH=%PYTHONPATH%;C:\path\to\carla\PythonAPI\carla\dist\carla-0.10.0-py3.7-win-amd64.egg
+
+# For Linux
 export PYTHONPATH=$PYTHONPATH:/path/to/carla/PythonAPI/carla/dist/carla-0.10.0-py3.7-linux-x86_64.egg
 ```
 
@@ -113,13 +120,20 @@ carla-driving-simulator-client/
 
 ## Contributing
 
-While this is a personal project, I welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create your feature branch:
+```bash
+git checkout -b feature/amazing-feature
+```
+3. Commit your changes:
+```bash
+git commit -m 'Add some amazing feature'
+```
+4. Push to the branch:
+```bash
+git push origin feature/amazing-feature
+```
+5. Open a Pull Request
 
 Note: I cannot guarantee response times or implementation of suggested features as this project is maintained in my free time.
 
