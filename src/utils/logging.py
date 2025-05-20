@@ -42,13 +42,31 @@ class SimulationLogger:
         self.csv_writer = csv.writer(self.csv_file)
         self._write_csv_header()
         
-        # Setup operations logging
-        self.op_file = open(config.operations_file, 'w')
-        self._write_op_header()
-        
         # Setup application logging
         self.logger = logging.getLogger('simulation')
         self.logger.setLevel(getattr(logging, config.log_level.upper()))
+        
+        # Remove any existing handlers
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        
+        # Add file handler for operations log
+        file_handler = logging.FileHandler(config.operations_file)
+        file_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
+        file_handler.setFormatter(file_formatter)
+        self.logger.addHandler(file_handler)
+        
+        # Add console handler
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(message)s')
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
+        
+        # Write header to operations log
+        self.logger.info("=== CARLA Simulation Operational Log ===")
+        self.logger.info(f"Simulation started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info("=" * 50)
+        self.logger.info("")  # Empty line for readability
     
     def _write_csv_header(self) -> None:
         """Write CSV file header"""
@@ -66,12 +84,7 @@ class SimulationLogger:
             "Event_Details", "Rotation_Pitch[deg]",
             "Rotation_Yaw[deg]", "Rotation_Roll[deg]"
         ])
-    
-    def _write_op_header(self) -> None:
-        """Write operations log header"""
-        self.op_file.write("=== CARLA Simulation Operational Log ===\n")
-        self.op_file.write(f"Simulation started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        self.op_file.write("=" * 50 + "\n\n")
+        self.csv_file.flush()
     
     def log_data(self, data: SimulationData) -> None:
         """Log simulation data to CSV file"""
@@ -109,26 +122,21 @@ class SimulationLogger:
     
     def log_event(self, elapsed_time: float, event: str, details: str) -> None:
         """Log significant events to operations log"""
-        self.op_file.write(f"[{elapsed_time:.1f}s] {event}: {details}\n")
-        self.op_file.flush()
+        self.logger.info(f"[{elapsed_time:.1f}s] {event}: {details}")
     
     def log_error(self, message: str) -> None:
         """Log error messages"""
         self.logger.error(message)
-        self.op_file.write(f"ERROR: {message}\n")
-        self.op_file.flush()
     
     def log_info(self, message: str) -> None:
         """Log informational messages"""
         self.logger.info(message)
-        self.op_file.write(f"INFO: {message}\n")
-        self.op_file.flush()
     
     def close(self) -> None:
         """Close all log files"""
+        self.logger.info("")  # Empty line for readability
+        self.logger.info(f"Simulation ended at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.csv_file.close()
-        self.op_file.write(f"\nSimulation ended at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        self.op_file.close()
 
 def setup_logger(config: LoggingConfig) -> logging.Logger:
     """Set up application logger"""

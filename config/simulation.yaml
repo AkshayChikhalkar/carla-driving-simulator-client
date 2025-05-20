@@ -30,7 +30,7 @@ world:
     ignore_signs_percentage: 100  # percentage
   fixed_delta_seconds: 0.05  # 20 FPS
   target_distance: 500.0
-  num_vehicles: 20
+  num_vehicles: 50
   enable_collision: false
   synchronous_mode: true
 
@@ -45,7 +45,7 @@ vehicle:
 
 # Controller settings
 controller:
-  type: autopilot  # keyboard, gamepad, or autopilot
+  type: keyboard  # keyboard, gamepad, or autopilot
   steer_speed: 1.0
   throttle_speed: 1.0
   brake_speed: 1.0
@@ -57,7 +57,7 @@ controller:
     brake: ["SPACE"]
     hand_brake: ["b"]
     reverse: ["r"]
-    quit: ["ESCAPE", "q"]
+    quit: ["ESCAPE"]
 
 # Sensor settings
 sensors:
@@ -65,8 +65,8 @@ sensors:
     enabled: true
   camera:
     enabled: true
-    width: 1920
-    height: 1080
+    width: 1280
+    height: 720
     fov: 90
     x: -2.5  # camera position relative to vehicle (moved closer)
     y: 0.0
@@ -76,8 +76,8 @@ sensors:
 
 # Display settings
 display:
-  width: 1920
-  height: 1080
+  width: 1280
+  height: 720
   fps: 60
   hud_enabled: true
   minimap_enabled: true
