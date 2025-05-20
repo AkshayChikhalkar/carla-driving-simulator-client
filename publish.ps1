@@ -116,9 +116,17 @@ Write-Host "[INFO] Git tag created:" -ForegroundColor Green
 git tag -l "v$NEW_VERSION"
 Write-Host ""
 
-# Build package
+# Clean pip cache
+Write-Host "[INFO] Cleaning pip cache..." -ForegroundColor Cyan
+python -m pip cache purge
+Write-Host "[INFO] Pip cache cleaned" -ForegroundColor Green
+Write-Host ""
+
+# Build package with clean environment
 Write-Host "[INFO] Building package..." -ForegroundColor Cyan
-python -m build
+$env:PYTHONPATH = ""  # Clear PYTHONPATH
+python -m pip install --upgrade pip build wheel
+python -m build --no-isolation
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Package build failed" -ForegroundColor Red
     exit 1
