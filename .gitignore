@@ -44,6 +44,7 @@ carla/
 CarlaUE4/
 CarlaUE4.sh
 docker_container_carla.sh
+publish.ps1
 # Testing
 .coverage
 htmlcov/

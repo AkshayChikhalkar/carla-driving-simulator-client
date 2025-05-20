@@ -35,24 +35,24 @@ Write-Host ""
 
 # Check if twine is installed
 try {
-    $twineVersion = pip show twine
+    $twineVersion = python -m pip show twine
     Write-Host "[INFO] Twine is installed:" -ForegroundColor Green
     Write-Host $twineVersion
 } catch {
     Write-Host "[WARNING] twine is not installed. Installing..." -ForegroundColor Yellow
-    pip install twine
+    python -m pip install twine
     Write-Host "[INFO] Twine installation completed" -ForegroundColor Green
 }
 Write-Host ""
 
 # Check if build is installed
 try {
-    $buildVersion = pip show build
+    $buildVersion = python -m pip show build
     Write-Host "[INFO] Build is installed:" -ForegroundColor Green
     Write-Host $buildVersion
 } catch {
     Write-Host "[WARNING] build is not installed. Installing..." -ForegroundColor Yellow
-    pip install build
+    python -m pip install build
     Write-Host "[INFO] Build installation completed" -ForegroundColor Green
 }
 Write-Host ""
@@ -100,23 +100,55 @@ Write-Host "[INFO] Git tag created:" -ForegroundColor Green
 git tag -l "v$NEW_VERSION"
 Write-Host ""
 
+# Clean up old build artifacts
+Write-Host "[INFO] Cleaning up old build artifacts..." -ForegroundColor Cyan
+if (Test-Path "dist") {
+    Remove-Item -Path "dist" -Recurse -Force
+    Write-Host "[INFO] Removed dist directory" -ForegroundColor Green
+}
+if (Test-Path "build") {
+    Remove-Item -Path "build" -Recurse -Force
+    Write-Host "[INFO] Removed build directory" -ForegroundColor Green
+}
+if (Test-Path "*.egg-info") {
+    Remove-Item -Path "*.egg-info" -Recurse -Force
+    Write-Host "[INFO] Removed egg-info directories" -ForegroundColor Green
+}
+Write-Host ""
+
 # Build package
 Write-Host "[INFO] Building package..." -ForegroundColor Cyan
 python -m build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Package build failed" -ForegroundColor Red
+    exit 1
+}
 Write-Host "[INFO] Package build completed. Contents of dist directory:" -ForegroundColor Green
 Get-ChildItem -Path "dist"
 Write-Host ""
 
 # Upload to PyPI
 Write-Host "[INFO] Uploading to PyPI..." -ForegroundColor Cyan
-twine upload dist/*
+python -m twine upload dist/*
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Upload to PyPI failed" -ForegroundColor Red
+    exit 1
+}
 Write-Host "[INFO] Upload to PyPI completed" -ForegroundColor Green
 Write-Host ""
 
 # Push changes and tag to remote
 Write-Host "[INFO] Pushing changes and tag to remote..." -ForegroundColor Cyan
 git push origin master
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to push changes to master" -ForegroundColor Red
+    exit 1
+}
 git push origin "v$NEW_VERSION"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to push tag" -ForegroundColor Red
+    exit 1
+}
 Write-Host "[INFO] Changes and tag pushed to remote" -ForegroundColor Green
 Write-Host ""
 
