@@ -79,6 +79,22 @@ if ($gitDiff) {
 Write-Host "[INFO] No uncommitted changes found" -ForegroundColor Green
 Write-Host ""
 
+# Clean up old build artifacts first
+Write-Host "[INFO] Cleaning up old build artifacts..." -ForegroundColor Cyan
+if (Test-Path "dist") {
+    Remove-Item -Path "dist" -Recurse -Force
+    Write-Host "[INFO] Removed dist directory" -ForegroundColor Green
+}
+if (Test-Path "build") {
+    Remove-Item -Path "build" -Recurse -Force
+    Write-Host "[INFO] Removed build directory" -ForegroundColor Green
+}
+if (Test-Path "*.egg-info") {
+    Remove-Item -Path "*.egg-info" -Recurse -Force
+    Write-Host "[INFO] Removed egg-info directories" -ForegroundColor Green
+}
+Write-Host ""
+
 # Update VERSION file
 Write-Host "[INFO] Updating VERSION file to $NEW_VERSION" -ForegroundColor Cyan
 Set-Content -Path "VERSION" -Value $NEW_VERSION
@@ -100,22 +116,6 @@ Write-Host "[INFO] Git tag created:" -ForegroundColor Green
 git tag -l "v$NEW_VERSION"
 Write-Host ""
 
-# Clean up old build artifacts
-Write-Host "[INFO] Cleaning up old build artifacts..." -ForegroundColor Cyan
-if (Test-Path "dist") {
-    Remove-Item -Path "dist" -Recurse -Force
-    Write-Host "[INFO] Removed dist directory" -ForegroundColor Green
-}
-if (Test-Path "build") {
-    Remove-Item -Path "build" -Recurse -Force
-    Write-Host "[INFO] Removed build directory" -ForegroundColor Green
-}
-if (Test-Path "*.egg-info") {
-    Remove-Item -Path "*.egg-info" -Recurse -Force
-    Write-Host "[INFO] Removed egg-info directories" -ForegroundColor Green
-}
-Write-Host ""
-
 # Build package
 Write-Host "[INFO] Building package..." -ForegroundColor Cyan
 python -m build
@@ -126,6 +126,15 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[INFO] Package build completed. Contents of dist directory:" -ForegroundColor Green
 Get-ChildItem -Path "dist"
 Write-Host ""
+
+# Verify built package version
+$wheelFile = Get-ChildItem -Path "dist" -Filter "*.whl" | Select-Object -First 1
+if ($wheelFile -and $wheelFile.Name -notmatch $NEW_VERSION) {
+    Write-Host "[ERROR] Built package version does not match requested version" -ForegroundColor Red
+    Write-Host "Expected version: $NEW_VERSION" -ForegroundColor Red
+    Write-Host "Built package: $($wheelFile.Name)" -ForegroundColor Red
+    exit 1
+}
 
 # Check if version already exists on TestPyPI
 Write-Host "[INFO] Checking if version $NEW_VERSION already exists on TestPyPI..." -ForegroundColor Cyan
