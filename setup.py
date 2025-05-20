@@ -1,0 +1,41 @@
+"""
+Setup script for the CARLA Driving Simulator Client.
+"""
+
+from setuptools import setup, find_packages
+
+setup(
+    name="carla-driving-simulator-client",
+    version="0.1.0",
+    description="A personal CARLA client for driving simulation experiments",
+    author="Akshay Chikhalkar",
+    author_email="akshaychikhalkar15@gmail.com",
+    url="https://github.com/akshaychikhalkar/carla-driving-simulator-client",
+    packages=find_packages(),
+    install_requires=[
+        "carla==0.10.0",
+        "pygame>=2.0.0",
+        "numpy>=1.19.0",
+        "matplotlib>=3.3.0",
+        "tabulate>=0.8.7",
+        "pyyaml>=5.4.0",
+    ],
+    python_requires=">=3.7",
+    entry_points={
+        "console_scripts": [
+            "carla-simulator-client=src.main:main",
+            "csc=src.main:main",
+        ],
+    },
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Topic :: Scientific/Engineering",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ],
+) 
