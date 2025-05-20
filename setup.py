@@ -4,23 +4,40 @@ Setup script for the CARLA Driving Simulator Client.
 
 from setuptools import setup, find_packages
 import os
+import re
 
 # Read README.md for long description
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-# Read version from git tag
+# Read version from git tag or version file
 def get_version():
+    # First try to get version from git tag
     try:
         import subprocess
-        return subprocess.check_output(['git', 'describe', '--tags', '--always']).decode().strip()
+        version = subprocess.check_output(['git', 'describe', '--tags', '--always']).decode().strip()
+        # Remove any leading 'v' and any additional git info after the version number
+        version = re.sub(r'^v', '', version)
+        version = re.sub(r'-.*$', '', version)
+        return version
     except:
-        return "0.1.0"  # Default version if git is not available
+        # If git tag is not available, try to read from version file
+        try:
+            with open('VERSION', 'r') as f:
+                return f.read().strip()
+        except:
+            return "1.0.0"  # Default version if neither git nor version file is available
+
+# Write version to VERSION file if it doesn't exist
+version = get_version()
+if not os.path.exists('VERSION'):
+    with open('VERSION', 'w') as f:
+        f.write(version)
 
 setup(
     name="carla-driving-simulator-client",
-    version=get_version(),
-    description="A personal CARLA client for driving simulation experiments",
+    version=version,
+    description="A comprehensive CARLA client for autonomous driving simulation, featuring scenario-based testing, real-time visualization, and customizable vehicle control",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Akshay Chikhalkar",
@@ -60,6 +77,6 @@ setup(
         "Operating System :: OS Independent",
         "Framework :: CARLA",
     ],
-    keywords="carla, autonomous-driving, simulation, pygame, visualization",
+    keywords="carla, autonomous-driving, simulation, pygame, visualization, scenario-testing, vehicle-control, driving-simulator",
     zip_safe=False,
 ) 
