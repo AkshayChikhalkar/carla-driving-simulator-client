@@ -127,14 +127,14 @@ Write-Host "[INFO] Package build completed. Contents of dist directory:" -Foregr
 Get-ChildItem -Path "dist"
 Write-Host ""
 
-# Upload to PyPI
-Write-Host "[INFO] Uploading to PyPI..." -ForegroundColor Cyan
-python -m twine upload dist/*
+# Upload to TestPyPI
+Write-Host "[INFO] Uploading to TestPyPI..." -ForegroundColor Cyan
+python -m twine upload --repository testpypi dist/*
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Upload to PyPI failed" -ForegroundColor Red
+    Write-Host "[ERROR] Upload to TestPyPI failed" -ForegroundColor Red
     exit 1
 }
-Write-Host "[INFO] Upload to PyPI completed" -ForegroundColor Green
+Write-Host "[INFO] Upload to TestPyPI completed" -ForegroundColor Green
 Write-Host ""
 
 # Push changes and tag to remote
@@ -154,6 +154,7 @@ Write-Host ""
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "[INFO] Release $NEW_VERSION completed successfully!" -ForegroundColor Green
+Write-Host "[INFO] Package uploaded to TestPyPI: https://test.pypi.org/project/carla-driving-simulator-client/" -ForegroundColor Cyan
 Write-Host "[INFO] Don't forget to create a release on GitHub with release notes." -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
