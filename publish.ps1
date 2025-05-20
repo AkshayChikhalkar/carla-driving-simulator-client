@@ -127,11 +127,26 @@ Write-Host "[INFO] Package build completed. Contents of dist directory:" -Foregr
 Get-ChildItem -Path "dist"
 Write-Host ""
 
+# Check if version already exists on TestPyPI
+Write-Host "[INFO] Checking if version $NEW_VERSION already exists on TestPyPI..." -ForegroundColor Cyan
+$existingVersion = python -m pip index versions carla-driving-simulator-client --index-url https://test.pypi.org/simple/ 2>&1
+if ($existingVersion -match $NEW_VERSION) {
+    Write-Host "[WARNING] Version $NEW_VERSION already exists on TestPyPI" -ForegroundColor Yellow
+    $response = Read-Host "Do you want to overwrite it? (y/N)"
+    if ($response -ne "y") {
+        Write-Host "[INFO] Aborting upload" -ForegroundColor Yellow
+        exit 1
+    }
+}
+Write-Host ""
+
 # Upload to TestPyPI
 Write-Host "[INFO] Uploading to TestPyPI..." -ForegroundColor Cyan
-python -m twine upload --repository testpypi dist/*
+python -m twine upload --verbose --repository testpypi dist/*
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Upload to TestPyPI failed" -ForegroundColor Red
+    Write-Host "[ERROR] Upload to TestPyPI failed. Check the error message above." -ForegroundColor Red
+    Write-Host "[INFO] You can try to upload manually with:" -ForegroundColor Yellow
+    Write-Host "python -m twine upload --verbose --repository testpypi dist/*" -ForegroundColor Yellow
     exit 1
 }
 Write-Host "[INFO] Upload to TestPyPI completed" -ForegroundColor Green
