@@ -78,20 +78,20 @@ class KeyboardController(ControllerStrategy):
             'm': pygame.K_m
         }
 
-        # Log controller initialization
-        if self.logger:
-            self.logger.log_info("Initializing keyboard controller")
-            self.logger.log_info("Controls:")
-            self.logger.log_info("- W/Up Arrow: Accelerate")
-            self.logger.log_info("- S/Down Arrow: Toggle Reverse")
-            self.logger.log_info("- A/Left Arrow: Steer Left")
-            self.logger.log_info("- D/Right Arrow: Steer Right")
-            self.logger.log_info("- Space: Brake")
-            self.logger.log_info("- B: Hand Brake")
-            self.logger.log_info("- M: Toggle Manual/Automatic Transmission")
-            self.logger.log_info("- 1-6: Select Gear (Manual Mode)")
-            self.logger.log_info("- R: Reverse Gear (Manual Mode)")
-            self.logger.log_info("- Q/Escape: Quit")
+        # # Log controller initialization
+        # if self.logger:
+        #     self.logger.log_info("Initializing keyboard controller")
+        #     self.logger.log_info("Controls:")
+        #     self.logger.log_info("- W/Up Arrow: Accelerate")
+        #     self.logger.log_info("- S/Down Arrow: Toggle Reverse")
+        #     self.logger.log_info("- A/Left Arrow: Steer Left")
+        #     self.logger.log_info("- D/Right Arrow: Steer Right")
+        #     self.logger.log_info("- Space: Brake")
+        #     self.logger.log_info("- B: Hand Brake")
+        #     self.logger.log_info("- M: Toggle Manual/Automatic Transmission")
+        #     self.logger.log_info("- 1-6: Select Gear (Manual Mode)")
+        #     self.logger.log_info("- R: Reverse Gear (Manual Mode)")
+        #     self.logger.log_info("- Q/Escape: Quit")
 
         # Initialize key mappings
         self.keys = {

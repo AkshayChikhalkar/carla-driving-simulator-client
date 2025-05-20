@@ -54,7 +54,7 @@ htmlcov/
 # Documentation
 docs/_build/
 site/
-
+scenario_runner/
 # OS specific
 .DS_Store
 Thumbs.db 
