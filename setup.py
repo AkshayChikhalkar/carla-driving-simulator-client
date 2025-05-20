@@ -10,9 +10,18 @@ import re
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-# Read version from git tag or version file
+# Read version from VERSION file or git tag
 def get_version():
-    # First try to get version from git tag
+    # First try to read from VERSION file
+    try:
+        with open('VERSION', 'r') as f:
+            version = f.read().strip()
+            if version:
+                return version
+    except:
+        pass
+
+    # If VERSION file doesn't exist or is empty, try git tag
     try:
         import subprocess
         version = subprocess.check_output(['git', 'describe', '--tags', '--always']).decode().strip()
@@ -21,16 +30,11 @@ def get_version():
         version = re.sub(r'-.*$', '', version)
         return version
     except:
-        # If git tag is not available, try to read from version file
-        try:
-            with open('VERSION', 'r') as f:
-                return f.read().strip()
-        except:
-            return "1.0.0"  # Default version if neither git nor version file is available
+        return "1.0.0"  # Default version if neither VERSION file nor git tag is available
 
-# Write version to VERSION file if it doesn't exist
+# Get version and ensure VERSION file exists with correct version
 version = get_version()
-if not os.path.exists('VERSION'):
+if not os.path.exists('VERSION') or open('VERSION', 'r').read().strip() != version:
     with open('VERSION', 'w') as f:
         f.write(version)
 
