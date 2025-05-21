@@ -558,17 +558,27 @@ def find_available_tm_port(client):
     base_port = 8000
     max_attempts = 20
     
-    ports_to_try = random.sample(range(base_port, base_port + 1000), max_attempts)
+    # Try ports in sequence first
+    for port in range(base_port, base_port + 10):
+        try:
+            tm = client.get_trafficmanager(port)
+            tm.set_synchronous_mode(True)
+            print(f"Found available Traffic Manager port: {port}")
+            return port
+        except Exception:
+            continue
     
+    # If sequential ports fail, try random ports
+    ports_to_try = random.sample(range(base_port, base_port + 1000), max_attempts)
     for port in ports_to_try:
         try:
             tm = client.get_trafficmanager(port)
             tm.set_synchronous_mode(True)
-            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                self.vehicle_manager.logger.log_info(f"Using Traffic Manager port: {port}")
+            print(f"Found available Traffic Manager port: {port}")
             return port
         except Exception:
             continue
+    
     raise RuntimeError("Could not find available Traffic Manager port")
 
 class CarlaSimulator:
@@ -595,6 +605,7 @@ class CarlaSimulator:
         self.is_running = False
         self.start_time = None
         self.current_scenario = None
+        self.tm_port = None  # Store traffic manager port
 
     def connect_to_server(self) -> bool:
         """Attempt to connect to CARLA server with proper error handling"""
@@ -627,49 +638,82 @@ class CarlaSimulator:
                 raise RuntimeError("Unable to connect to CARLA server")
             
             # Get world and apply settings
-            world = self.client.get_world()
+            self.world = self.client.get_world()
             
             # Set up synchronous mode first
-            settings = world.get_settings()
+            settings = self.world.get_settings()
             settings.synchronous_mode = True
             settings.fixed_delta_seconds = 1.0 / self.config.simulation.update_rate
-            world.apply_settings(settings)
+            self.world.apply_settings(settings)
             
             # Initialize managers
             self.world_manager = WorldManager(self.client, self.config.world)
-            self.vehicle_manager = VehicleManager(world, self.config.vehicle_model)
+            self.vehicle_manager = VehicleManager(self.world, self.config.vehicle_model)
             
             # Spawn vehicle
             spawn_point = self.world_manager.get_random_spawn_point()
+            if not spawn_point:
+                raise RuntimeError("Failed to get valid spawn point")
+            
             self.vehicle_manager.spawn_vehicle(spawn_point)
+            
+            # Wait for vehicle to be properly spawned
+            self.world.tick()
+            
+            # Get vehicle transform and ensure it's valid
+            vehicle_transform = self.vehicle_manager.vehicle.get_transform()
+            if not vehicle_transform or not vehicle_transform.location:
+                raise RuntimeError("Failed to get valid vehicle transform")
+            
+            # Generate target point using WorldManager
+            target_point = self.world_manager.generate_target_point(vehicle_transform)
+            if not target_point or not target_point.location:
+                raise RuntimeError("Failed to generate valid target point")
+            
+            # Set target and verify it was set
+            self.vehicle_manager.set_target(target_point.location)
+            
+            # Wait for target to be properly set
+            self.world.tick()
+            
+            # Verify target was set correctly
+            if not self.vehicle_manager._target_point:
+                raise RuntimeError("Failed to set target point in vehicle manager")
             
             # Set up autopilot if enabled
             if self.config.controller.type == 'autopilot':
                 try:
                     # Find available Traffic Manager port
-                    tm_port = find_available_tm_port(self.client)
-                    traffic_manager = self.client.get_trafficmanager(tm_port)
+                    self.tm_port = find_available_tm_port(self.client)
+                    
+                    # Get traffic manager with specific port
+                    traffic_manager = self.client.get_trafficmanager(self.tm_port)
                     traffic_manager.set_synchronous_mode(True)
                     
                     # Enable autopilot with traffic manager port
-                    self.vehicle_manager.vehicle.set_autopilot(True, tm_port)
+                    self.vehicle_manager.vehicle.set_autopilot(True, self.tm_port)
                     
                     # Configure vehicle behavior
-                    traffic_manager.set_global_distance_to_leading_vehicle(2.5)
+                    traffic_manager.set_global_distance_to_leading_vehicle(3.5)
                     traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)
-                    traffic_manager.ignore_lights_percentage(self.vehicle_manager.vehicle, 100)
-                    traffic_manager.ignore_signs_percentage(self.vehicle_manager.vehicle, 100)
+                    traffic_manager.ignore_lights_percentage(self.vehicle_manager.vehicle, 0)
+                    traffic_manager.ignore_signs_percentage(self.vehicle_manager.vehicle, 0)
                     traffic_manager.auto_lane_change(self.vehicle_manager.vehicle, True)
                     traffic_manager.random_left_lanechange_percentage(self.vehicle_manager.vehicle, 0)
                     traffic_manager.random_right_lanechange_percentage(self.vehicle_manager.vehicle, 0)
-                    traffic_manager.set_desired_speed(self.vehicle_manager.vehicle, self.config.simulation.max_speed)
-                except Exception:
+                    
+                    # Set initial speed and remove speed limits
+                    initial_speed = 120.0  # km/h
+                    traffic_manager.set_desired_speed(self.vehicle_manager.vehicle, initial_speed)
+                    traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)  # No speed reduction
+                    traffic_manager.set_global_distance_to_leading_vehicle(3.5)  # Minimum safe distance
+                    #traffic_manager.set_global_speed_limit(0)  # Remove global speed limit
+                    
+                    print("Autopilot enabled with initial speed settings")
+                except Exception as e:
+                    print(f"Failed to setup autopilot: {str(e)}")
                     # Silently fall back to manual control
                     self.config.controller.type = 'keyboard'
-            
-            # Generate target point
-            target = self.world_manager.generate_target_point(spawn_point)
-            self.vehicle_manager.set_target(target.location)
             
             # Initialize sensors
             self.logger.log_info("Initializing sensor manager...")

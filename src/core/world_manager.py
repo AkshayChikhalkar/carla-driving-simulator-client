@@ -27,23 +27,17 @@ class WorldManager:
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
         
-        # Apply initial settings
+        # Apply initial settings with more stable timing parameters
         settings = self.world.get_settings()
         settings.synchronous_mode = config.synchronous_mode
         settings.fixed_delta_seconds = config.fixed_delta_seconds
         settings.substepping = True
-        settings.max_substep_delta_time = 0.01  # 10ms
-        settings.max_substeps = 10
+        settings.max_substep_delta_time = config.physics.max_substep_delta_time
+        settings.max_substeps = config.physics.max_substeps
         self.world.apply_settings(settings)
         
         # Wait for the world to be ready
         self.world.tick()
-        
-        # Set up traffic manager
-        traffic_manager = self.client.get_trafficmanager()
-        traffic_manager.set_synchronous_mode(True)
-        traffic_manager.set_global_distance_to_leading_vehicle(2.5)
-        traffic_manager.global_percentage_speed_difference(30.0)  # Allow some speed variation
     
     def get_weather_parameters(self) -> Dict[str, float]:
         """Get current weather parameters"""
@@ -65,22 +59,28 @@ class WorldManager:
         """Get list of all traffic actors in the world"""
         return self._traffic_actors
     
-    def setup_traffic(self) -> None:
-        """Initialize traffic in the world"""
-        traffic_manager = self.world.get_traffic_manager()
-        traffic_manager.set_global_distance_to_leading_vehicle(2.0)
-        traffic_manager.set_random_device_seed(0)
+    def setup_traffic(self, tm_port: int) -> None:
+        """Initialize traffic in the world with specific traffic manager port"""
+        # Get traffic manager with specific port
+        self.traffic_manager = self.client.get_trafficmanager(tm_port)
+        self.traffic_manager.set_synchronous_mode(True)
+        self.traffic_manager.set_global_distance_to_leading_vehicle(3.5)
+        self.traffic_manager.global_percentage_speed_difference(15.0)
+        self.traffic_manager.set_random_device_seed(0)
         
+        # Spawn traffic vehicles
         for _ in range(self.config.num_vehicles):
             transform = random.choice(self.world.get_map().get_spawn_points())
             bp = random.choice(self.world.get_blueprint_library().filter('vehicle.*'))
             
             npc = self.world.try_spawn_actor(bp, transform)
             if npc is not None:
-                npc.set_autopilot(True)
-                traffic_manager.ignore_lights_percentage(npc, 0)
-                traffic_manager.vehicle_percentage_speed_difference(npc, random.uniform(-20, 20))
+                npc.set_autopilot(True, tm_port)
+                self.traffic_manager.ignore_lights_percentage(npc, 0)
+                self.traffic_manager.vehicle_percentage_speed_difference(npc, random.uniform(-10, 10))
                 self._traffic_actors.append(npc)
+                # Tick the world to ensure proper spawning
+                self.world.tick()
     
     def generate_target_point(self, spawn_point: carla.Transform) -> TargetPoint:
         """Generate a target point at specified distance from spawn point"""

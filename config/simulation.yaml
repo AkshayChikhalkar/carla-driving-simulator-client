@@ -45,7 +45,7 @@ vehicle:
 
 # Controller settings
 controller:
-  type: keyboard  # keyboard, gamepad, or autopilot
+  type: autopilot  # keyboard, gamepad, or autopilot
   steer_speed: 1.0
   throttle_speed: 1.0
   brake_speed: 1.0
@@ -119,7 +119,7 @@ simulation:
 logging:
   simulation_file: simulation_data.csv
   operations_file: simulation_operations.log
-  log_level: INFO
+  log_level: DEBUG
   enabled: true
   directory: logs
   format:
