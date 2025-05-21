@@ -963,12 +963,9 @@ def main():
         import argparse
         parser = argparse.ArgumentParser(description='CARLA Simulator')
         parser.add_argument('--scenario', type=str, default='FOLLOW_ROUTE',
-                          choices=[s.name for s in ScenarioType],
-                          help='Type of scenario to run')
+                          choices=[s.name for s in ScenarioType] + ['all'],
+                          help='Type of scenario to run (use "all" to run all scenarios sequentially)')
         args = parser.parse_args()
-        
-        # Convert string scenario type to enum
-        scenario_type = ScenarioType[args.scenario]
         
         # Load configuration
         config_path = os.path.join(project_root, 'config', 'simulation.yaml')
@@ -977,10 +974,26 @@ def main():
         # Initialize logger first
         logger = SimulationLogger(config.logging)
         
-        # Create and run simulator with specified scenario
-        simulator = CarlaSimulator(config_path, scenario_type)
-        simulator.setup()
-        simulator.run()
+        if args.scenario == 'all':
+            # Run all scenarios sequentially
+            for scenario_type in ScenarioType:
+                logger.log_info(f"\nStarting scenario: {scenario_type.name}")
+                simulator = CarlaSimulator(config_path, scenario_type)
+                simulator.setup()
+                simulator.run()
+                
+                # Clean up current scenario
+                if simulator:
+                    simulator.cleanup()
+                
+                # Small delay between scenarios
+                time.sleep(2)
+        else:
+            # Run single scenario
+            scenario_type = ScenarioType[args.scenario]
+            simulator = CarlaSimulator(config_path, scenario_type)
+            simulator.setup()
+            simulator.run()
         
     except KeyboardInterrupt:
         if logger:
@@ -988,7 +1001,7 @@ def main():
     except Exception as e:
         if logger:
             # Log only the error message without additional context
-            logger.log_error(str(e))
+            logger.log_error(f"Error during simulation: {str(e)}")
     finally:
         if simulator:
             try:
