@@ -496,8 +496,8 @@ class PedestrianCrossingScenario(Scenario):
     """Scenario where a pedestrian crosses the road in front of the vehicle"""
     def __init__(self, world_manager, vehicle_manager):
         super().__init__(world_manager, vehicle_manager)
-        self.pedestrian = None
-        self.controller = None
+        self.pedestrians = []
+        self.controllers = []
         self.crossing_distance = 30.0  # meters
         self.safe_distance = 3.0  # meters
         self.is_crossing = False
@@ -608,11 +608,12 @@ class PedestrianCrossingScenario(Scenario):
                             )
                             
                             # Try to spawn the pedestrian
-                            self.pedestrian = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
+                            pedestrian = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
                             
-                            if self.pedestrian:
+                            if pedestrian:
                                 if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
                                     self.vehicle_manager.logger.log_info(f"Successfully spawned pedestrian {blueprint_name} on attempt {attempt + 1}")
+                                self.pedestrians.append(pedestrian)
                                 break
                                 
                         except Exception as e:
@@ -620,7 +621,7 @@ class PedestrianCrossingScenario(Scenario):
                                 self.vehicle_manager.logger.log_info(f"Failed to spawn {blueprint_name} on attempt {attempt + 1}: {str(e)}")
                             continue
                     
-                    if self.pedestrian:
+                    if self.pedestrians:
                         break
                         
                 except Exception as e:
@@ -630,7 +631,7 @@ class PedestrianCrossingScenario(Scenario):
                         raise RuntimeError(f"Failed to spawn pedestrian after {self.max_spawn_attempts} attempts")
                     continue
             
-            if not self.pedestrian:
+            if not self.pedestrians:
                 raise RuntimeError("Failed to spawn pedestrian with any blueprint")
             
             # Set target point far ahead for ego vehicle
@@ -647,9 +648,11 @@ class PedestrianCrossingScenario(Scenario):
             if not walker_controller_bp:
                 raise RuntimeError("Failed to find walker controller blueprint")
                 
-            self.controller = self.world_manager.world.spawn_actor(walker_controller_bp, carla.Transform(), self.pedestrian)
-            if not self.controller:
-                raise RuntimeError("Failed to spawn walker controller")
+            for pedestrian in self.pedestrians:
+                controller = self.world_manager.world.spawn_actor(walker_controller_bp, carla.Transform(), pedestrian)
+                if not controller:
+                    raise RuntimeError("Failed to spawn walker controller")
+                self.controllers.append(controller)
             
             self.start_time = time.time()
             if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
@@ -671,33 +674,35 @@ class PedestrianCrossingScenario(Scenario):
         try:
             # Get current states
             ego_location = self.vehicle_manager.vehicle.get_location()
-            pedestrian_location = self.pedestrian.get_location()
             ego_velocity = self.vehicle_manager.vehicle.get_velocity()
             ego_speed = 3.6 * math.sqrt(ego_velocity.x**2 + ego_velocity.y**2)  # km/h
             
-            # Calculate distance between vehicle and pedestrian
-            distance = ego_location.distance(pedestrian_location)
+            # Calculate distance between vehicle and pedestrians
+            distances = [ego_location.distance(pedestrian.get_location()) for pedestrian in self.pedestrians]
             
             # Start crossing when vehicle is close enough
-            if not self.is_crossing and distance < self.crossing_distance:
+            if not self.is_crossing and all(distance < self.crossing_distance for distance in distances):
                 self.is_crossing = True
                 # Calculate crossing target (other side of the road)
                 ego_transform = self.vehicle_manager.vehicle.get_transform()
                 right_vector = ego_transform.get_right_vector()
-                target_location = carla.Location(
-                    x=pedestrian_location.x - right_vector.x * 8.0,
-                    y=pedestrian_location.y - right_vector.y * 8.0,
-                    z=pedestrian_location.z
-                )
-                # Command pedestrian to cross
-                self.controller.start()
-                self.controller.go_to_location(target_location)
-                self.controller.set_max_speed(1.4)  # normal walking speed
-                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                    self.vehicle_manager.logger.log_info("Pedestrian starting to cross!")
+                for pedestrian in self.pedestrians:
+                    pedestrian_location = pedestrian.get_location()
+                    target_location = carla.Location(
+                        x=pedestrian_location.x - right_vector.x * 8.0,
+                        y=pedestrian_location.y - right_vector.y * 8.0,
+                        z=pedestrian_location.z
+                    )
+                    # Command pedestrian to cross
+                    controller = self.controllers[self.pedestrians.index(pedestrian)]
+                    controller.start()
+                    controller.go_to_location(target_location)
+                    controller.set_max_speed(1.4)  # normal walking speed
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_info(f"Pedestrian {self.pedestrians.index(pedestrian) + 1} starting to cross!")
 
             # Check for collision
-            if distance < self.safe_distance:
+            if any(distance < self.safe_distance for distance in distances):
                 self.is_completed = True
                 self.success = False
                 if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
@@ -706,7 +711,7 @@ class PedestrianCrossingScenario(Scenario):
             
             # Check if crossing is complete
             if self.is_crossing and not self.cross_complete:
-                # Check if pedestrian has reached the other side
+                # Check if all pedestrians have reached the other side
                 ego_transform = self.vehicle_manager.vehicle.get_transform()
                 right_vector = ego_transform.get_right_vector()
                 cross_vector = carla.Vector3D(
@@ -714,13 +719,13 @@ class PedestrianCrossingScenario(Scenario):
                     y=-right_vector.y * 8.0,
                     z=0
                 )
-                if pedestrian_location.distance(ego_location + cross_vector) < 1.0:
+                if all(pedestrian.get_location().distance(ego_location + cross_vector) < 1.0 for pedestrian in self.pedestrians):
                     self.cross_complete = True
                     if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                        self.vehicle_manager.logger.log_info("Pedestrian crossed successfully!")
+                        self.vehicle_manager.logger.log_info("All pedestrians crossed successfully!")
             
             # Check if scenario is complete (crossing performed and safe distance maintained)
-            if self.cross_complete and ego_speed > 0 and distance > self.safe_distance:
+            if self.cross_complete and ego_speed > 0 and all(distance > self.safe_distance for distance in distances):
                 self.is_completed = True
                 self.success = True
                 self.completion_time = time.time() - self.start_time
@@ -737,22 +742,22 @@ class PedestrianCrossingScenario(Scenario):
 
     def cleanup(self):
         try:
-            if self.controller is not None:
+            for controller in self.controllers:
                 try:
-                    self.controller.stop()
-                    self.controller.destroy()
+                    controller.stop()
+                    controller.destroy()
                 except Exception as e:
                     if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
                         self.vehicle_manager.logger.log_error(f"Error stopping controller: {str(e)}")
-                self.controller = None
+            self.controllers = []
             
-            if self.pedestrian is not None:
+            for pedestrian in self.pedestrians:
                 try:
-                    self.pedestrian.destroy()
+                    pedestrian.destroy()
                 except Exception as e:
                     if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
                         self.vehicle_manager.logger.log_error(f"Error destroying pedestrian: {str(e)}")
-                self.pedestrian = None
+            self.pedestrians = []
         except Exception as e:
             if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
                 self.vehicle_manager.logger.log_error(f"Error in PedestrianCrossingScenario cleanup: {str(e)}")
@@ -850,14 +855,58 @@ class CarlaSimulator:
             
             # Get world and apply settings
             self.world = self.client.get_world()
-            self.logger.log_info("World settings applied")
             
-            # Set up synchronous mode first
+            # Optimize world settings for better performance
             settings = self.world.get_settings()
             settings.synchronous_mode = True
-            settings.fixed_delta_seconds = 1.0 / self.config.simulation.update_rate
+            settings.fixed_delta_seconds = 1.0 / 30.0  # Cap at 30 FPS for stability
+            settings.no_rendering_mode = False  # Keep rendering but optimize
+            
+            # Apply optimized settings
             self.world.apply_settings(settings)
-            self.logger.log_info("Synchronous mode enabled")
+            
+            # Disable unnecessary features for better performance
+            self.world.unload_map_layer(carla.MapLayer.ParkedVehicles)
+            self.world.unload_map_layer(carla.MapLayer.Props)
+            self.world.unload_map_layer(carla.MapLayer.Foliage)
+            
+            # Disable ray tracing and other graphics features
+            try:
+                # Get the current weather
+                weather = self.world.get_weather()
+                
+                # Disable ray tracing and other graphics features
+                weather.ray_tracing_intensity = 0.0
+                weather.ray_tracing_ambient_occlusion = 0.0
+                weather.ray_tracing_reflections = 0.0
+                weather.ray_tracing_global_illumination = 0.0
+                weather.ray_tracing_shadows = 0.0
+                
+                # Reduce other graphics settings
+                weather.clouds = 0.0
+                weather.precipitation = 0.0
+                weather.precipitation_deposits = 0.0
+                weather.wind_intensity = 0.0
+                weather.fog_density = 0.0
+                weather.fog_distance = 0.0
+                weather.wetness = 0.0
+                weather.scattering_intensity = 0.0
+                weather.mie_scattering_scale = 0.0
+                weather.rayleigh_scattering_scale = 0.0
+                
+                # Apply the optimized weather settings
+                self.world.set_weather(weather)
+                
+                # Disable post-processing effects
+                self.world.unload_map_layer(carla.MapLayer.Decals)
+                self.world.unload_map_layer(carla.MapLayer.Buildings)
+                self.world.unload_map_layer(carla.MapLayer.Walls)
+                
+                self.logger.log_info("Graphics settings optimized for performance")
+            except Exception as e:
+                self.logger.log_error(f"Error optimizing graphics settings: {str(e)}")
+            
+            self.logger.log_info("World settings optimized for performance")
             
             # Initialize managers
             self.logger.log_info("Initializing world manager...")
@@ -915,20 +964,20 @@ class CarlaSimulator:
                     # Enable autopilot with traffic manager port
                     self.vehicle_manager.vehicle.set_autopilot(True, self.tm_port)
                     
-                    # Configure vehicle behavior
+                    # Configure vehicle behavior with optimized settings
                     traffic_manager.set_global_distance_to_leading_vehicle(3.5)
                     traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)
-                    traffic_manager.ignore_lights_percentage(self.vehicle_manager.vehicle, 0)
-                    traffic_manager.ignore_signs_percentage(self.vehicle_manager.vehicle, 0)
-                    traffic_manager.auto_lane_change(self.vehicle_manager.vehicle, True)
+                    traffic_manager.ignore_lights_percentage(self.vehicle_manager.vehicle, 100)  # Ignore traffic lights for better performance
+                    traffic_manager.ignore_signs_percentage(self.vehicle_manager.vehicle, 100)  # Ignore signs for better performance
+                    traffic_manager.auto_lane_change(self.vehicle_manager.vehicle, False)  # Disable lane changes for better performance
                     traffic_manager.random_left_lanechange_percentage(self.vehicle_manager.vehicle, 0)
                     traffic_manager.random_right_lanechange_percentage(self.vehicle_manager.vehicle, 0)
                     
                     # Set initial speed and remove speed limits
                     initial_speed = 120.0  # km/h
                     traffic_manager.set_desired_speed(self.vehicle_manager.vehicle, initial_speed)
-                    traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)  # No speed reduction
-                    traffic_manager.set_global_distance_to_leading_vehicle(3.5)  # Minimum safe distance
+                    traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)
+                    traffic_manager.set_global_distance_to_leading_vehicle(3.5)
                     
                     self.logger.log_info("Autopilot configured successfully")
                 except Exception as e:
@@ -936,15 +985,15 @@ class CarlaSimulator:
                     # Silently fall back to manual control
                     self.config.controller.type = 'keyboard'
             
-            # Initialize sensors
+            # Initialize sensors with optimized settings
             self.logger.log_info("Initializing sensor manager...")
             self.sensor_manager = SensorManager(self.vehicle_manager.vehicle, self.config.sensors)
             
-            # Initialize display
+            # Initialize display with optimized settings
             self.logger.log_info("Initializing display manager...")
             self.display_manager = DisplayManager(self.config.display)
             
-            # Add camera view as sensor observer
+            # Add camera view as sensor observer with reduced quality
             self.sensor_manager.add_observer('camera', self.display_manager.camera_view)
             
             # Initialize controller
@@ -997,8 +1046,34 @@ class CarlaSimulator:
             self.start_time = time.time()
             self.scenario_quit = False  # Flag to indicate scenario quit vs full quit
             
+            # FPS monitoring variables
+            frame_times = []
+            last_frame_time = time.time()
+            target_frame_time = 1.0 / 30.0  # Target 30 FPS
+            frame_count = 0
+            fps_update_interval = 1.0  # Update FPS display every second
+            last_fps_update = time.time()
+            
             while self.is_running:
                 try:
+                    # Calculate frame timing
+                    current_time = time.time()
+                    frame_time = current_time - last_frame_time
+                    frame_times.append(frame_time)
+                    
+                    # Keep only last 60 frame times for average calculation
+                    if len(frame_times) > 60:
+                        frame_times.pop(0)
+                    
+                    # Calculate average FPS
+                    if current_time - last_fps_update >= fps_update_interval:
+                        avg_frame_time = sum(frame_times) / len(frame_times)
+                        current_fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
+                        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                            self.vehicle_manager.logger.log_info(f"Current FPS: {current_fps:.1f}")
+                        last_fps_update = current_time
+                        frame_times.clear()  # Clear frame times after logging
+                    
                     # Handle pygame events
                     for event in pygame.event.get():
                         if event.type == pygame.QUIT:
@@ -1096,6 +1171,14 @@ class CarlaSimulator:
                     
                     # Tick the world
                     self.world_manager.world.tick()
+                    
+                    # Frame timing control
+                    frame_count += 1
+                    elapsed = time.time() - current_time
+                    if elapsed < target_frame_time:
+                        time.sleep(target_frame_time - elapsed)
+                    
+                    last_frame_time = time.time()
                     
                 except RuntimeError as e:
                     if "trying to operate on a destroyed actor" in str(e):
