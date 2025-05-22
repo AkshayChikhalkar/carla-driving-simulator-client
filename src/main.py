@@ -31,11 +31,11 @@ from src.control.controller import VehicleController, KeyboardController, Gamepa
 
 class ScenarioType(Enum):
     """Types of available scenarios"""
-    FOLLOW_ROUTE = auto()
-    AVOID_OBSTACLE = auto()
     EMERGENCY_BRAKE = auto()
     VEHICLE_CUTTING = auto()
+    FOLLOW_ROUTE = auto()
     PEDESTRIAN_CROSSING = auto()
+    AVOID_OBSTACLE = auto()
 
 class Scenario:
     """Base class for all scenarios"""
@@ -136,117 +136,141 @@ class AvoidObstacleScenario(Scenario):
             'static.prop.trafficcone01',
             'static.prop.trafficcone02'
         ]
+        self.max_attempts = 3  # Maximum attempts to spawn obstacles
+        self.current_attempt = 0
 
     def setup(self):
-        # Get vehicle's current position and forward vector
-        vehicle_transform = self.vehicle_manager.vehicle.get_transform()
-        forward_vector = vehicle_transform.get_forward_vector()
-        
-        # Set initial speed for better control
-        self.vehicle_manager.vehicle.set_target_velocity(
-            carla.Vector3D(x=self.initial_speed/3.6, y=0.0, z=0.0)
-        )
-        
-        # Calculate target point straight ahead
-        target_location = carla.Location(
-            x=vehicle_transform.location.x + forward_vector.x * self.target_distance,
-            y=vehicle_transform.location.y + forward_vector.y * self.target_distance,
-            z=vehicle_transform.location.z
-        )
-        
-        # Get the waypoint for the target
-        target_waypoint = self.world_manager.world.get_map().get_waypoint(target_location)
-        if target_waypoint:
-            target_location = target_waypoint.transform.location
-        
-        # Set the final target
-        self.vehicle_manager.set_target(target_location)
-        
-        # Spawn obstacles along the path with better spacing and placement
-        for i in range(self.num_obstacles):
-            # Calculate base distance for this obstacle
-            distance = self.obstacle_spacing * (i + 1)
+        try:
+            # Get vehicle's current position and forward vector
+            vehicle_transform = self.vehicle_manager.vehicle.get_transform()
+            forward_vector = vehicle_transform.get_forward_vector()
             
-            # Get the waypoint at this distance
-            obstacle_waypoint = self.world_manager.world.get_map().get_waypoint(
-                carla.Location(
-                    x=vehicle_transform.location.x + forward_vector.x * distance,
-                    y=vehicle_transform.location.y + forward_vector.y * distance,
-                    z=vehicle_transform.location.z
-                )
+            # Set initial speed for better control
+            self.vehicle_manager.vehicle.set_target_velocity(
+                carla.Vector3D(x=self.initial_speed/3.6, y=0.0, z=0.0)
             )
             
-            if obstacle_waypoint:
-                # Get the next waypoint to determine road direction
-                next_waypoint = obstacle_waypoint.next(1.0)[0]
-                road_direction = next_waypoint.transform.location - obstacle_waypoint.transform.location
-                road_direction = road_direction.make_unit_vector()
+            # Calculate target point straight ahead
+            target_location = carla.Location(
+                x=vehicle_transform.location.x + forward_vector.x * self.target_distance,
+                y=vehicle_transform.location.y + forward_vector.y * self.target_distance,
+                z=vehicle_transform.location.z
+            )
+            
+            # Get the waypoint for the target
+            target_waypoint = self.world_manager.world.get_map().get_waypoint(target_location)
+            if target_waypoint:
+                target_location = target_waypoint.transform.location
+            
+            # Set the final target
+            self.vehicle_manager.set_target(target_location)
+            
+            # Spawn obstacles along the path with better spacing and placement
+            for i in range(self.num_obstacles):
+                # Calculate base distance for this obstacle
+                distance = self.obstacle_spacing * (i + 1)
                 
-                # Calculate perpendicular offset (alternating sides)
-                perpendicular_offset = 4.0 if i % 2 == 0 else -4.0
-                
-                # Calculate obstacle position with offset perpendicular to road direction
-                obstacle_location = carla.Location(
-                    x=obstacle_waypoint.transform.location.x + perpendicular_offset * road_direction.y,
-                    y=obstacle_waypoint.transform.location.y - perpendicular_offset * road_direction.x,
-                    z=obstacle_waypoint.transform.location.z
+                # Get the waypoint at this distance
+                obstacle_waypoint = self.world_manager.world.get_map().get_waypoint(
+                    carla.Location(
+                        x=vehicle_transform.location.x + forward_vector.x * distance,
+                        y=vehicle_transform.location.y + forward_vector.y * distance,
+                        z=vehicle_transform.location.z
+                    )
                 )
                 
-                # Choose a random obstacle blueprint
-                blueprint_name = random.choice(self.obstacle_blueprints)
-                blueprint = self.world_manager.world.get_blueprint_library().find(blueprint_name)
-                
-                # Spawn the obstacle
-                obstacle_transform = carla.Transform(obstacle_location)
-                obstacle = self.world_manager.world.spawn_actor(blueprint, obstacle_transform)
-                if obstacle:
-                    self.obstacles.append(obstacle)
-                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                        self.vehicle_manager.logger.log_info(f"Spawned obstacle {i+1} at distance {distance:.1f}m with offset {perpendicular_offset:.1f}m")
+                if obstacle_waypoint:
+                    # Get the next waypoint to determine road direction
+                    next_waypoint = obstacle_waypoint.next(1.0)[0]
+                    road_direction = next_waypoint.transform.location - obstacle_waypoint.transform.location
+                    road_direction = road_direction.make_unit_vector()
+                    
+                    # Calculate perpendicular offset (alternating sides)
+                    perpendicular_offset = 4.0 if i % 2 == 0 else -4.0
+                    
+                    # Calculate obstacle position with offset perpendicular to road direction
+                    obstacle_location = carla.Location(
+                        x=obstacle_waypoint.transform.location.x + perpendicular_offset * road_direction.y,
+                        y=obstacle_waypoint.transform.location.y - perpendicular_offset * road_direction.x,
+                        z=obstacle_waypoint.transform.location.z
+                    )
+                    
+                    # Choose a random obstacle blueprint
+                    blueprint_name = random.choice(self.obstacle_blueprints)
+                    blueprint = self.world_manager.world.get_blueprint_library().find(blueprint_name)
+                    
+                    # Spawn the obstacle
+                    obstacle_transform = carla.Transform(obstacle_location)
+                    obstacle = self.world_manager.world.spawn_actor(blueprint, obstacle_transform)
+                    if obstacle:
+                        self.obstacles.append(obstacle)
+                        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                            self.vehicle_manager.logger.log_info(f"Spawned obstacle {i+1} at distance {distance:.1f}m with offset {perpendicular_offset:.1f}m")
+            
+            self.start_time = time.time()
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_info(f"Avoid obstacle scenario started with {len(self.obstacles)} obstacles")
+                self.vehicle_manager.logger.log_info(f"Initial speed set to {self.initial_speed} km/h for better control")
         
-        self.start_time = time.time()
-        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-            self.vehicle_manager.logger.log_info(f"Avoid obstacle scenario started with {len(self.obstacles)} obstacles")
-            self.vehicle_manager.logger.log_info(f"Initial speed set to {self.initial_speed} km/h for better control")
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in AvoidObstacleScenario setup: {str(e)}")
+            # Mark scenario as completed but failed
+            self.is_completed = True
+            self.success = False
+            self.cleanup()  # Clean up any spawned obstacles
 
     def update(self):
         if self.is_completed:
             return
 
-        # Get current vehicle state
-        vehicle_location = self.vehicle_manager.vehicle.get_location()
-        target_location = self.vehicle_manager._target_point
-        vehicle_velocity = self.vehicle_manager.vehicle.get_velocity()
-        speed = 3.6 * math.sqrt(vehicle_velocity.x**2 + vehicle_velocity.y**2)  # km/h
+        try:
+            # Get current vehicle state
+            vehicle_location = self.vehicle_manager.vehicle.get_location()
+            target_location = self.vehicle_manager._target_point
+            vehicle_velocity = self.vehicle_manager.vehicle.get_velocity()
+            speed = 3.6 * math.sqrt(vehicle_velocity.x**2 + vehicle_velocity.y**2)  # km/h
+            
+            # Check if vehicle has reached the target
+            distance_to_target = vehicle_location.distance(target_location)
+            
+            # Check for collisions with obstacles
+            for obstacle in self.obstacles:
+                if obstacle and obstacle.is_active:
+                    obstacle_location = obstacle.get_location()
+                    distance = vehicle_location.distance(obstacle_location)
+                    if distance < 2.5:  # Increased collision threshold
+                        self.is_completed = True
+                        self.success = False
+                        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                            self.vehicle_manager.logger.log_info(f"Failed: Collision with obstacle at distance {distance:.1f}m!")
+                        return
+            
+            # Check if passed all obstacles successfully
+            if distance_to_target < 5.0:
+                self.is_completed = True
+                self.success = True
+                self.completion_time = time.time() - self.start_time
+                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                    self.vehicle_manager.logger.log_info(f"Successfully avoided all obstacles! Time: {self.completion_time:.1f} seconds")
         
-        # Check if vehicle has reached the target
-        distance_to_target = vehicle_location.distance(target_location)
-        
-        # Check for collisions with obstacles
-        for obstacle in self.obstacles:
-            if obstacle and obstacle.is_active:
-                obstacle_location = obstacle.get_location()
-                distance = vehicle_location.distance(obstacle_location)
-                if distance < 2.5:  # Increased collision threshold
-                    self.is_completed = True
-                    self.success = False
-                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                        self.vehicle_manager.logger.log_info(f"Failed: Collision with obstacle at distance {distance:.1f}m!")
-                    return
-        
-        # Check if passed all obstacles successfully
-        if distance_to_target < 5.0:
-            self.is_completed = True
-            self.success = True
-            self.completion_time = time.time() - self.start_time
+        except Exception as e:
             if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                self.vehicle_manager.logger.log_info(f"Successfully avoided all obstacles! Time: {self.completion_time:.1f} seconds")
+                self.vehicle_manager.logger.log_error(f"Error in AvoidObstacleScenario update: {str(e)}")
+            # Mark scenario as completed but failed
+            self.is_completed = True
+            self.success = False
+            self.cleanup()  # Clean up any spawned obstacles
 
     def cleanup(self):
-        for obstacle in self.obstacles:
-            if obstacle and obstacle.is_active:
-                obstacle.destroy()
-        self.obstacles = []
+        try:
+            for obstacle in self.obstacles:
+                if obstacle and obstacle.is_active:
+                    obstacle.destroy()
+            self.obstacles = []
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in AvoidObstacleScenario cleanup: {str(e)}")
 
 class EmergencyBrakeScenario(Scenario):
     """Scenario where vehicle must perform emergency braking when an obstacle suddenly appears"""
@@ -338,41 +362,77 @@ class VehicleCuttingScenario(Scenario):
         self.target_speed = 40.0  # km/h
         self.is_cutting = False
         self.cut_complete = False
+        self.max_spawn_attempts = 5  # Maximum attempts to spawn the cutting vehicle
 
     def setup(self):
-        # Get ego vehicle's transform
-        ego_transform = self.vehicle_manager.vehicle.get_transform()
-        forward_vector = ego_transform.get_forward_vector()
-        right_vector = ego_transform.get_right_vector()
+        try:
+            # Get ego vehicle's transform
+            ego_transform = self.vehicle_manager.vehicle.get_transform()
+            forward_vector = ego_transform.get_forward_vector()
+            right_vector = ego_transform.get_right_vector()
+            
+            # Try different spawn positions
+            for attempt in range(self.max_spawn_attempts):
+                try:
+                    # Calculate spawn point for cutting vehicle (to the right of ego vehicle)
+                    # Adjust distance and offset based on attempt
+                    distance = self.initial_distance + (attempt * 5.0)  # Increase distance with each attempt
+                    offset = 3.5 + (attempt * 0.5)  # Increase offset with each attempt
+                    
+                    spawn_location = carla.Location(
+                        x=ego_transform.location.x + forward_vector.x * distance + right_vector.x * offset,
+                        y=ego_transform.location.y + forward_vector.y * distance + right_vector.y * offset,
+                        z=ego_transform.location.z
+                    )
+                    
+                    # Get the waypoint for spawn location
+                    spawn_waypoint = self.world_manager.world.get_map().get_waypoint(spawn_location)
+                    if spawn_waypoint:
+                        spawn_location = spawn_waypoint.transform.location
+                    
+                    spawn_rotation = ego_transform.rotation
+                    spawn_transform = carla.Transform(spawn_location, spawn_rotation)
+                    
+                    # Spawn the cutting vehicle
+                    blueprint = self.world_manager.world.get_blueprint_library().find('vehicle.fuso.mitsubishi')
+                    blueprint.set_attribute('role_name', 'cutting_vehicle')
+                    self.cutting_vehicle = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
+                    
+                    if self.cutting_vehicle:
+                        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                            self.vehicle_manager.logger.log_info(f"Successfully spawned cutting vehicle on attempt {attempt + 1}")
+                        break
+                        
+                except Exception as e:
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_info(f"Spawn attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == self.max_spawn_attempts - 1:
+                        raise RuntimeError(f"Failed to spawn cutting vehicle after {self.max_spawn_attempts} attempts")
+                    continue
+            
+            # Set target point far ahead
+            target_location = carla.Location(
+                x=ego_transform.location.x + forward_vector.x * (self.initial_distance + 100.0),
+                y=ego_transform.location.y + forward_vector.y * (self.initial_distance + 100.0),
+                z=ego_transform.location.z
+            )
+            self.vehicle_manager.set_target(target_location)
+            
+            # Set initial velocity for cutting vehicle
+            self.cutting_vehicle.set_target_velocity(carla.Vector3D(x=self.target_speed/3.6, y=0, z=0))
+            
+            self.start_time = time.time()
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_info("Vehicle cutting scenario started")
         
-        # Calculate spawn point for cutting vehicle (to the right of ego vehicle)
-        spawn_location = carla.Location(
-            x=ego_transform.location.x + forward_vector.x * self.initial_distance + right_vector.x * 3.5,
-            y=ego_transform.location.y + forward_vector.y * self.initial_distance + right_vector.y * 3.5,
-            z=ego_transform.location.z
-        )
-        spawn_rotation = ego_transform.rotation
-        spawn_transform = carla.Transform(spawn_location, spawn_rotation)
-        
-        # Spawn the cutting vehicle
-        blueprint = self.world_manager.world.get_blueprint_library().find('vehicle.tesla.model3')
-        blueprint.set_attribute('role_name', 'cutting_vehicle')
-        self.cutting_vehicle = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
-        
-        # Set target point far ahead
-        target_location = carla.Location(
-            x=ego_transform.location.x + forward_vector.x * (self.initial_distance + 100.0),
-            y=ego_transform.location.y + forward_vector.y * (self.initial_distance + 100.0),
-            z=ego_transform.location.z
-        )
-        self.vehicle_manager.set_target(target_location)
-        
-        # Set initial velocity for cutting vehicle
-        self.cutting_vehicle.set_target_velocity(carla.Vector3D(x=self.target_speed/3.6, y=0, z=0))
-        
-        self.start_time = time.time()
-        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-            self.vehicle_manager.logger.log_info("Vehicle cutting scenario started")
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in VehicleCuttingScenario setup: {str(e)}")
+            # Mark scenario as completed but failed
+            self.is_completed = True
+            self.success = False
+            self.cleanup()  # Clean up any spawned vehicles
+            raise  # Re-raise the exception to be handled by the main loop
 
     def update(self):
         if self.is_completed:
@@ -465,7 +525,7 @@ class PedestrianCrossingScenario(Scenario):
         spawn_transform = carla.Transform(spawn_location, spawn_rotation)
         
         # Spawn the pedestrian
-        blueprint = self.world_manager.world.get_blueprint_library().find('walker.pedestrian.0001')
+        blueprint = self.world_manager.world.get_blueprint_library().find('walker.pedestrian.0015')
         self.pedestrian = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
         
         # Set target point far ahead for ego vehicle
@@ -614,18 +674,23 @@ class CarlaSimulator:
         
         for attempt in range(max_retries):
             try:
+                self.logger.log_info(f"Attempting to connect to CARLA server (attempt {attempt + 1}/{max_retries})")
                 # Create client with timeout
                 self.client = carla.Client(self.config.server.host, self.config.server.port)
                 self.client.set_timeout(self.config.server.timeout)
                 
                 # Test connection
-                self.client.get_world()
+                world = self.client.get_world()
+                self.logger.log_info(f"Successfully connected to CARLA server. Map: {world.get_map().name}")
                 return True
                 
-            except Exception:
+            except Exception as e:
+                self.logger.log_error(f"Connection attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_retries - 1:
+                    self.logger.log_info(f"Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
                 else:
+                    self.logger.log_error("Failed to connect to CARLA server after all attempts")
                     return False
         
         return False
@@ -633,32 +698,42 @@ class CarlaSimulator:
     def setup(self) -> None:
         """Set up simulation components"""
         try:
+            self.logger.log_info("Starting simulation setup...")
+            
             # First connect to server
             if not self.connect_to_server():
                 raise RuntimeError("Unable to connect to CARLA server")
             
             # Get world and apply settings
             self.world = self.client.get_world()
+            self.logger.log_info("World settings applied")
             
             # Set up synchronous mode first
             settings = self.world.get_settings()
             settings.synchronous_mode = True
             settings.fixed_delta_seconds = 1.0 / self.config.simulation.update_rate
             self.world.apply_settings(settings)
+            self.logger.log_info("Synchronous mode enabled")
             
             # Initialize managers
+            self.logger.log_info("Initializing world manager...")
             self.world_manager = WorldManager(self.client, self.config.world)
+            
+            self.logger.log_info("Initializing vehicle manager...")
             self.vehicle_manager = VehicleManager(self.world, self.config.vehicle_model)
             
             # Spawn vehicle
+            self.logger.log_info("Getting spawn point...")
             spawn_point = self.world_manager.get_random_spawn_point()
             if not spawn_point:
                 raise RuntimeError("Failed to get valid spawn point")
             
+            self.logger.log_info("Spawning vehicle...")
             self.vehicle_manager.spawn_vehicle(spawn_point)
             
             # Wait for vehicle to be properly spawned
             self.world.tick()
+            self.logger.log_info("Vehicle spawned successfully")
             
             # Get vehicle transform and ensure it's valid
             vehicle_transform = self.vehicle_manager.vehicle.get_transform()
@@ -666,12 +741,14 @@ class CarlaSimulator:
                 raise RuntimeError("Failed to get valid vehicle transform")
             
             # Generate target point using WorldManager
+            self.logger.log_info("Generating target point...")
             target_point = self.world_manager.generate_target_point(vehicle_transform)
             if not target_point or not target_point.location:
                 raise RuntimeError("Failed to generate valid target point")
             
             # Set target and verify it was set
             self.vehicle_manager.set_target(target_point.location)
+            self.logger.log_info("Target point set successfully")
             
             # Wait for target to be properly set
             self.world.tick()
@@ -683,6 +760,7 @@ class CarlaSimulator:
             # Set up autopilot if enabled
             if self.config.controller.type == 'autopilot':
                 try:
+                    self.logger.log_info("Setting up autopilot...")
                     # Find available Traffic Manager port
                     self.tm_port = find_available_tm_port(self.client)
                     
@@ -707,11 +785,10 @@ class CarlaSimulator:
                     traffic_manager.set_desired_speed(self.vehicle_manager.vehicle, initial_speed)
                     traffic_manager.vehicle_percentage_speed_difference(self.vehicle_manager.vehicle, 0)  # No speed reduction
                     traffic_manager.set_global_distance_to_leading_vehicle(3.5)  # Minimum safe distance
-                    #traffic_manager.set_global_speed_limit(0)  # Remove global speed limit
                     
-                    print("Autopilot enabled with initial speed settings")
+                    self.logger.log_info("Autopilot configured successfully")
                 except Exception as e:
-                    print(f"Failed to setup autopilot: {str(e)}")
+                    self.logger.log_error(f"Failed to setup autopilot: {str(e)}")
                     # Silently fall back to manual control
                     self.config.controller.type = 'keyboard'
             
@@ -720,12 +797,14 @@ class CarlaSimulator:
             self.sensor_manager = SensorManager(self.vehicle_manager.vehicle, self.config.sensors)
             
             # Initialize display
+            self.logger.log_info("Initializing display manager...")
             self.display_manager = DisplayManager(self.config.display)
             
             # Add camera view as sensor observer
             self.sensor_manager.add_observer('camera', self.display_manager.camera_view)
             
             # Initialize controller
+            self.logger.log_info("Initializing controller...")
             self.controller = VehicleController(self.config.controller)
             
             # Set control strategy based on configuration
@@ -739,10 +818,15 @@ class CarlaSimulator:
                 raise ValueError(f"Unknown controller type: {self.config.controller.type}")
             
             # Setup scenario using the specified type
+            self.logger.log_info(f"Setting up scenario: {self.scenario_type.name}")
             self.setup_scenario(self.scenario_type)
             
+            self.logger.log_info("Simulation setup completed successfully")
+            
         except Exception as e:
-            self.logger.log_error(str(e))
+            self.logger.log_error(f"Error during setup: {str(e)}")
+            import traceback
+            self.logger.log_error(f"Setup traceback: {traceback.format_exc()}")
             self.cleanup()
             raise
     
@@ -767,12 +851,40 @@ class CarlaSimulator:
         try:
             self.is_running = True
             self.start_time = time.time()
+            self.scenario_quit = False  # Flag to indicate scenario quit vs full quit
             
             while self.is_running:
                 try:
+                    # Handle pygame events
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            self.logger.log_info("Pygame window closed by user")
+                            self.is_running = False
+                            self.full_exit = True
+                            break
+                        elif event.type == pygame.KEYDOWN:
+                            if event.key == pygame.K_ESCAPE:
+                                self.logger.log_info("Escape key pressed, exiting entire simulation")
+                                self.is_running = False
+                                self.full_exit = True
+                                break
+                            elif event.key == pygame.K_q:
+                                self.logger.log_info("Q key pressed, moving to next scenario")
+                                self.is_running = False
+                                self.scenario_quit = True  # Set scenario quit flag
+                                # Mark current scenario as completed
+                                if self.current_scenario:
+                                    self.current_scenario.is_completed = True
+                                    self.current_scenario.success = False
+                                break
+                    
+                    if not self.is_running:
+                        break
+                    
                     # Process input
                     if self.controller.process_input():
                         self.logger.log_info("Quitting simulation")
+                        self.full_exit = True
                         break
                     
                     # Get current control state
@@ -812,6 +924,8 @@ class CarlaSimulator:
                         display_state,
                         self.world_manager.target.location
                     ):
+                        self.logger.log_info("Display manager requested exit")
+                        self.full_exit = True
                         break
                     
                     # Log simulation data
@@ -819,6 +933,7 @@ class CarlaSimulator:
                     
                     # Check simulation end conditions
                     if self._should_end_simulation(vehicle_state):
+                        self.logger.log_info("Simulation end conditions met")
                         break
                     
                     # Update scenario
@@ -831,6 +946,8 @@ class CarlaSimulator:
                                 self.logger.log_info("Scenario completed successfully!")
                             else:
                                 self.logger.log_info("Scenario failed!")
+                            # Set is_running to False to exit the loop
+                            self.is_running = False
                             break
                     
                     # Tick the world
@@ -838,12 +955,18 @@ class CarlaSimulator:
                     
                 except RuntimeError as e:
                     if "trying to operate on a destroyed actor" in str(e):
-                        self.logger.log_info("Actor was destroyed, ending simulation...")
+                        self.logger.log_error("Actor was destroyed, ending simulation...")
                         break
+                    self.logger.log_error(f"Runtime error in simulation loop: {str(e)}")
+                    raise
+                except Exception as e:
+                    self.logger.log_error(f"Unexpected error in simulation loop: {str(e)}")
                     raise
                 
         except Exception as e:
-            self.logger.log_error(f"Simulation error: {str(e)}")
+            self.logger.log_error(f"Critical simulation error: {str(e)}")
+            import traceback
+            self.logger.log_error(f"Traceback: {traceback.format_exc()}")
             raise
         
         finally:
@@ -852,12 +975,13 @@ class CarlaSimulator:
                     self.current_scenario.cleanup()
                 self.cleanup()
             except Exception as e:
-                self.logger.log_error(f"Error during cleanup: {e}")
+                self.logger.log_error(f"Error during cleanup: {str(e)}")
+                import traceback
+                self.logger.log_error(f"Cleanup traceback: {traceback.format_exc()}")
             finally:
-                # Force exit the process
-                import os
-                os._exit(0)
-    
+                # Don't exit here, let the main function handle the exit
+                pygame.quit()
+
     def _log_simulation_data(self, vehicle_state, control) -> None:
         """Log current simulation data"""
         data = SimulationData(
@@ -898,14 +1022,17 @@ class CarlaSimulator:
         """Check if simulation should end"""
         # Check time limit
         if time.time() - self.start_time > self.config.simulation.simulation_time:
+            self.logger.log_info("Simulation time limit reached")
             return True
         
-        # Check target reached
-        if vehicle_state.distance_to_target < self.config.simulation.target_tolerance:
+        # Check target reached - only if not in a scenario
+        if not self.current_scenario and vehicle_state.distance_to_target < self.config.simulation.target_tolerance:
+            self.logger.log_info("Target reached")
             return True
         
         # Check collision
         if vehicle_state.collision_intensity > self.config.simulation.max_collision_force:
+            self.logger.log_error("Collision detected")
             return True
         
         return False
@@ -973,24 +1100,73 @@ def main():
         
         # Initialize logger first
         logger = SimulationLogger(config.logging)
+        logger.log_info(f"Starting simulation with scenario: {args.scenario}")
         
         if args.scenario == 'all':
+            # Get all scenario types
+            all_scenarios = list(ScenarioType)
+            total_scenarios = len(all_scenarios)
+            logger.log_info(f"Total scenarios to run: {total_scenarios}")
+            
             # Run all scenarios sequentially
-            for scenario_type in ScenarioType:
-                logger.log_info(f"\nStarting scenario: {scenario_type.name}")
-                simulator = CarlaSimulator(config_path, scenario_type)
-                simulator.setup()
-                simulator.run()
+            for i, scenario_type in enumerate(all_scenarios, 1):
+                logger.log_info(f"\n{'='*50}")
+                logger.log_info(f"Starting scenario {i}/{total_scenarios}: {scenario_type.name}")
+                logger.log_info(f"{'='*50}\n")
                 
-                # Clean up current scenario
-                if simulator:
-                    simulator.cleanup()
+                try:
+                    # Create new simulator instance for each scenario
+                    simulator = CarlaSimulator(config_path, scenario_type)
+                    simulator.setup()
+                    
+                    # Run the scenario
+                    try:
+                        simulator.run()
+                        # Check if full exit was requested
+                        if hasattr(simulator, 'full_exit') and simulator.full_exit:
+                            logger.log_info("Full exit requested, stopping all scenarios")
+                            break
+                        # If scenario quit was requested, continue to next scenario
+                        elif hasattr(simulator, 'scenario_quit') and simulator.scenario_quit:
+                            logger.log_info("Scenario quit requested, continuing to next scenario")
+                            continue
+                    except Exception as e:
+                        logger.log_error(f"Error during scenario execution: {str(e)}")
+                        import traceback
+                        logger.log_error(f"Traceback: {traceback.format_exc()}")
+                    finally:
+                        # Always clean up the current scenario
+                        if simulator:
+                            try:
+                                simulator.cleanup()
+                            except Exception as e:
+                                logger.log_error(f"Error during cleanup: {str(e)}")
+                            finally:
+                                simulator = None  # Reset simulator for next scenario
+                    
+                    # Small delay between scenarios
+                    if i < total_scenarios:  # Don't wait after the last scenario
+                        logger.log_info(f"Waiting 2 seconds before next scenario...")
+                        time.sleep(2)
+                        
+                except Exception as e:
+                    logger.log_error(f"Error in scenario {scenario_type.name}: {str(e)}")
+                    import traceback
+                    logger.log_error(f"Traceback: {traceback.format_exc()}")
+                    if simulator:
+                        try:
+                            simulator.cleanup()
+                        except Exception as cleanup_error:
+                            logger.log_error(f"Cleanup error: {str(cleanup_error)}")
+                        finally:
+                            simulator = None
+                    continue  # Continue to next scenario even if current one fails
                 
-                # Small delay between scenarios
-                time.sleep(2)
+            logger.log_info("\nAll scenarios completed!")
         else:
             # Run single scenario
             scenario_type = ScenarioType[args.scenario]
+            logger.log_info(f"Running single scenario: {scenario_type.name}")
             simulator = CarlaSimulator(config_path, scenario_type)
             simulator.setup()
             simulator.run()
@@ -1000,8 +1176,9 @@ def main():
             logger.log_info("Simulation interrupted by user")
     except Exception as e:
         if logger:
-            # Log only the error message without additional context
             logger.log_error(f"Error during simulation: {str(e)}")
+            import traceback
+            logger.log_error(f"Traceback: {traceback.format_exc()}")
     finally:
         if simulator:
             try:
@@ -1010,6 +1187,8 @@ def main():
                 if logger:
                     logger.log_error(f"Cleanup error: {str(e)}")
         pygame.quit()
+        import sys
+        sys.exit(0)
 
 if __name__ == '__main__':
     main() 
