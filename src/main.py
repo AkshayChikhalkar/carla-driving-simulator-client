@@ -503,115 +503,259 @@ class PedestrianCrossingScenario(Scenario):
         self.is_crossing = False
         self.cross_complete = False
         self.initial_speed = 40.0  # km/h
+        self.max_spawn_attempts = 5  # Maximum attempts to spawn the pedestrian
+        # CARLA 0.10.0 official pedestrian blueprints
+        self.pedestrian_blueprints = [
+            'walker.pedestrian.0001',
+            'walker.pedestrian.0002',
+            'walker.pedestrian.0003',
+            'walker.pedestrian.0004',
+            'walker.pedestrian.0005',
+            'walker.pedestrian.0006',
+            'walker.pedestrian.0007',
+            'walker.pedestrian.0008',
+            'walker.pedestrian.0009',
+            'walker.pedestrian.0010',
+            'walker.pedestrian.0011',
+            'walker.pedestrian.0012',
+            'walker.pedestrian.0013',
+            'walker.pedestrian.0014',
+            'walker.pedestrian.0015',
+            'walker.pedestrian.0016'
+        ]
+
+    def find_valid_spawn_point(self, ego_transform, attempt):
+        """Find a valid spawn point for the pedestrian using the navigation mesh"""
+        try:
+            # Get the map and navigation mesh
+            carla_map = self.world_manager.world.get_map()
+            
+            # Calculate base spawn location
+            forward_vector = ego_transform.get_forward_vector()
+            right_vector = ego_transform.get_right_vector()
+            
+            # Adjust distance and offset based on attempt
+            distance = self.crossing_distance + (attempt * 5.0)
+            offset = 4.0 + (attempt * 0.5)
+            
+            # Calculate initial spawn location
+            spawn_location = carla.Location(
+                x=ego_transform.location.x + forward_vector.x * distance + right_vector.x * offset,
+                y=ego_transform.location.y + forward_vector.y * distance + right_vector.y * offset,
+                z=ego_transform.location.z
+            )
+            
+            # Get the waypoint for spawn location
+            spawn_waypoint = carla_map.get_waypoint(spawn_location)
+            if not spawn_waypoint:
+                return None
+            
+            # Get the sidewalk waypoint
+            sidewalk_waypoint = spawn_waypoint.get_right_lane()
+            if not sidewalk_waypoint:
+                return None
+            
+            # Get the spawn location from the sidewalk waypoint
+            spawn_location = sidewalk_waypoint.transform.location
+            
+            # Ensure the spawn location is on the ground
+            spawn_location.z += 1.0  # Add a small offset to ensure it's above ground
+            
+            return spawn_location
+            
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error finding valid spawn point: {str(e)}")
+            return None
 
     def setup(self):
-        # Set initial speed for ego vehicle
-        self.vehicle_manager.vehicle.set_target_velocity(
-            carla.Vector3D(x=self.initial_speed/3.6, y=0.0, z=0.0)
-        )
+        try:
+            # Set initial speed for ego vehicle
+            self.vehicle_manager.vehicle.set_target_velocity(
+                carla.Vector3D(x=self.initial_speed/3.6, y=0.0, z=0.0)
+            )
+            
+            # Get ego vehicle's transform
+            ego_transform = self.vehicle_manager.vehicle.get_transform()
+            
+            # Try different spawn positions
+            for attempt in range(self.max_spawn_attempts):
+                try:
+                    # Find valid spawn point
+                    spawn_location = self.find_valid_spawn_point(ego_transform, attempt)
+                    if not spawn_location:
+                        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                            self.vehicle_manager.logger.log_info(f"Could not find valid spawn point on attempt {attempt + 1}")
+                        continue
+                    
+                    # Try different pedestrian blueprints
+                    for blueprint_name in self.pedestrian_blueprints:
+                        try:
+                            blueprint = self.world_manager.world.get_blueprint_library().find(blueprint_name)
+                            if not blueprint:
+                                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                                    self.vehicle_manager.logger.log_info(f"Blueprint {blueprint_name} not found, trying next")
+                                continue
+                                
+                            # Set pedestrian attributes
+                            blueprint.set_attribute('is_invincible', 'true')
+                            blueprint.set_attribute('speed', '1.4')
+                            
+                            # Create spawn transform
+                            spawn_transform = carla.Transform(
+                                spawn_location,
+                                carla.Rotation(pitch=0.0, yaw=ego_transform.rotation.yaw, roll=0.0)
+                            )
+                            
+                            # Try to spawn the pedestrian
+                            self.pedestrian = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
+                            
+                            if self.pedestrian:
+                                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                                    self.vehicle_manager.logger.log_info(f"Successfully spawned pedestrian {blueprint_name} on attempt {attempt + 1}")
+                                break
+                                
+                        except Exception as e:
+                            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                                self.vehicle_manager.logger.log_info(f"Failed to spawn {blueprint_name} on attempt {attempt + 1}: {str(e)}")
+                            continue
+                    
+                    if self.pedestrian:
+                        break
+                        
+                except Exception as e:
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_info(f"Spawn attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == self.max_spawn_attempts - 1:
+                        raise RuntimeError(f"Failed to spawn pedestrian after {self.max_spawn_attempts} attempts")
+                    continue
+            
+            if not self.pedestrian:
+                raise RuntimeError("Failed to spawn pedestrian with any blueprint")
+            
+            # Set target point far ahead for ego vehicle
+            forward_vector = ego_transform.get_forward_vector()
+            target_location = carla.Location(
+                x=ego_transform.location.x + forward_vector.x * (self.crossing_distance + 100.0),
+                y=ego_transform.location.y + forward_vector.y * (self.crossing_distance + 100.0),
+                z=ego_transform.location.z
+            )
+            self.vehicle_manager.set_target(target_location)
+            
+            # Create and start walker AI controller
+            walker_controller_bp = self.world_manager.world.get_blueprint_library().find('controller.ai.walker')
+            if not walker_controller_bp:
+                raise RuntimeError("Failed to find walker controller blueprint")
+                
+            self.controller = self.world_manager.world.spawn_actor(walker_controller_bp, carla.Transform(), self.pedestrian)
+            if not self.controller:
+                raise RuntimeError("Failed to spawn walker controller")
+            
+            self.start_time = time.time()
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_info("Pedestrian crossing scenario started")
         
-        # Get ego vehicle's transform
-        ego_transform = self.vehicle_manager.vehicle.get_transform()
-        forward_vector = ego_transform.get_forward_vector()
-        right_vector = ego_transform.get_right_vector()
-        
-        # Calculate spawn point for pedestrian (on the sidewalk)
-        spawn_location = carla.Location(
-            x=ego_transform.location.x + forward_vector.x * self.crossing_distance + right_vector.x * 4.0,
-            y=ego_transform.location.y + forward_vector.y * self.crossing_distance + right_vector.y * 4.0,
-            z=ego_transform.location.z
-        )
-        spawn_rotation = ego_transform.rotation
-        spawn_transform = carla.Transform(spawn_location, spawn_rotation)
-        
-        # Spawn the pedestrian
-        blueprint = self.world_manager.world.get_blueprint_library().find('walker.pedestrian.0015')
-        self.pedestrian = self.world_manager.world.spawn_actor(blueprint, spawn_transform)
-        
-        # Set target point far ahead for ego vehicle
-        target_location = carla.Location(
-            x=ego_transform.location.x + forward_vector.x * (self.crossing_distance + 100.0),
-            y=ego_transform.location.y + forward_vector.y * (self.crossing_distance + 100.0),
-            z=ego_transform.location.z
-        )
-        self.vehicle_manager.set_target(target_location)
-        
-        # Create and start walker AI controller
-        walker_controller_bp = self.world_manager.world.get_blueprint_library().find('controller.ai.walker')
-        self.controller = self.world_manager.world.spawn_actor(walker_controller_bp, carla.Transform(), self.pedestrian)
-        
-        self.start_time = time.time()
-        if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-            self.vehicle_manager.logger.log_info("Pedestrian crossing scenario started")
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in PedestrianCrossingScenario setup: {str(e)}")
+            # Mark scenario as completed but failed
+            self.is_completed = True
+            self.success = False
+            self.cleanup()  # Clean up any spawned actors
+            raise  # Re-raise the exception to be handled by the main loop
 
     def update(self):
         if self.is_completed:
             return
 
-        # Get current states
-        ego_location = self.vehicle_manager.vehicle.get_location()
-        pedestrian_location = self.pedestrian.get_location()
-        ego_velocity = self.vehicle_manager.vehicle.get_velocity()
-        ego_speed = 3.6 * math.sqrt(ego_velocity.x**2 + ego_velocity.y**2)  # km/h
-        
-        # Calculate distance between vehicle and pedestrian
-        distance = ego_location.distance(pedestrian_location)
-        
-        # Start crossing when vehicle is close enough
-        if not self.is_crossing and distance < self.crossing_distance:
-            self.is_crossing = True
-            # Calculate crossing target (other side of the road)
-            ego_transform = self.vehicle_manager.vehicle.get_transform()
-            right_vector = ego_transform.get_right_vector()
-            target_location = carla.Location(
-                x=pedestrian_location.x - right_vector.x * 8.0,
-                y=pedestrian_location.y - right_vector.y * 8.0,
-                z=pedestrian_location.z
-            )
-            # Command pedestrian to cross
-            self.controller.start()
-            self.controller.go_to_location(target_location)
-            self.controller.set_max_speed(1.4)  # normal walking speed
-            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                self.vehicle_manager.logger.log_info("Pedestrian starting to cross!")
+        try:
+            # Get current states
+            ego_location = self.vehicle_manager.vehicle.get_location()
+            pedestrian_location = self.pedestrian.get_location()
+            ego_velocity = self.vehicle_manager.vehicle.get_velocity()
+            ego_speed = 3.6 * math.sqrt(ego_velocity.x**2 + ego_velocity.y**2)  # km/h
+            
+            # Calculate distance between vehicle and pedestrian
+            distance = ego_location.distance(pedestrian_location)
+            
+            # Start crossing when vehicle is close enough
+            if not self.is_crossing and distance < self.crossing_distance:
+                self.is_crossing = True
+                # Calculate crossing target (other side of the road)
+                ego_transform = self.vehicle_manager.vehicle.get_transform()
+                right_vector = ego_transform.get_right_vector()
+                target_location = carla.Location(
+                    x=pedestrian_location.x - right_vector.x * 8.0,
+                    y=pedestrian_location.y - right_vector.y * 8.0,
+                    z=pedestrian_location.z
+                )
+                # Command pedestrian to cross
+                self.controller.start()
+                self.controller.go_to_location(target_location)
+                self.controller.set_max_speed(1.4)  # normal walking speed
+                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                    self.vehicle_manager.logger.log_info("Pedestrian starting to cross!")
 
-        # Check for collision
-        if distance < self.safe_distance:
+            # Check for collision
+            if distance < self.safe_distance:
+                self.is_completed = True
+                self.success = False
+                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                    self.vehicle_manager.logger.log_info("Failed: Too close to pedestrian!")
+                return
+            
+            # Check if crossing is complete
+            if self.is_crossing and not self.cross_complete:
+                # Check if pedestrian has reached the other side
+                ego_transform = self.vehicle_manager.vehicle.get_transform()
+                right_vector = ego_transform.get_right_vector()
+                cross_vector = carla.Vector3D(
+                    x=-right_vector.x * 8.0,
+                    y=-right_vector.y * 8.0,
+                    z=0
+                )
+                if pedestrian_location.distance(ego_location + cross_vector) < 1.0:
+                    self.cross_complete = True
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_info("Pedestrian crossed successfully!")
+            
+            # Check if scenario is complete (crossing performed and safe distance maintained)
+            if self.cross_complete and ego_speed > 0 and distance > self.safe_distance:
+                self.is_completed = True
+                self.success = True
+                self.completion_time = time.time() - self.start_time
+                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                    self.vehicle_manager.logger.log_info(f"Successfully handled pedestrian crossing! Time: {self.completion_time:.1f} seconds")
+        
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in PedestrianCrossingScenario update: {str(e)}")
+            # Mark scenario as completed but failed
             self.is_completed = True
             self.success = False
-            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                self.vehicle_manager.logger.log_info("Failed: Too close to pedestrian!")
-            return
-        
-        # Check if crossing is complete
-        if self.is_crossing and not self.cross_complete:
-            # Check if pedestrian has reached the other side
-            ego_transform = self.vehicle_manager.vehicle.get_transform()
-            right_vector = ego_transform.get_right_vector()
-            cross_vector = carla.Vector3D(
-                x=-right_vector.x * 8.0,
-                y=-right_vector.y * 8.0,
-                z=0
-            )
-            if pedestrian_location.distance(ego_location + cross_vector) < 1.0:
-                self.cross_complete = True
-                if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                    self.vehicle_manager.logger.log_info("Pedestrian crossed successfully!")
-        
-        # Check if scenario is complete (crossing performed and safe distance maintained)
-        if self.cross_complete and ego_speed > 0 and distance > self.safe_distance:
-            self.is_completed = True
-            self.success = True
-            self.completion_time = time.time() - self.start_time
-            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
-                self.vehicle_manager.logger.log_info(f"Successfully handled pedestrian crossing! Time: {self.completion_time:.1f} seconds")
+            self.cleanup()  # Clean up any spawned actors
 
     def cleanup(self):
-        if self.controller is not None:
-            self.controller.stop()
-            self.controller.destroy()
-        if self.pedestrian is not None:
-            self.pedestrian.destroy()
+        try:
+            if self.controller is not None:
+                try:
+                    self.controller.stop()
+                    self.controller.destroy()
+                except Exception as e:
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_error(f"Error stopping controller: {str(e)}")
+                self.controller = None
+            
+            if self.pedestrian is not None:
+                try:
+                    self.pedestrian.destroy()
+                except Exception as e:
+                    if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                        self.vehicle_manager.logger.log_error(f"Error destroying pedestrian: {str(e)}")
+                self.pedestrian = None
+        except Exception as e:
+            if hasattr(self.vehicle_manager, 'logger') and self.vehicle_manager.logger:
+                self.vehicle_manager.logger.log_error(f"Error in PedestrianCrossingScenario cleanup: {str(e)}")
 
 def find_available_tm_port(client):
     """Find an available Traffic Manager port using random ports"""
