@@ -11,6 +11,7 @@ from ..core.sensors import SensorObserver, CameraData, SensorData
 from ..utils.config import DisplayConfig
 import time
 import os
+import sys
 
 @dataclass
 class VehicleState:
@@ -125,7 +126,6 @@ class Minimap:
 
 class CameraView(SensorObserver):
     """Camera view display"""
-    
     def __init__(self, config: DisplayConfig):
         """Initialize camera view"""
         self.config = config
@@ -143,7 +143,6 @@ class CameraView(SensorObserver):
                 self.last_frame = array  # Store the last frame
                 self.surface = pygame.surfarray.make_surface(array)
             except Exception as e:
-                print(f"Error creating camera surface: {e}")
                 self.surface = None
     
     def render(self, display: pygame.Surface) -> None:
@@ -156,18 +155,22 @@ class CameraView(SensorObserver):
                     try:
                         scaled_surface = pygame.transform.scale(self.surface, display_size)
                         display.blit(scaled_surface, (0, 0))
-                    except Exception as e:
-                        print(f"Error scaling camera surface: {e}")
+                    except Exception:
+                        pass
                 else:
                     display.blit(self.surface, (0, 0))
             elif self.last_frame is not None:
                 # Try to recreate surface from last frame
                 try:
                     self.surface = pygame.surfarray.make_surface(self.last_frame)
-                except Exception as e:
-                    print(f"Error recreating surface from last frame: {e}")
-        except Exception as e:
-            print(f"Error in camera rendering: {e}")
+                    display.blit(self.surface, (0, 0))
+                except Exception:
+                    pass
+            else:
+                # If no camera data, fill with a dark gray color
+                display.fill((32, 32, 32))
+        except Exception:
+            display.fill((32, 32, 32))  # Fallback to dark gray
 
 def get_window_count():
     """Get count of existing CARLA Simulator windows"""
@@ -215,6 +218,11 @@ class DisplayManager:
         )
         pygame.display.set_caption(f"CARLA Simulator - Instance {window_count + 1}")
         
+        # Initialize components
+        self.hud = HUD()
+        self.minimap = Minimap(config)
+        self.camera_view = CameraView(config)
+        
         # Window state
         self.minimized = False
         self.focused = True
@@ -223,144 +231,89 @@ class DisplayManager:
         self.last_event_time = time.time()
         self.force_exit = False
         self.frame_count = 0
-        self.is_initialized = True
         
-        # Initialize components
-        self.hud = HUD()
-        self.minimap = Minimap(config)
-        self.camera_view = CameraView(config)
-        
-        # Set up clock for FPS control
+        # FPS tracking
         self.clock = pygame.time.Clock()
+        self.fps_font = pygame.font.Font(None, 24)
+        self.last_fps_update = time.time()
+        self.current_fps = 0
     
     def handle_resize(self, size):
-        """Handle window resize event"""
-        width, height = size
-        if width < 800:  # Minimum width
-            width = 800
-        if height < 600:  # Minimum height
-            height = 600
-        
-        self.current_size = (width, height)
-        self.display = pygame.display.set_mode(
-            self.current_size,
-            pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
-        )
+        """Handle window resize"""
+        self.current_size = size
+        self.display = pygame.display.set_mode(size, pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE)
     
     def process_events(self):
         """Process pygame events"""
-        if not self.is_initialized:
-            return False
-            
-        current_time = time.time()
-        
-        # Process all pending events
         for event in pygame.event.get():
-            self.last_event_time = current_time
-            
             if event.type == pygame.QUIT:
-                self.cleanup()
+                self.should_quit = True
                 return False
-            
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.cleanup()
+                    self.should_quit = True
                     return False
-                elif event.key == pygame.K_F11:  # Toggle fullscreen
-                    pygame.display.toggle_fullscreen()
-            
-            elif event.type == pygame.VIDEORESIZE:
+            elif event.type == pygame.WINDOWRESIZED:
                 self.handle_resize(event.size)
-            
             elif event.type == pygame.WINDOWMINIMIZED:
                 self.minimized = True
-            
-            elif event.type == pygame.WINDOWRESTORED or event.type == pygame.WINDOWEXPOSED:
+            elif event.type == pygame.WINDOWRESTORED:
                 self.minimized = False
-            
             elif event.type == pygame.WINDOWFOCUSLOST:
                 self.focused = False
-            
             elif event.type == pygame.WINDOWFOCUSGAINED:
                 self.focused = True
-        
-        # Check if we haven't processed events for too long (window might be hanging)
-        if current_time - self.last_event_time > 0.5:  # 500ms threshold
-            pygame.event.pump()  # Process OS events to keep window responsive
-        
         return True
     
     def render(self, state: VehicleState, target_pos: carla.Location) -> bool:
-        """Render all visualization components. Returns False if window should close."""
-        if not self.is_initialized:
-            return False
-            
+        """Render the current frame"""
         try:
             # Process events first
             if not self.process_events():
                 return False
-            
-            if self.force_exit:
-                self.cleanup()
-                return False
-            
-            # Skip rendering if window is minimized
+
+            # Skip rendering if minimized
             if self.minimized:
-                self.clock.tick(20)  # Reduce update rate when minimized
                 return True
-            
-            # Clear display with dark gray instead of black
-            self.display.fill((32, 32, 32))
-            
-            # Increment frame counter
-            self.frame_count += 1
-            
+
+            # Clear display
+            self.display.fill((0, 0, 0))
+
             # Render camera view
             self.camera_view.render(self.display)
-            
-            # Render HUD on top
+
+            # Render HUD
             self.hud.render(self.display, state)
-            
-            # Render minimap last
+
+            # Render minimap
             self.minimap.render(self.display, state, target_pos)
             
-            # Add window controls hint
-            font = pygame.font.Font(None, 24)
-            hint_text = font.render("F11: Toggle Fullscreen | ESC: Exit", True, (255, 255, 255))
-            self.display.blit(hint_text, (10, self.current_size[1] - 30))
+            # Update FPS counter
+            current_time = time.time()
+            if current_time - self.last_fps_update >= 0.5:  # Update FPS every 0.5 seconds
+                self.current_fps = self.clock.get_fps()
+                self.last_fps_update = current_time
             
-            # Add frame counter in top-right corner
-            fps_text = font.render(f"FPS: {self.clock.get_fps():.1f}", True, (255, 255, 255))
+            # Render FPS in top-right corner
+            fps_text = self.fps_font.render(f"FPS: {self.current_fps:.1f}", True, (255, 255, 255))
             self.display.blit(fps_text, (self.current_size[0] - 120, 10))
-            
+
             # Update display
             pygame.display.flip()
+            self.frame_count += 1
             
-            # Control FPS
-            target_fps = self.config.fps if self.focused else 30
-            self.clock.tick_busy_loop(target_fps)
-            
+            # Control frame rate
+            self.clock.tick(60)
+
             return True
-            
+
         except Exception as e:
-            if self.is_initialized:  # Only print error if we haven't already cleaned up
-                print(f"Error in display rendering: {e}")
+            print(f"Error in display rendering: {e}")
             return False
     
     def cleanup(self) -> None:
-        """Clean up pygame resources"""
-        if self.is_initialized:
-            try:
-                self.is_initialized = False  # Set this first to prevent further rendering
-                pygame.display.quit()
-                pygame.quit()
-                # Force quit pygame
-                import sys
-                if sys.platform == 'win32':
-                    import ctypes
-                    ctypes.windll.user32.PostQuitMessage(0)
-            except Exception as e:
-                print(f"Error during cleanup: {e}")
-            finally:
-                self.should_quit = True
-                self.force_exit = True 
+        """Clean up resources"""
+        try:
+            pygame.quit()
+        except Exception as e:
+            print(f"Error during cleanup: {e}") 

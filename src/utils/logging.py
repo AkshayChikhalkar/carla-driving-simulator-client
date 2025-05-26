@@ -132,6 +132,75 @@ class SimulationLogger:
         """Log informational messages"""
         self.logger.info(message)
     
+    def log_vehicle_state(self, state: Dict[str, Any]) -> None:
+        """Log vehicle state data"""
+        # Extract location and rotation from transform if available
+        location = state.get('location', None)
+        rotation = state.get('rotation', None)
+        velocity = state.get('velocity', None)
+        acceleration = state.get('acceleration', None)
+        control = state.get('control', None)
+        
+        # Handle CARLA Vector3D objects
+        if hasattr(location, 'x'):
+            position = (location.x, location.y, location.z)
+        else:
+            position = (0.0, 0.0, 0.0)
+            
+        if hasattr(velocity, 'length'):
+            speed = velocity.length()
+        else:
+            speed = 0.0
+            
+        if hasattr(acceleration, 'length'):
+            accel = acceleration.length()
+        else:
+            accel = 0.0
+            
+        if hasattr(rotation, 'pitch'):
+            rot = (rotation.pitch, rotation.yaw, rotation.roll)
+        else:
+            rot = (0.0, 0.0, 0.0)
+            
+        # Create SimulationData object from state
+        data = SimulationData(
+            elapsed_time=0.0,  # This should be updated by the caller
+            speed=speed,
+            position=position,
+            controls={
+                'throttle': control.throttle if control else 0.0,
+                'brake': control.brake if control else 0.0,
+                'steer': control.steer if control else 0.0,
+                'gear': control.gear if control else 0,
+                'hand_brake': control.hand_brake if control else False,
+                'reverse': control.reverse if control else False,
+                'manual_gear_shift': control.manual_gear_shift if control else False
+            },
+            target_info={
+                'distance': 0.0,  # This should be updated by the caller
+                'heading': 0.0,   # This should be updated by the caller
+                'heading_diff': 0.0  # This should be updated by the caller
+            },
+            vehicle_state={
+                'heading': rot[1],  # yaw
+                'acceleration': accel,
+                'angular_velocity': 0.0,  # This should be updated by the caller
+                'collision_intensity': 0.0,  # This should be updated by the caller
+                'rotation': rot
+            },
+            weather={
+                'cloudiness': 0.0,  # This should be updated by the caller
+                'precipitation': 0.0  # This should be updated by the caller
+            },
+            traffic_count=0,  # This should be updated by the caller
+            fps=0.0,  # This should be updated by the caller
+            event='vehicle_state',
+            event_details=''
+        )
+        
+        # Log the data to CSV only
+        self.log_data(data)
+    
     def close(self) -> None:
         """Close all log files"""
         self.logger.info("")  # Empty line for readability

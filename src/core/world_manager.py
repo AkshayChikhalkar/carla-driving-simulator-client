@@ -5,10 +5,11 @@ Manages the CARLA world, including weather, traffic, and target points.
 import carla
 import random
 import math
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from ..utils.config import WorldConfig
+from ..utils.config import WorldConfig, VehicleConfig
 import time
+from src.core.interfaces import IWorldManager
 
 @dataclass
 class TargetPoint:
@@ -17,16 +18,21 @@ class TargetPoint:
     actors: List[carla.Actor]
     waypoint: carla.Waypoint
 
-class WorldManager:
-    """Manages the CARLA world state and operations"""
+class WorldManager(IWorldManager):
+    """Manages the CARLA world and its entities"""
     
-    def __init__(self, client: carla.Client, config: WorldConfig):
+    def __init__(self, client: carla.Client, config: WorldConfig, vehicle_config: VehicleConfig):
         """Initialize the world manager"""
         self.client = client
         self.config = config
-        self.world = self.client.get_world()
+        self.vehicle_config = vehicle_config
+        self.world = None
+        self.vehicle = None
+        self.blueprint_library = None
+        self.spawn_points = []
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
+        self._setup_world()
         
         # Apply initial settings with more stable timing parameters
         settings = self.world.get_settings()
@@ -39,7 +45,106 @@ class WorldManager:
         
         # Wait for the world to be ready
         self.world.tick()
-    
+
+    def get_map(self) -> carla.Map:
+        """Get the current CARLA map"""
+        return self.world.get_map()
+
+    def spawn_actor(self, blueprint: carla.ActorBlueprint, transform: carla.Transform) -> Optional[carla.Actor]:
+        """Spawn an actor in the world"""
+        try:
+            return self.world.spawn_actor(blueprint, transform)
+        except Exception as e:
+            print(f"Error spawning actor: {str(e)}")
+            return None
+
+    def destroy_actor(self, actor: carla.Actor) -> None:
+        """Destroy an actor from the world"""
+        if actor and actor.is_alive:
+            actor.destroy()
+
+    def _setup_world(self) -> None:
+        """Setup the CARLA world with specified configuration"""
+        try:
+            # Get world
+            self.world = self.client.get_world()
+            
+            # Set synchronous mode if configured
+            if self.config.synchronous_mode:
+                settings = self.world.get_settings()
+                settings.synchronous_mode = True
+                settings.fixed_delta_seconds = self.config.fixed_delta_seconds
+                self.world.apply_settings(settings)
+            
+            # Get blueprint library
+            self.blueprint_library = self.world.get_blueprint_library()
+            
+            # Get spawn points
+            self.spawn_points = self.world.get_map().get_spawn_points()
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to setup world: {str(e)}")
+
+    def create_vehicle(self) -> Optional[carla.Vehicle]:
+        """Create and spawn a vehicle in the world"""
+        try:
+            # Get vehicle blueprint from config
+            vehicle_bp = self.blueprint_library.find(self.vehicle_config.model)
+            if not vehicle_bp:
+                raise RuntimeError(f"Failed to find vehicle blueprint: {self.vehicle_config.model}")
+            
+            # Get spawn points
+            if not self.spawn_points:
+                raise RuntimeError("No spawn points available")
+            
+            # Try multiple spawn points until successful
+            for spawn_point in self.spawn_points:
+                try:
+                    # Spawn vehicle
+                    self.vehicle = self.spawn_actor(vehicle_bp, spawn_point)
+                    if self.vehicle:
+                        # Set vehicle physics after spawning
+                        physics_control = self.vehicle.get_physics_control()
+                        
+                        # Update physics control with configuration values
+                        physics_control.mass = self.vehicle_config.mass
+                        physics_control.drag_coefficient = self.vehicle_config.drag_coefficient
+                        physics_control.max_rpm = self.vehicle_config.max_rpm
+                        physics_control.moi = self.vehicle_config.moi
+                        physics_control.center_of_mass = carla.Vector3D(*self.vehicle_config.center_of_mass)
+                        
+                        # Apply the physics control
+                        self.vehicle.apply_physics_control(physics_control)
+                        
+                        print(f"Successfully spawned vehicle at location: {spawn_point.location}")
+                        return self.vehicle
+                except Exception as e:
+                    print(f"Failed to spawn at location {spawn_point.location}: {str(e)}")
+                    continue
+            
+            raise RuntimeError("Failed to spawn vehicle at any spawn point")
+            
+        except Exception as e:
+            print(f"Error creating vehicle: {str(e)}")
+            return None
+
+    def get_vehicle_state(self) -> Dict[str, Any]:
+        """Get current vehicle state"""
+        if not self.vehicle:
+            return {}
+            
+        return {
+            'location': self.vehicle.get_location(),
+            'velocity': self.vehicle.get_velocity(),
+            'acceleration': self.vehicle.get_acceleration(),
+            'transform': self.vehicle.get_transform()
+        }
+
+    def apply_control(self, control: carla.VehicleControl) -> None:
+        """Apply control commands to vehicle"""
+        if self.vehicle:
+            self.vehicle.apply_control(control)
+
     def get_weather_parameters(self) -> Dict[str, float]:
         """Get current weather parameters"""
         weather = self.world.get_weather()
@@ -74,7 +179,7 @@ class WorldManager:
             transform = random.choice(self.world.get_map().get_spawn_points())
             bp = random.choice(self.world.get_blueprint_library().filter('vehicle.*'))
             
-            npc = self.world.try_spawn_actor(bp, transform)
+            npc = self.spawn_actor(bp, transform)
             if npc is not None:
                 npc.set_autopilot(True, tm_port)
                 self.traffic_manager.ignore_lights_percentage(npc, 0)
@@ -117,8 +222,9 @@ class WorldManager:
                 waypoint.transform.location.z + 4 + i
             )
             target_transform = carla.Transform(target_loc)
-            target = self.world.spawn_actor(target_bp, target_transform)
-            target_actors.append(target)
+            target = self.spawn_actor(target_bp, target_transform)
+            if target:
+                target_actors.append(target)
         
         self.target = TargetPoint(
             location=waypoint.transform.location,
@@ -137,12 +243,41 @@ class WorldManager:
         if self.target:
             for actor in self.target.actors:
                 if actor is not None:
-                    actor.destroy()
+                    self.destroy_actor(actor)
         
         # Clean up traffic
         for actor in self._traffic_actors:
             if actor is not None:
-                actor.destroy()
+                self.destroy_actor(actor)
         
         # Reset world settings
-        self.world.apply_settings(carla.WorldSettings()) 
+        self.world.apply_settings(carla.WorldSettings())
+        
+        # Clean up vehicle
+        if self.vehicle:
+            self.destroy_actor(self.vehicle)
+        
+        # Reset synchronous mode
+        if self.world and self.config.synchronous_mode:
+            settings = self.world.get_settings()
+            settings.synchronous_mode = False
+            self.world.apply_settings(settings)
+        
+        # Reset vehicle
+        self.vehicle = None
+        self.blueprint_library = None
+        self.spawn_points = []
+        self.target = None
+        self._traffic_actors = []
+    
+    def get_world(self) -> carla.World:
+        """Get the CARLA world"""
+        return self.world
+    
+    def get_blueprint_library(self) -> carla.BlueprintLibrary:
+        """Get the CARLA blueprint library"""
+        return self.blueprint_library
+    
+    def get_spawn_points(self) -> List[carla.Transform]:
+        """Get the list of spawn points"""
+        return self.spawn_points 

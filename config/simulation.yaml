@@ -24,10 +24,10 @@ world:
     max_substep_delta_time: 0.01  # 10ms
     max_substeps: 10
   traffic:
-    distance_to_leading_vehicle: 2.5  # meters
-    speed_difference_percentage: 30.0  # percentage
-    ignore_lights_percentage: 100  # percentage
-    ignore_signs_percentage: 100  # percentage
+    distance_to_leading_vehicle: 3.0  # meters (increased for higher speed)
+    speed_difference_percentage: -100  # percentage (negative means faster)
+    ignore_lights_percentage: 0  # percentage (0 means follow all traffic lights)
+    ignore_signs_percentage: 0  # percentage (0 means follow all traffic signs)
   fixed_delta_seconds: 0.05  # 20 FPS
   target_distance: 500.0
   num_vehicles: 50
@@ -35,8 +35,8 @@ world:
   synchronous_mode: true
 
 # Vehicle settings
-vehicle_model: vehicle.dodge.charger
 vehicle:
+  model: vehicle.dodge.charger
   mass: 1500  # kg
   drag_coefficient: 0.3
   max_rpm: 5000

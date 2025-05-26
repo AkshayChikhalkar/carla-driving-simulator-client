@@ -6,12 +6,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import pygame
 import carla
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
 import os
 from datetime import datetime
 from ..utils.config import ControllerConfig, LoggingConfig
 from ..utils.logging import SimulationLogger
+from ..utils.settings import DEBUG_MODE  # Import from settings module
+import math
 
 @dataclass
 class VehicleControl:
@@ -47,8 +49,8 @@ class KeyboardController(ControllerStrategy):
         self._control = VehicleControl()
         self._steer_cache = 0.0
         self.config = config
-        self.is_manual_mode = False  # Start in automatic mode
-        self.debug_mode = getattr(config, 'debug_mode', False)
+        # Set initial mode based on config type
+        self.is_manual_mode = config.type == 'keyboard'  # True for keyboard, False for autopilot
         self.logger = logger
 
         # Initialize Pygame
@@ -77,21 +79,6 @@ class KeyboardController(ControllerStrategy):
             '6': pygame.K_6,
             'm': pygame.K_m
         }
-
-        # # Log controller initialization
-        # if self.logger:
-        #     self.logger.log_info("Initializing keyboard controller")
-        #     self.logger.log_info("Controls:")
-        #     self.logger.log_info("- W/Up Arrow: Accelerate")
-        #     self.logger.log_info("- S/Down Arrow: Toggle Reverse")
-        #     self.logger.log_info("- A/Left Arrow: Steer Left")
-        #     self.logger.log_info("- D/Right Arrow: Steer Right")
-        #     self.logger.log_info("- Space: Brake")
-        #     self.logger.log_info("- B: Hand Brake")
-        #     self.logger.log_info("- M: Toggle Manual/Automatic Transmission")
-        #     self.logger.log_info("- 1-6: Select Gear (Manual Mode)")
-        #     self.logger.log_info("- R: Reverse Gear (Manual Mode)")
-        #     self.logger.log_info("- Q/Escape: Quit")
 
         # Initialize key mappings
         self.keys = {
@@ -144,21 +131,21 @@ class KeyboardController(ControllerStrategy):
         if not self.keys['forward']:
             self.keys['forward'] = [pygame.K_UP, pygame.K_w]
         if not self.keys['backward']:
-            self.keys["backward"] = [pygame.K_s, pygame.K_DOWN]  # No backward keys
+            self.keys["backward"] = [pygame.K_s, pygame.K_DOWN]
         if not self.keys['left']:
             self.keys['left'] = [pygame.K_LEFT, pygame.K_a]
         if not self.keys['right']:
             self.keys['right'] = [pygame.K_RIGHT, pygame.K_d]
         if not self.keys['brake']:
-            self.keys['brake'] = [pygame.K_SPACE]  # Space is brake
+            self.keys['brake'] = [pygame.K_SPACE]
         if not self.keys['hand_brake']:
             self.keys['hand_brake'] = [pygame.K_b]
         if not self.keys['reverse']:
-            self.keys['reverse'] = [pygame.K_r]  # Both 's' and down arrow for reverse
+            self.keys['reverse'] = [pygame.K_r]
         if not self.keys['quit']:
             self.keys['quit'] = [pygame.K_ESCAPE]
         if not self.keys['manual_mode']:
-            self.keys['manual_mode'] = [pygame.K_m]  # M key to toggle manual/automatic mode
+            self.keys['manual_mode'] = [pygame.K_m]
 
         # Add default gear keys
         if not self.keys['gear_1']:
@@ -180,8 +167,10 @@ class KeyboardController(ControllerStrategy):
         self._control.manual_gear_shift = False
         self._control.gear = 1
 
-        if self.logger:
+        if self.logger and DEBUG_MODE:
             self.logger.log_info("Keyboard controller initialization complete")
+            self.logger.log_info(f"Controller type: {config.type}")
+            self.logger.log_info(f"Initial mode: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
     def process_input(self) -> bool:
         """Process keyboard input"""
@@ -193,7 +182,7 @@ class KeyboardController(ControllerStrategy):
             if event.type == pygame.KEYDOWN:
                 # Check quit
                 if event.key in self.keys['quit']:
-                    if self.logger:
+                    if self.logger and DEBUG_MODE:
                         self.logger.log_info("Quitting simulation")
                     return True
 
@@ -201,7 +190,7 @@ class KeyboardController(ControllerStrategy):
                 if event.key in self.keys['manual_mode']:
                     self.is_manual_mode = not self.is_manual_mode
                     self._control.manual_gear_shift = self.is_manual_mode
-                    if self.logger:
+                    if self.logger and DEBUG_MODE:
                         self.logger.log_info(f"Transmission: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
                 # Handle reverse toggle
@@ -210,12 +199,12 @@ class KeyboardController(ControllerStrategy):
                         # In manual mode, toggle between reverse and forward
                         self._control.reverse = not self._control.reverse
                         self._control.gear = -1 if self._control.reverse else 1
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
                     else:
                         # In automatic mode, just toggle reverse
                         self._control.reverse = not self._control.reverse
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
 
                 # Handle gear shifting (only in manual mode)
@@ -223,38 +212,38 @@ class KeyboardController(ControllerStrategy):
                     if event.key in self.keys['gear_1']:
                         self._control.gear = 1
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 1")
                     elif event.key in self.keys['gear_2']:
                         self._control.gear = 2
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 2")
                     elif event.key in self.keys['gear_3']:
                         self._control.gear = 3
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 3")
                     elif event.key in self.keys['gear_4']:
                         self._control.gear = 4
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 4")
                     elif event.key in self.keys['gear_5']:
                         self._control.gear = 5
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 5")
                     elif event.key in self.keys['gear_6']:
                         self._control.gear = 6
                         self._control.reverse = False
-                        if self.logger:
+                        if self.logger and DEBUG_MODE:
                             self.logger.log_info("Gear: 6")
 
                 # Handle hand brake
                 if event.key in self.keys['hand_brake']:
                     self._control.hand_brake = not self._control.hand_brake
-                    if self.logger:
+                    if self.logger and DEBUG_MODE:
                         self.logger.log_info(f"Hand brake: {'On' if self._control.hand_brake else 'Off'}")
 
         # Get pressed keys
@@ -268,23 +257,23 @@ class KeyboardController(ControllerStrategy):
         # Throttle
         if any(keys[key] for key in self.keys['forward']):
             self._control.throttle = 1.0  # Set to full throttle when key is pressed
-            if self.debug_mode and self.logger:
+            if DEBUG_MODE and self.logger:
                 self.logger.log_info("Throttle: 100%")
 
         # Brake (Space)
         if any(keys[key] for key in self.keys['brake']):
             self._control.brake = 1.0  # Set to full brake when key is pressed
-            if self.debug_mode and self.logger:
+            if DEBUG_MODE and self.logger:
                 self.logger.log_info("Brake: 100%")
 
         # Steering
         if any(keys[key] for key in self.keys['left']):
             self._control.steer = -0.7  # Set to full left when key is pressed
-            if self.debug_mode and self.logger:
+            if DEBUG_MODE and self.logger:
                 self.logger.log_info("Steering: Left")
         elif any(keys[key] for key in self.keys['right']):
             self._control.steer = 0.7  # Set to full right when key is pressed
-            if self.debug_mode and self.logger:
+            if DEBUG_MODE and self.logger:
                 self.logger.log_info("Steering: Right")
         else:
             self._control.steer = 0.0  # Reset steering when no keys are pressed
@@ -292,7 +281,37 @@ class KeyboardController(ControllerStrategy):
         return False
 
     def get_control(self) -> VehicleControl:
-        """Get current control state"""
+        """Get current control state based on keyboard input"""
+        # Get current keyboard state
+        keys = pygame.key.get_pressed()
+        
+        # Reset control values
+        self._control.throttle = 0.0
+        self._control.brake = 0.0
+        self._control.steer = 0.0
+        self._control.hand_brake = False
+        
+        # Process throttle/brake
+        if any(keys[key] for key in self.keys['forward']):
+            self._control.throttle = 1.0
+        elif any(keys[key] for key in self.keys['backward']):
+            self._control.brake = 1.0
+        
+        # Process steering
+        if any(keys[key] for key in self.keys['left']):
+            self._control.steer = -0.7  # Reduced from -1.0 for smoother steering
+        elif any(keys[key] for key in self.keys['right']):
+            self._control.steer = 0.7  # Reduced from 1.0 for smoother steering
+        
+        # Process hand brake
+        if any(keys[key] for key in self.keys['hand_brake']):
+            self._control.hand_brake = True
+        
+        # Process brake key
+        if any(keys[key] for key in self.keys['brake']):
+            self._control.brake = 1.0
+            self._control.throttle = 0.0  # Ensure throttle is off when braking
+        
         return self._control
 
 class GamepadController(ControllerStrategy):
@@ -343,15 +362,25 @@ class AutopilotController(ControllerStrategy):
         self.config = config
         
         # Get traffic manager directly from client
-        traffic_manager = client.get_trafficmanager()
-        traffic_manager.set_global_distance_to_leading_vehicle(2.5)
-        traffic_manager.vehicle_percentage_speed_difference(self.vehicle, 0)  # No speed reduction
-        traffic_manager.ignore_lights_percentage(self.vehicle, 100)
-        traffic_manager.ignore_signs_percentage(self.vehicle, 100)
-        traffic_manager.set_synchronous_mode(True)
+        self.traffic_manager = client.get_trafficmanager()
         
-        # Enable autopilot with traffic manager settings
-        self.vehicle.set_autopilot(True, traffic_manager.get_port())
+        # Get traffic settings from config
+        traffic_config = getattr(config, 'traffic', {})
+        
+        # Configure traffic manager settings
+        distance_to_leading = traffic_config.get('distance_to_leading_vehicle', 2.5)
+        speed_diff = traffic_config.get('speed_difference_percentage', -100)  # Default to full speed
+        ignore_lights = traffic_config.get('ignore_lights_percentage', 0)
+        ignore_signs = traffic_config.get('ignore_signs_percentage', 0)
+        
+        # Apply traffic settings
+        self.traffic_manager.set_global_distance_to_leading_vehicle(distance_to_leading)
+        self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle, speed_diff)  # Set speed difference once
+        self.traffic_manager.ignore_lights_percentage(self.vehicle, ignore_lights)
+        self.traffic_manager.ignore_signs_percentage(self.vehicle, ignore_signs)
+        self.traffic_manager.set_synchronous_mode(True)
+        
+        # Initialize control
         self._control = VehicleControl()
     
     def process_input(self) -> bool:
@@ -375,24 +404,92 @@ class AutopilotController(ControllerStrategy):
         return self._control
 
 class VehicleController:
-    """Main vehicle controller class"""
+    """Main vehicle controller that uses a strategy pattern"""
     
     def __init__(self, config: ControllerConfig):
+        """Initialize controller with configuration"""
         self.config = config
-        self._strategy: Optional[ControllerStrategy] = None
+        self._strategy = None
+        self._vehicle = None
+        self._target = None
     
     def set_strategy(self, strategy: ControllerStrategy) -> None:
         """Set the control strategy"""
         self._strategy = strategy
+        # If we already have a vehicle, update its control mode
+        if self._vehicle:
+            self._update_vehicle_control_mode()
+    
+    def set_vehicle(self, vehicle: carla.Vehicle) -> None:
+        """Set the vehicle to control"""
+        self._vehicle = vehicle
+        self._update_vehicle_control_mode()
+    
+    def _update_vehicle_control_mode(self) -> None:
+        """Update vehicle control mode based on controller type"""
+        if not self._vehicle:
+            return
+            
+        if DEBUG_MODE:
+            print(f"[VehicleController] Updating control mode for type: {self.config.type}")
+        if self.config.type == 'autopilot':
+            if not isinstance(self._strategy, AutopilotController):
+                raise RuntimeError("Autopilot mode requires AutopilotController strategy")
+            if DEBUG_MODE:
+                print("[VehicleController] Enabling autopilot mode")
+            # Enable autopilot with traffic manager
+            self._vehicle.set_autopilot(True, self._strategy.traffic_manager.get_port())
+            # Set initial control state for autopilot
+            control = carla.VehicleControl()
+            control.manual_gear_shift = False
+            self._vehicle.apply_control(control)
+            if DEBUG_MODE:
+                print("[VehicleController] Autopilot mode enabled")
+        else:
+            if DEBUG_MODE:
+                print("[VehicleController] Enabling manual control mode")
+            # For keyboard control, ensure autopilot is disabled
+            self._vehicle.set_autopilot(False)
+            # Set initial control state for manual control
+            control = carla.VehicleControl()
+            control.manual_gear_shift = True
+            self._vehicle.apply_control(control)
+            if DEBUG_MODE:
+                print("[VehicleController] Manual control mode enabled")
+    
+    def get_vehicle(self) -> carla.Vehicle:
+        """Get the controlled vehicle instance"""
+        return self._vehicle
+    
+    def set_target(self, target: carla.Location) -> None:
+        """Set the target location for navigation"""
+        self._target = target
+        if self._strategy and hasattr(self._strategy, 'set_target'):
+            self._strategy.set_target(target)
     
     def process_input(self) -> bool:
         """Process input using current strategy"""
-        if self._strategy is None:
+        if not self._strategy:
             raise RuntimeError("No control strategy set")
         return self._strategy.process_input()
     
-    def get_control(self) -> VehicleControl:
-        """Get control state from current strategy"""
-        if self._strategy is None:
+    def get_control(self, vehicle_state: Dict[str, Any]) -> carla.VehicleControl:
+        """Get control commands using current strategy"""
+        if not self._strategy:
             raise RuntimeError("No control strategy set")
-        return self._strategy.get_control() 
+            
+        # Get control from the current strategy
+        control = self._strategy.get_control()
+        
+        # Convert our VehicleControl to CARLA VehicleControl
+        carla_control = carla.VehicleControl(
+            throttle=float(control.throttle),
+            steer=float(control.steer),
+            brake=float(control.brake),
+            hand_brake=bool(control.hand_brake),
+            reverse=bool(control.reverse),
+            manual_gear_shift=bool(control.manual_gear_shift),
+            gear=int(control.gear)
+        )
+        
+        return carla_control 

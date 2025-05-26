@@ -55,7 +55,7 @@ class WorldConfig:
     traffic: TrafficConfig
     fixed_delta_seconds: float = 0.1
     target_distance: float = 500.0
-    num_vehicles: int = 20
+    num_vehicles: int = 5
     enable_collision: bool = False
     synchronous_mode: bool = True
 
@@ -248,6 +248,16 @@ class ControllerConfig:
     keyboard: KeyboardConfig
 
 @dataclass
+class VehicleConfig:
+    """Vehicle configuration parameters"""
+    model: str
+    mass: float
+    drag_coefficient: float
+    max_rpm: float
+    moi: float
+    center_of_mass: List[float]
+
+@dataclass
 class Config:
     """Main configuration class"""
     server: ServerConfig
@@ -257,7 +267,7 @@ class Config:
     display: DisplayConfig
     sensors: SensorConfig
     controller: ControllerConfig
-    vehicle_model: str
+    vehicle: VehicleConfig
     scenarios: ScenarioConfig
 
 def load_config(config_path: str) -> Config:
@@ -288,6 +298,6 @@ def load_config(config_path: str) -> Config:
             brake_speed=config_dict['controller']['brake_speed'],
             keyboard=KeyboardConfig(**config_dict['controller']['keyboard'])
         ),
-        vehicle_model=config_dict['vehicle_model'],
+        vehicle=VehicleConfig(**config_dict['vehicle']),
         scenarios=ScenarioConfig(**config_dict['scenarios'])
     ) 
