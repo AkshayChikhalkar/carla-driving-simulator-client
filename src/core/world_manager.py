@@ -8,14 +8,11 @@ import math
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import time
-import logging
-
-from src.utils.settings import DEBUG_MODE
+from ..utils.logging import Logger
 from ..utils.config import WorldConfig, VehicleConfig
 from src.core.interfaces import IWorldManager
-from ..utils.logging import Logger
 
-# Set up logging
+# Get logger instance
 logger = Logger()
 
 @dataclass
@@ -28,12 +25,11 @@ class TargetPoint:
 class WorldManager(IWorldManager):
     """Manages the CARLA world and its entities"""
     
-    def __init__(self, client: carla.Client, config: WorldConfig, vehicle_config: VehicleConfig, logger: Logger):
+    def __init__(self, client: carla.Client, config: WorldConfig, vehicle_config: VehicleConfig):
         """Initialize the world manager"""
         self.client = client
         self.config = config
         self.vehicle_config = vehicle_config
-        self.logger = logger
         self.world = None
         self.vehicle = None
         self.blueprint_library = None
@@ -41,15 +37,6 @@ class WorldManager(IWorldManager):
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
         self._setup_world()
-        
-        # Apply initial settings with more stable timing parameters
-        settings = self.world.get_settings()
-        settings.synchronous_mode = config.synchronous_mode
-        settings.fixed_delta_seconds = config.fixed_delta_seconds
-        settings.substepping = True
-        settings.max_substep_delta_time = config.physics.max_substep_delta_time
-        settings.max_substeps = config.physics.max_substeps
-        self.world.apply_settings(settings)
         
         # Wait for the world to be ready
         self.world.tick()
@@ -100,15 +87,8 @@ class WorldManager(IWorldManager):
 
     def destroy_actor(self, actor: carla.Actor) -> None:
         """Destroy an actor from the world"""
-        if not actor:
-            return
-            
-        try:
-            if hasattr(actor, 'is_alive') and actor.is_alive:
-                actor.destroy()
-        except Exception as e:
-            if DEBUG_MODE:
-                logger.debug(f"[WorldManager] Actor already destroyed or not found: {str(e)}")
+        if actor and actor.is_alive:
+            actor.destroy()
 
     def _setup_world(self) -> None:
         """Setup the CARLA world with specified configuration"""
@@ -116,12 +96,14 @@ class WorldManager(IWorldManager):
             # Get world
             self.world = self.client.get_world()
             
-            # Set synchronous mode if configured
-            if self.config.synchronous_mode:
-                settings = self.world.get_settings()
-                settings.synchronous_mode = True
-                settings.fixed_delta_seconds = self.config.fixed_delta_seconds
-                self.world.apply_settings(settings)
+            # Apply world settings
+            settings = self.world.get_settings()
+            settings.synchronous_mode = self.config.synchronous_mode
+            settings.fixed_delta_seconds = self.config.fixed_delta_seconds
+            settings.substepping = True
+            settings.max_substep_delta_time = self.config.physics.max_substep_delta_time
+            settings.max_substeps = self.config.physics.max_substeps
+            self.world.apply_settings(settings)
             
             # Get blueprint library
             self.blueprint_library = self.world.get_blueprint_library()
@@ -284,85 +266,111 @@ class WorldManager(IWorldManager):
         """Get a random spawn point from the map"""
         return random.choice(self.world.get_map().get_spawn_points())
     
-    def destroy_all_actors(self) -> None:
-        """Destroy all actors in the world"""
-        if not self.world:
-            return
-            
-        try:
-            # Get all actors
-            actors = list(self.world.get_actors())
-            
-            # First destroy all sensors
-            sensor_actors = [actor for actor in actors if actor and actor.type_id.startswith('sensor.')]
-            for actor in sensor_actors:
-                if actor.is_alive:
-                    actor.destroy()
-            
-            # Wait for sensors to be destroyed
-            time.sleep(0.5)
-            
-            # Then destroy all vehicles
-            vehicle_actors = [actor for actor in actors if actor and actor.type_id.startswith('vehicle.')]
-            for actor in vehicle_actors:
-                if actor.is_alive:
-                    try:
-                        actor.set_autopilot(False)
-                        time.sleep(0.1)
-                    except:
-                        pass
-                    actor.destroy()
-            
-            # Wait for vehicles to be destroyed
-            time.sleep(1.0)
-            
-            # Finally destroy any remaining actors
-            other_actors = [actor for actor in actors if actor and not actor.type_id.startswith(('sensor.', 'vehicle.'))]
-            for actor in other_actors:
-                if actor.is_alive:
-                    actor.destroy()
-            
-            # Final wait and world tick
-            time.sleep(1.0)
-            self.world.tick()
-            
-        except Exception as e:
-            if DEBUG_MODE:
-                logger.debug(f"[WorldManager] Error destroying all actors: {str(e)}")
-
     def cleanup(self) -> None:
-        """Clean up all world resources"""
+        """Clean up world resources"""
         try:
-            if DEBUG_MODE:
-                logger.debug("[WorldManager] Starting cleanup...")
+            logger.debug("[WorldManager] Starting cleanup...")
             
-            # First destroy our managed actors
-            if self.vehicle:
-                self.destroy_actor(self.vehicle)
-                self.vehicle = None
+            # First disable autopilot and traffic manager
+            if hasattr(self, 'traffic_manager'):
+                logger.debug("[WorldManager] Disabling traffic manager...")
+                try:
+                    self.traffic_manager.set_synchronous_mode(False)
+                    time.sleep(0.5)  # Wait for traffic manager to update
+                except Exception as e:
+                    logger.error(f"[WorldManager] Error disabling traffic manager: {str(e)}")
             
-            # Destroy all traffic actors
-            for actor in self._traffic_actors:
-                self.destroy_actor(actor)
-            self._traffic_actors.clear()
+            # Destroy all actors in proper order
+            if self.world:
+                logger.debug("[WorldManager] Destroying all actors...")
+                    
+                try:
+                    # Get all actors and create a copy of the list
+                    actors = list(self.world.get_actors())
+                    
+                    # Helper function to safely destroy an actor
+                    def safe_destroy_actor(actor, actor_type="actor"):
+                        if not actor:
+                            return False
+                            
+                        try:
+                            # Check if actor is valid and alive
+                            if not hasattr(actor, 'is_alive') or not actor.is_alive:
+                                logger.debug(f"[WorldManager] {actor_type} {actor.id if actor else 'unknown'} is not alive")
+                                return False
+                                
+                            # For vehicles, disable autopilot first
+                            if actor_type == "vehicle":
+                                try:
+                                    actor.set_autopilot(False)
+                                    time.sleep(0.1)  # Wait for autopilot to disable
+                                except Exception as e:
+                                    logger.error(f"[WorldManager] Error disabling autopilot for vehicle {actor.id}: {str(e)}")
+                            
+                            # Destroy the actor
+                            logger.debug(f"[WorldManager] Destroying {actor_type}: {actor.type_id}")
+                            actor.destroy()
+                            
+                            # Wait for destruction to complete
+                            time.sleep(0.2)
+                            
+                            # Verify destruction
+                            if hasattr(actor, 'is_alive') and actor.is_alive:
+                                logger.warning(f"[WorldManager] Failed to destroy {actor_type} {actor.id}")
+                                return False
+                                
+                            return True
+                            
+                        except Exception as e:
+                            logger.error(f"[WorldManager] Error destroying {actor_type} {actor.id if actor else 'unknown'}: {str(e)}")
+                            return False
+                    
+                    # Only destroy vehicles and dynamic actors, not map actors
+                    vehicle_actors = [actor for actor in actors if actor and 
+                                    actor.type_id.startswith('vehicle.') and 
+                                    not actor.type_id.startswith('traffic.')]
+                    for actor in vehicle_actors:
+                        safe_destroy_actor(actor, "vehicle")
+                    
+                    # Wait for vehicles to be destroyed
+                    time.sleep(1.0)
+                    
+                    # Then destroy any remaining dynamic actors (excluding map actors)
+                    other_actors = [actor for actor in actors if actor and 
+                                  not actor.type_id.startswith(('sensor.', 'vehicle.', 'traffic.', 'static.'))]
+                    for actor in other_actors:
+                        safe_destroy_actor(actor, "actor")
+                    
+                    # Final wait and world tick
+                    time.sleep(1.0)
+                    if self.world:
+                        try:
+                            self.world.tick()
+                        except Exception as e:
+                            if "connection failed" in str(e).lower():
+                                logger.error("[WorldManager] Connection lost during cleanup - server may have crashed")
+                            else:
+                                logger.error(f"[WorldManager] Error during final world tick: {str(e)}")
+                    
+                except Exception as e:
+                    if "connection failed" in str(e).lower():
+                        logger.error("[WorldManager] Connection lost during actor cleanup - server may have crashed")
+                    else:
+                        logger.error(f"[WorldManager] Error during actor cleanup: {str(e)}")
             
-            # Destroy all remaining actors in the world
-            self.destroy_all_actors()
-                
-            # Reset vehicle reference
+            # Reset internal state
             self.vehicle = None
-            
-            # Clear traffic actors list
             self._traffic_actors = []
+            self.target = None
             
-            if DEBUG_MODE:
-                logger.debug("[WorldManager] Cleanup completed successfully")
+            logger.debug("[WorldManager] Cleanup completed")
                 
         except Exception as e:
-            if DEBUG_MODE:
+            if "connection failed" in str(e).lower():
+                logger.error("[WorldManager] Connection lost during cleanup - server may have crashed")
+            else:
                 logger.error(f"[WorldManager] Error during cleanup: {str(e)}")
-            # Don't raise the exception, just log it
-            pass
+            raise
     
     def get_blueprint_library(self) -> carla.BlueprintLibrary:
         """Get the CARLA blueprint library"""

@@ -10,9 +10,11 @@ import math
 import numpy as np
 from dataclasses import dataclass
 from ..utils.config import SensorConfig
-import logging
+from ..utils.logging import Logger
+import time
 
-logger = logging.getLogger(__name__)
+# Get logger instance
+logger = Logger()
 
 @dataclass
 class SensorData:
@@ -68,6 +70,10 @@ class SensorSubject(ABC):
         """Notify all observers of new data"""
         for observer in self._observers:
             observer.on_sensor_data(data)
+
+    def detach_all(self) -> None:
+        """Detach all observers"""
+        self._observers.clear()
 
 class CollisionSensor(SensorSubject):
     """Collision detection sensor"""
@@ -238,16 +244,28 @@ class SensorManager:
     def cleanup(self) -> None:
         """Clean up all sensors"""
         try:
+            logger.debug("[SensorManager] Starting sensor cleanup...")
+            
+            # First detach all observers
             for sensor in self.sensors.values():
-                try:
-                    if sensor and hasattr(sensor, 'destroy'):
+                if sensor:
+                    sensor.detach_all()
+            
+            # Then destroy each sensor
+            for sensor_type, sensor in self.sensors.items():
+                if sensor:
+                    try:
+                        logger.debug(f"[SensorManager] Destroying sensor: {sensor_type}")
                         sensor.destroy()
-                except Exception as e:
-                    # Log at debug level since this is expected during cleanup
-                    logger.debug(f"[SensorManager] Error destroying sensor: {str(e)}")
-                    pass
+                        time.sleep(0.1)  # Small delay between sensor destruction
+                    except Exception as e:
+                        logger.error(f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}")
+            
+            # Clear the sensors dictionary
             self.sensors.clear()
+            
+            logger.debug("[SensorManager] Sensor cleanup completed")
+                
         except Exception as e:
-            # Log at debug level since this is expected during cleanup
-            logger.debug(f"[SensorManager] Error during cleanup: {str(e)}")
-            pass 
+            logger.error(f"[SensorManager] Error during sensor cleanup: {str(e)}")
+            raise 

@@ -23,7 +23,7 @@ from src.utils.config import (
     Config,
     KeyboardConfig
 )
-from src.utils.logging import SimulationData, Logger
+from src.utils.logging import SimulationData
 
 @dataclass
 class ServerConfig:
@@ -100,8 +100,7 @@ class SimulationState:
 
 class SimulationMetrics:
     """Tracks simulation metrics"""
-    def __init__(self, logger: Logger):
-        """Initialize metrics with logger"""
+    def __init__(self, logger: ILogger):
         self.logger = logger
         self.metrics = {
             'fps': 0.0,

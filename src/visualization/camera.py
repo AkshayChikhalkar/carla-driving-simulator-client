@@ -8,25 +8,22 @@ import pygame
 import numpy as np
 from typing import Optional, Tuple, Dict, Any
 import weakref
-from ..utils.logging import Logger
 
 class CameraManager:
     """Manages camera setup and visualization."""
     
-    def __init__(self, parent_actor: carla.Actor, config: Dict[str, Any], logger: Logger):
+    def __init__(self, parent_actor: carla.Actor, config: Dict[str, Any]):
         """
         Initialize camera manager.
         
         Args:
             parent_actor: Actor to attach camera to
             config: Camera configuration dictionary
-            logger: Logger instance for logging
         """
         self.sensor = None
         self._parent = parent_actor
         self.config = config
         self.surface = None
-        self.logger = logger
         self._setup_camera()
 
     def _setup_camera(self):
@@ -77,17 +74,11 @@ class CameraManager:
 
     def destroy(self):
         """Destroy the camera sensor."""
-        try:
-            if self.sensor is not None:
-                if hasattr(self.sensor, 'is_alive') and self.sensor.is_alive:
-                    self.sensor.destroy()
-                self.sensor = None
-            if self.surface is not None:
-                self.surface = None
-        except Exception as e:
-            # Log at debug level since this is expected during cleanup
-            self.logger.debug(f"[CameraManager] Error destroying sensor: {str(e)}")
-            pass
+        if self.sensor is not None:
+            self.sensor.destroy()
+            self.sensor = None
+        if self.surface is not None:
+            self.surface = None
 
 class DisplayManager:
     """Manages the display window and HUD elements."""

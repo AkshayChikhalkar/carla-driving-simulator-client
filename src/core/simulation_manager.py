@@ -163,50 +163,53 @@ class SimulationManager(ISimulationManager):
     def cleanup(self) -> None:
         """Clean up simulation resources"""
         try:
-            # Stop the simulation loop if it's running
-            self._is_running = False
+            if DEBUG_MODE:
+                self.logger.debug("Starting simulation cleanup...")
             
-            # Clean up scenario if it exists
-            if self._scenario:
-                try:
-                    self._scenario.cleanup()
-                except Exception as e:
-                    if DEBUG_MODE:
-                        self.logger.debug(f"Error cleaning up scenario: {str(e)}")
-                self._scenario = None
+            # First stop any ongoing simulation
+            self.stop()
             
-            # First clean up sensors (they are attached to the vehicle)
-            if self.sensor_manager:
-                try:
-                    self.sensor_manager.cleanup()
-                    self.logger.info("Sensors cleaned up")
-                except Exception as e:
-                    if DEBUG_MODE:
-                        self.logger.debug(f"Error cleaning up sensors: {str(e)}")
-            
-            # Then clean up vehicle
-            vehicle = self.vehicle_controller.get_vehicle()
-            if vehicle:
-                try:
-                    if hasattr(vehicle, 'is_alive') and vehicle.is_alive:
-                        self.world_manager.destroy_actor(vehicle)
-                        self.logger.info("Vehicle destroyed")
-                except Exception as e:
-                    if DEBUG_MODE:
-                        self.logger.debug(f"Error destroying vehicle: {str(e)}")
-            
-            # Finally disconnect from world
-            try:
-                self.world_manager.disconnect()
-                self.logger.info("Simulation cleanup completed")
-            except Exception as e:
+            # Clean up world and all actors
+            if self.world_manager:
                 if DEBUG_MODE:
-                    self.logger.debug(f"Error disconnecting from world: {str(e)}")
+                    self.logger.debug("Cleaning up world manager...")
+                self.world_manager.cleanup()
+            
+            # Clean up sensors
+            if self.sensor_manager:
+                if DEBUG_MODE:
+                    self.logger.debug("Cleaning up sensor manager...")
+                self.sensor_manager.cleanup()
+            
+            # Reset simulation state
+            self._state = None
+            self.last_speed = 0.0
+            self.last_position = (0.0, 0.0, 0.0)
+            self.last_heading = 0.0
+            self.is_finished = False
+            self.start_time = None
+            
+            # Clear any remaining references
+            self._scenario = None
+            self._vehicle_state = {
+                'location': None,
+                'velocity': None,
+                'acceleration': None,
+                'transform': None,
+                'sensor_data': None
+            }
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            if DEBUG_MODE:
+                self.logger.debug("Simulation cleanup completed")
+            self.logger.info("Simulation cleanup completed")
             
         except Exception as e:
             self.logger.error("Error during cleanup", exc_info=e)
-            # Don't raise the exception, just log it
-            pass
+            raise
 
     def check_events(self) -> tuple[SimulationEvent, str]:
         """Check for significant events based on current state"""
@@ -241,7 +244,7 @@ class SimulationManager(ISimulationManager):
         """Check if simulation should continue"""
         elapsed_time = time.time() - self.start_time
         return (elapsed_time < self.config['simulation_time'] 
-                and not self.is_finished) 
+                and not self.is_finished)
 
     def initialize(self) -> bool:
         """Initialize the simulation"""

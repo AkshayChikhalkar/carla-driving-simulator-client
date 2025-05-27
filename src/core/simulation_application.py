@@ -67,7 +67,7 @@ class SimulationApplication:
         # Initialize display manager
         if DEBUG_MODE:
             print("[SimulationApplication] Initializing display manager...")
-        self.display_manager = DisplayManager(self._config.display_config, self.logger)
+        self.display_manager = DisplayManager(self._config.display_config)
         if DEBUG_MODE:
             print("[SimulationApplication] Display manager initialized")
         
@@ -270,24 +270,31 @@ class SimulationApplication:
             if DEBUG_MODE:
                 self.logger.debug("Starting cleanup process...")
             
+            # First stop any ongoing simulation
             if DEBUG_MODE:
                 self.logger.debug("Stopping simulation...")
             self.stop()
             
+            # Clean up scenario first
             if self.current_scenario:
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up current scenario...")
                 self.current_scenario.cleanup()
+                self.current_scenario = None
             
+            # Clean up sensors
             if self.sensor_manager:
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up sensor manager...")
                 self.sensor_manager.cleanup()
+                self.sensor_manager = None
             
+            # Clean up display
             if self.display_manager:
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up display manager...")
                 self.display_manager.cleanup()
+                self.display_manager = None
             
             # Clean up world and all actors
             if self.world_manager:
@@ -295,9 +302,18 @@ class SimulationApplication:
                     self.logger.debug("Cleaning up world manager...")
                 self.world_manager.cleanup()
             
+            # Disconnect from server
             if DEBUG_MODE:
                 self.logger.debug("Disconnecting from server...")
             self.connection.disconnect()
+            
+            # Clear any remaining references
+            self.vehicle_controller = None
+            self.vehicle = None
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
             
             if self.logger:
                 self.logger.info("Simulation cleanup completed")

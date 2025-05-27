@@ -1,4 +1,4 @@
-from typing import Dict, Type, Optional
+from typing import Dict, Type, Optional, Any
 from src.core.interfaces import IScenario, IWorldManager, IVehicleController, ILogger
 
 class ScenarioRegistry:
@@ -28,42 +28,25 @@ class ScenarioRegistry:
             cls._scenario_configs[scenario_type] = default_config
 
     @classmethod
-    def create_scenario(cls,
-                       scenario_type: str,
-                       world_manager: IWorldManager,
-                       vehicle_controller: IVehicleController,
-                       logger: ILogger,
-                       config: Optional[Dict] = None) -> IScenario:
-        """
-        Create a scenario instance
-        
-        Args:
-            scenario_type: String identifier for the scenario
-            world_manager: World manager instance
-            vehicle_controller: Vehicle controller instance
-            logger: Logger instance
-            config: Optional configuration override
-            
-        Returns:
-            IScenario: Instance of the requested scenario type
-            
-        Raises:
-            ValueError: If scenario_type is not registered
-        """
+    def create_scenario(cls, scenario_type: str, world_manager: IWorldManager, 
+                       vehicle_controller: IVehicleController, logger: ILogger, config: Dict[str, Any] = None) -> IScenario:
+        """Create a new scenario instance"""
         if scenario_type not in cls._scenarios:
             raise ValueError(f"Unknown scenario type: {scenario_type}")
             
-        # Merge default config with provided config
-        scenario_config = cls._scenario_configs.get(scenario_type, {}).copy()
+        # Get default config for this scenario type
+        default_config = cls._scenario_configs.get(scenario_type, {})
+        
+        # Merge with provided config if any
         if config:
-            scenario_config.update(config)
+            default_config.update(config)
             
         scenario_class = cls._scenarios[scenario_type]
         return scenario_class(
             world_manager=world_manager,
             vehicle_controller=vehicle_controller,
             logger=logger,
-            **scenario_config
+            **default_config  # Unpack config as keyword arguments
         )
 
     @classmethod

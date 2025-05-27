@@ -117,8 +117,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         world_manager = WorldManager(
             client=app.connection.client,
             config=app.world_config,
-            vehicle_config=app._config.vehicle,
-            logger=logger
+            vehicle_config=app._config.vehicle
         )
         
         # Create vehicle first

@@ -14,7 +14,6 @@ import os
 import sys
 import logging
 import math
-from ..utils.logging import Logger
 
 @dataclass
 class VehicleState:
@@ -30,9 +29,8 @@ class VehicleState:
 class HUD:
     """Heads Up Display showing vehicle telemetry"""
     
-    def __init__(self, config: DisplayConfig, logger: Logger):
+    def __init__(self, config: DisplayConfig):
         """Initialize HUD with given font size"""
-        self.logger = logger
         pygame.font.init()
         self.font = pygame.font.Font(pygame.font.get_default_font(), config.hud.font_size)
         self.alpha = config.hud.alpha
@@ -74,14 +72,13 @@ class HUD:
             
             display.blit(info_surface, (10, 10))
         except Exception as e:
-            self.logger.error("Error rendering HUD", exc_info=e)
+            logging.error("Error rendering HUD", exc_info=e)
 
 class Minimap:
     """Minimap display showing vehicle and target positions"""
     
-    def __init__(self, config: DisplayConfig, logger: Logger):
+    def __init__(self, config: DisplayConfig):
         """Initialize minimap"""
-        self.logger = logger
         self.config = config
         self.width = 200
         self.height = 200
@@ -128,7 +125,7 @@ class Minimap:
             surface.blit(minimap, (surface.get_width() - self.width - 10,
                                   surface.get_height() - self.height - 10))
         except Exception as e:
-            self.logger.error("Error rendering minimap", exc_info=e)
+            logging.error("Error rendering minimap", exc_info=e)
 
     def _get_vehicle_triangle(self, x: int, y: int, heading: float) -> list:
         """Get triangle points for vehicle representation"""
@@ -146,9 +143,8 @@ class Minimap:
 
 class CameraView(SensorObserver):
     """Camera view display"""
-    def __init__(self, config: DisplayConfig, logger: Logger):
+    def __init__(self, config: DisplayConfig):
         """Initialize camera view"""
-        self.logger = logger
         self.config = config
         self.surface: Optional[pygame.Surface] = None
         self.last_frame = None
@@ -215,9 +211,8 @@ def get_window_count():
 class DisplayManager:
     """Facade for all visualization components"""
     
-    def __init__(self, config: DisplayConfig, logger: Logger):
+    def __init__(self, config: DisplayConfig):
         """Initialize display manager"""
-        self.logger = logger
         self.config = config
         
         # Initialize pygame display
@@ -247,9 +242,9 @@ class DisplayManager:
         pygame.display.set_caption(f"CARLA Simulator - Instance {window_count + 1}")
         
         # Initialize components
-        self.hud = HUD(config, logger)
-        self.minimap = Minimap(config, logger)
-        self.camera_view = CameraView(config, logger)
+        self.hud = HUD(config)
+        self.minimap = Minimap(config)
+        self.camera_view = CameraView(config)
         
         # Window state
         self.minimized = False
@@ -265,6 +260,9 @@ class DisplayManager:
         self.fps_font = pygame.font.Font(None, 24)
         self.last_fps_update = time.time()
         self.current_fps = 0
+        
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
     
     def handle_resize(self, size):
         """Handle window resize"""
