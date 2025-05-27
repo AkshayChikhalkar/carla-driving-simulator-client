@@ -15,6 +15,7 @@ from src.core.interfaces import (
     ISensorManager,
     ILogger
 )
+from src.utils.settings import DEBUG_MODE
 from ..visualization.display_manager import VehicleState
 
 class SimulationEvent(Enum):
