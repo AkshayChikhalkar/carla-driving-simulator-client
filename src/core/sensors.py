@@ -10,6 +10,9 @@ import math
 import numpy as np
 from dataclasses import dataclass
 from ..utils.config import SensorConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class SensorData:
@@ -233,6 +236,18 @@ class SensorManager:
     def get_sensor_data(self) -> Dict[str, Any]:
         return {}
     def cleanup(self) -> None:
-        for sensor in self.sensors.values():
-            sensor.destroy()
-        self.sensors.clear() 
+        """Clean up all sensors"""
+        try:
+            for sensor in self.sensors.values():
+                try:
+                    if sensor and hasattr(sensor, 'destroy'):
+                        sensor.destroy()
+                except Exception as e:
+                    # Log at debug level since this is expected during cleanup
+                    logger.debug(f"[SensorManager] Error destroying sensor: {str(e)}")
+                    pass
+            self.sensors.clear()
+        except Exception as e:
+            # Log at debug level since this is expected during cleanup
+            logger.debug(f"[SensorManager] Error during cleanup: {str(e)}")
+            pass 

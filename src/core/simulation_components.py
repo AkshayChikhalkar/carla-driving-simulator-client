@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import Optional, Dict, Any
 import carla
 import yaml
@@ -22,7 +23,7 @@ from src.utils.config import (
     Config,
     KeyboardConfig
 )
-from src.utils.logging import SimulationData
+from src.utils.logging import SimulationData, Logger
 
 @dataclass
 class ServerConfig:
@@ -99,7 +100,8 @@ class SimulationState:
 
 class SimulationMetrics:
     """Tracks simulation metrics"""
-    def __init__(self, logger: ILogger):
+    def __init__(self, logger: Logger):
+        """Initialize metrics with logger"""
         self.logger = logger
         self.metrics = {
             'fps': 0.0,

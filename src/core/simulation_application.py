@@ -67,7 +67,7 @@ class SimulationApplication:
         # Initialize display manager
         if DEBUG_MODE:
             print("[SimulationApplication] Initializing display manager...")
-        self.display_manager = DisplayManager(self._config.display_config)
+        self.display_manager = DisplayManager(self._config.display_config, self.logger)
         if DEBUG_MODE:
             print("[SimulationApplication] Display manager initialized")
         
@@ -135,7 +135,7 @@ class SimulationApplication:
         
         # Setup the scenario
         self.current_scenario.setup()
-        self.logger.log_info(f"Started scenario: {scenario_type}")
+        self.logger.info(f"Started scenario: {scenario_type}")
 
     def run(self) -> None:
         """Run the simulation loop"""
@@ -143,7 +143,7 @@ class SimulationApplication:
             raise RuntimeError("No scenario set")
             
         self.state.start()
-        self.logger.log_info("Starting simulation loop")
+        self.logger.info("Starting simulation loop")
         
         try:
             world = self.connection.client.get_world()
@@ -179,23 +179,20 @@ class SimulationApplication:
                     # Update scenario
                     self.current_scenario.update()
                 except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"Exception in scenario update: {e}")
+                    self.logger.error("Exception in scenario update", exc_info=e)
                     
                 try:
                     # Apply vehicle control
                     control = self.vehicle_controller.get_control(vehicle_state)
                     vehicle.apply_control(control)
                 except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"Exception in control/apply: {e}")
+                    self.logger.error("Exception in control/apply", exc_info=e)
                     
                 try:
                     # Update metrics
                     self.metrics.update(vehicle_state)
                 except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"Exception in metrics update: {e}")
+                    self.logger.error("Exception in metrics update", exc_info=e)
                     
                 try:
                     # Render display
@@ -219,7 +216,7 @@ class SimulationApplication:
                                 'manual_gear_shift': control.manual_gear_shift
                             },
                             speed_kmh=vehicle_state['velocity'].length() * 3.6,
-                            scenario_name=self.current_scenario.__class__.__name__
+                            scenario_name=self.current_scenario.name
                         )
                         
                         # Get target position from scenario if available
@@ -227,28 +224,26 @@ class SimulationApplication:
                         if target_pos is None:
                             target_pos = carla.Location()
                             
-                        # Render display
+                        # Render display and check for quit signal
                         if not self.display_manager.render(display_state, target_pos):
+                            self.logger.info("Display manager requested exit")
                             break
                 except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"Exception in display rendering: {e}")
+                    self.logger.error("Exception in display rendering", exc_info=e)
                     
                 try:
                     # Log metrics periodically
                     if self.metrics.metrics['frame_count'] % 30 == 0:
                         self.metrics.log_metrics()
-                        self.logger.log_vehicle_state(vehicle_state)
+                        #self.logger.log_vehicle_state(vehicle_state)
                 except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"Exception in logging: {e}")
+                    self.logger.error("Exception in logging", exc_info=e)
                     
                 # Tick the CARLA world (required for synchronous mode)
                 world.tick()
                     
         except Exception as e:
-            if DEBUG_MODE:
-                print(f"[SimulationApplication] Error in simulation loop: {str(e)}")
+            self.logger.error("Error in simulation loop", exc_info=e)
             raise
         finally:
             self.cleanup()
@@ -256,58 +251,60 @@ class SimulationApplication:
     def pause(self) -> None:
         """Pause the simulation"""
         self.state.pause()
-        self.logger.log_info("Simulation paused")
+        self.logger.info("Simulation paused")
 
     def resume(self) -> None:
         """Resume the simulation"""
         self.state.resume()
-        self.logger.log_info("Simulation resumed")
+        self.logger.info("Simulation resumed")
 
     def stop(self) -> None:
         """Stop the simulation"""
         self.state.stop()
         if self.logger:
-            self.logger.log_info("Simulation stopped")
+            self.logger.info("Simulation stopped")
 
     def cleanup(self) -> None:
         """Clean up simulation resources"""
         try:
             if DEBUG_MODE:
-                print("[SimulationApplication] Starting cleanup process...")
+                self.logger.debug("Starting cleanup process...")
             
             if DEBUG_MODE:
-                print("[SimulationApplication] Stopping simulation...")
+                self.logger.debug("Stopping simulation...")
             self.stop()
             
             if self.current_scenario:
                 if DEBUG_MODE:
-                    print("[SimulationApplication] Cleaning up current scenario...")
+                    self.logger.debug("Cleaning up current scenario...")
                 self.current_scenario.cleanup()
             
             if self.sensor_manager:
                 if DEBUG_MODE:
-                    print("[SimulationApplication] Cleaning up sensor manager...")
+                    self.logger.debug("Cleaning up sensor manager...")
                 self.sensor_manager.cleanup()
             
             if self.display_manager:
                 if DEBUG_MODE:
-                    print("[SimulationApplication] Cleaning up display manager...")
+                    self.logger.debug("Cleaning up display manager...")
                 self.display_manager.cleanup()
             
+            # Clean up world and all actors
+            if self.world_manager:
+                if DEBUG_MODE:
+                    self.logger.debug("Cleaning up world manager...")
+                self.world_manager.cleanup()
+            
             if DEBUG_MODE:
-                print("[SimulationApplication] Disconnecting from server...")
+                self.logger.debug("Disconnecting from server...")
             self.connection.disconnect()
             
             if self.logger:
-                self.logger.log_info("Simulation cleanup completed")
+                self.logger.info("Simulation cleanup completed")
                 if DEBUG_MODE:
-                    print("[SimulationApplication] Cleanup completed successfully")
+                    self.logger.debug("Cleanup completed successfully")
         except Exception as e:
-            if DEBUG_MODE:
-                print(f"[SimulationApplication] Error during cleanup: {str(e)}")
-                print(f"[SimulationApplication] Error type: {type(e).__name__}")
-                import traceback
-                print(f"[SimulationApplication] Error traceback:\n{traceback.format_exc()}")
+            self.logger.error("Error during cleanup", exc_info=e)
             raise
 
     @property

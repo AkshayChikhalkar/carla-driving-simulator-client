@@ -103,15 +103,26 @@ class IWorldManager(ABC):
         pass
 
 class ILogger(ABC):
-    """Interface for logging simulation data"""
+    """Interface for logging functionality"""
+    
     @abstractmethod
-    def log_info(self, message: str) -> None:
-        """Log an info message"""
+    def info(self, message: str) -> None:
+        """Log informational message"""
         pass
-
+    
     @abstractmethod
-    def log_error(self, message: str) -> None:
-        """Log an error message"""
+    def error(self, message: str) -> None:
+        """Log error message"""
+        pass
+    
+    @abstractmethod
+    def debug(self, message: str) -> None:
+        """Log debug message"""
+        pass
+    
+    @abstractmethod
+    def warning(self, message: str) -> None:
+        """Log warning message"""
         pass
 
     @abstractmethod

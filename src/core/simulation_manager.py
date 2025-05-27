@@ -15,6 +15,7 @@ from src.core.interfaces import (
     ISensorManager,
     ILogger
 )
+from ..visualization.display_manager import VehicleState
 
 class SimulationEvent(Enum):
     """Possible simulation events"""
@@ -117,8 +118,35 @@ class SimulationManager(ISimulationManager):
                 control = self.vehicle_controller.get_control(self._vehicle_state)
                 vehicle.apply_control(control)
                 
+                # Convert vehicle state to display format
+                display_state = VehicleState(
+                    speed=self._vehicle_state['velocity'].length(),
+                    position=(
+                        self._vehicle_state['location'].x,
+                        self._vehicle_state['location'].y,
+                        self._vehicle_state['location'].z
+                    ),
+                    heading=self._vehicle_state['transform'].rotation.yaw,
+                    distance_to_target=0.0,  # This should be updated by the scenario
+                    controls={
+                        'throttle': control.throttle,
+                        'brake': control.brake,
+                        'steer': control.steer,
+                        'gear': control.gear,
+                        'hand_brake': control.hand_brake,
+                        'reverse': control.reverse,
+                        'manual_gear_shift': control.manual_gear_shift
+                    },
+                    speed_kmh=self._vehicle_state['velocity'].length() * 3.6,
+                    scenario_name=self._scenario.__class__.__name__
+                )
+                
+                # Update display with converted state
+                if self.display_manager:
+                    self.display_manager.render(display_state, self._scenario.get_target_position())
+                
                 # Log vehicle state (consider reducing logging frequency)
-                self.logger.log_vehicle_state(self._vehicle_state)
+                #self.logger.log_vehicle_state(self._vehicle_state)
                 
         except Exception as e:
             self.logger.log_error(f"Error in simulation loop: {str(e)}")
@@ -135,12 +163,50 @@ class SimulationManager(ISimulationManager):
     def cleanup(self) -> None:
         """Clean up simulation resources"""
         try:
-            self.stop()
-            self.sensor_manager.cleanup()
-            self.logger.log_info("Simulation cleanup completed")
+            # Stop the simulation loop if it's running
+            self._is_running = False
+            
+            # Clean up scenario if it exists
+            if self._scenario:
+                try:
+                    self._scenario.cleanup()
+                except Exception as e:
+                    if DEBUG_MODE:
+                        self.logger.debug(f"Error cleaning up scenario: {str(e)}")
+                self._scenario = None
+            
+            # First clean up sensors (they are attached to the vehicle)
+            if self.sensor_manager:
+                try:
+                    self.sensor_manager.cleanup()
+                    self.logger.info("Sensors cleaned up")
+                except Exception as e:
+                    if DEBUG_MODE:
+                        self.logger.debug(f"Error cleaning up sensors: {str(e)}")
+            
+            # Then clean up vehicle
+            vehicle = self.vehicle_controller.get_vehicle()
+            if vehicle:
+                try:
+                    if hasattr(vehicle, 'is_alive') and vehicle.is_alive:
+                        self.world_manager.destroy_actor(vehicle)
+                        self.logger.info("Vehicle destroyed")
+                except Exception as e:
+                    if DEBUG_MODE:
+                        self.logger.debug(f"Error destroying vehicle: {str(e)}")
+            
+            # Finally disconnect from world
+            try:
+                self.world_manager.disconnect()
+                self.logger.info("Simulation cleanup completed")
+            except Exception as e:
+                if DEBUG_MODE:
+                    self.logger.debug(f"Error disconnecting from world: {str(e)}")
+            
         except Exception as e:
-            self.logger.log_error(f"Error during cleanup: {str(e)}")
-            raise
+            self.logger.error("Error during cleanup", exc_info=e)
+            # Don't raise the exception, just log it
+            pass
 
     def check_events(self) -> tuple[SimulationEvent, str]:
         """Check for significant events based on current state"""
@@ -176,3 +242,53 @@ class SimulationManager(ISimulationManager):
         elapsed_time = time.time() - self.start_time
         return (elapsed_time < self.config['simulation_time'] 
                 and not self.is_finished) 
+
+    def initialize(self) -> bool:
+        """Initialize the simulation"""
+        try:
+            # Connect to CARLA server
+            if not self.world_manager.connect():
+                self.logger.error("Failed to connect to CARLA server")
+                return False
+                
+            # Load map
+            self.world_manager.load_map(self.map_name)
+            self.logger.info(f"Loaded map: {self.map_name}")
+            
+            # Spawn vehicle
+            if not self.spawn_vehicle():
+                self.logger.error("Failed to spawn vehicle")
+                return False
+                
+            self.logger.info("Simulation initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error initializing simulation", exc_info=e)
+            return False
+
+    def spawn_vehicle(self) -> bool:
+        """Spawn the ego vehicle"""
+        try:
+            # Get spawn points
+            spawn_points = self.world_manager.get_map().get_spawn_points()
+            if not spawn_points:
+                self.logger.error("No spawn points found in map")
+                return False
+                
+            # Spawn vehicle
+            self.vehicle = self.world_manager.spawn_actor(
+                self.vehicle_bp,
+                spawn_points[0]
+            )
+            
+            if not self.vehicle:
+                self.logger.error("Failed to spawn vehicle")
+                return False
+                
+            self.logger.info("Vehicle spawned successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error spawning vehicle", exc_info=e)
+            return False 
