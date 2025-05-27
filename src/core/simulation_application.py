@@ -272,20 +272,43 @@ class SimulationApplication:
     def cleanup(self) -> None:
         """Clean up simulation resources"""
         try:
+            if DEBUG_MODE:
+                print("[SimulationApplication] Starting cleanup process...")
+            
+            if DEBUG_MODE:
+                print("[SimulationApplication] Stopping simulation...")
             self.stop()
+            
             if self.current_scenario:
+                if DEBUG_MODE:
+                    print("[SimulationApplication] Cleaning up current scenario...")
                 self.current_scenario.cleanup()
+            
             if self.sensor_manager:
+                if DEBUG_MODE:
+                    print("[SimulationApplication] Cleaning up sensor manager...")
                 self.sensor_manager.cleanup()
+            
             if self.display_manager:
+                if DEBUG_MODE:
+                    print("[SimulationApplication] Cleaning up display manager...")
                 self.display_manager.cleanup()
+            
+            if DEBUG_MODE:
+                print("[SimulationApplication] Disconnecting from server...")
             self.connection.disconnect()
+            
             if self.logger:
                 self.logger.log_info("Simulation cleanup completed")
+                if DEBUG_MODE:
+                    print("[SimulationApplication] Cleanup completed successfully")
         except Exception as e:
             if DEBUG_MODE:
                 print(f"[SimulationApplication] Error during cleanup: {str(e)}")
-            raise 
+                print(f"[SimulationApplication] Error type: {type(e).__name__}")
+                import traceback
+                print(f"[SimulationApplication] Error traceback:\n{traceback.format_exc()}")
+            raise
 
     @property
     def logging_config(self):
