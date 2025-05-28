@@ -55,6 +55,7 @@ htmlcov/
 docs/_build/
 site/
 scenario_runner/
+*.ini
 # OS specific
 .DS_Store
 Thumbs.db 
