@@ -83,6 +83,14 @@ class AvoidObstacleConfig:
     obstacle_spacing: float
     completion_distance: float
     collision_threshold: float
+    max_simulation_time: float
+    waypoint_tolerance: float
+    min_waypoint_distance: float
+    max_waypoint_distance: float
+    num_waypoints: int
+    num_obstacles: int
+    min_obstacle_distance: float
+    obstacle_types: List[str]
 
 @dataclass
 class EmergencyBrakeConfig:

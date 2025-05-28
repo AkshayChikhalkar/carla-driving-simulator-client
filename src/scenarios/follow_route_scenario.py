@@ -13,17 +13,18 @@ class FollowRouteScenario(BaseScenario):
                  world_manager: IWorldManager,
                  vehicle_controller: IVehicleController,
                  logger: ILogger,
-                 num_waypoints: int = 5,
-                 waypoint_tolerance: float = 5.0,
-                 min_distance: float = 50.0,
-                 max_distance: float = 100.0):
+                 config: Dict[str, Any]):
         super().__init__(world_manager, vehicle_controller, logger)
-        self.num_waypoints = num_waypoints
+        
+        # Load configuration parameters
+        self.num_waypoints = config.get('num_waypoints', 5)
+        self.waypoint_tolerance = config.get('waypoint_tolerance', 5.0)  # meters
+        self.min_distance = config.get('min_distance', 50.0)  # meters
+        self.max_distance = config.get('max_distance', 100.0)  # meters
+        
+        # Scenario state
         self.waypoints: List[carla.Location] = []
         self.current_waypoint = 0
-        self.waypoint_tolerance = waypoint_tolerance  # meters
-        self.min_distance = min_distance  # meters
-        self.max_distance = max_distance  # meters
         # Pre-allocate location for distance calculations
         self._current_loc = carla.Location()
         self._name = "Follow Route"  # User-friendly display name

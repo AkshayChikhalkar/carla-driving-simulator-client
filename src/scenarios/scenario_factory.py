@@ -1,13 +1,18 @@
 from typing import Dict, Type
 from src.core.interfaces import IScenario, IWorldManager, IVehicleController, ILogger
 from src.scenarios.follow_route_scenario import FollowRouteScenario
+from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
+from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
+from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 class ScenarioFactory:
     """Factory class for creating scenario instances"""
     
     _scenarios: Dict[str, Type[IScenario]] = {
         'follow_route': FollowRouteScenario,
-        # Add more scenarios here as they are implemented
+        'avoid_obstacle': AvoidObstacleScenario,
+        'emergency_brake': EmergencyBrakeScenario,
+        'vehicle_cutting': VehicleCuttingScenario
     }
 
     @classmethod

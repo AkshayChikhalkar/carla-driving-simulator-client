@@ -137,6 +137,17 @@ scenarios:
     obstacle_spacing: 25.0  # meters
     completion_distance: 110.0  # meters
     collision_threshold: 1.0  # meters
+    max_simulation_time: 0.0  # 0 means unlimited time
+    waypoint_tolerance: 5.0  # meters
+    min_waypoint_distance: 30.0  # meters
+    max_waypoint_distance: 50.0  # meters
+    num_waypoints: 3  # number of waypoints to generate
+    num_obstacles: 10  # number of obstacles to spawn
+    min_obstacle_distance: 15.0  # minimum distance between obstacles
+    obstacle_types:  # list of possible obstacle types
+      - "static.prop.streetbarrier"
+      - "static.prop.container"
+      - "static.prop.constructioncone"
   emergency_brake:
     trigger_distance: 50.0  # meters
     target_speed: 40.0  # km/h

@@ -19,6 +19,9 @@ from src.control.controller import VehicleController, KeyboardController, Autopi
 from src.utils.logging import Logger
 from src.scenarios.scenario_registry import ScenarioRegistry
 from src.scenarios.follow_route_scenario import FollowRouteScenario
+from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
+from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
+from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -37,10 +40,51 @@ def register_scenarios():
         FollowRouteScenario,
         default_config={
             'num_waypoints': 5,
-            'waypoint_tolerance': 5.0
+            'waypoint_tolerance': 5.0,
+            'min_distance': 50.0,
+            'max_distance': 100.0
         }
     )
-    # Add more scenario registrations here
+    
+    # Register avoid obstacle scenario
+    ScenarioRegistry.register(
+        'avoid_obstacle',
+        AvoidObstacleScenario,
+        default_config={
+            'target_distance': 100.0,
+            'obstacle_spacing': 25.0,
+            'completion_distance': 110.0,
+            'collision_threshold': 1.0,
+            'max_simulation_time': 120.0,
+            'waypoint_tolerance': 5.0,
+            'min_waypoint_distance': 30.0,
+            'max_waypoint_distance': 50.0,
+            'num_waypoints': 3
+        }
+    )
+    
+    # Register emergency brake scenario
+    ScenarioRegistry.register(
+        'emergency_brake',
+        EmergencyBrakeScenario,
+        default_config={
+            'trigger_distance': 50.0,
+            'target_speed': 40.0,
+            'obstacle_type': "static.prop.streetbarrier"
+        }
+    )
+    
+    # Register vehicle cutting scenario
+    ScenarioRegistry.register(
+        'vehicle_cutting',
+        VehicleCuttingScenario,
+        default_config={
+            'target_speed': 40.0,
+            'spawn_distance': 20.0,
+            'lateral_offset': 5.0,
+            'cutting_vehicle_model': "vehicle.fuso.mitsubishi"
+        }
+    )
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """
@@ -69,7 +113,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         '--scenario',
         type=str,
         default=DEFAULT_CONFIG['scenario'],
-        choices=['follow_route', 'all'],
+        choices=['follow_route', 'avoid_obstacle', 'emergency_brake', 'vehicle_cutting', 'all'],
         help='Type of scenario to run'
     )
     

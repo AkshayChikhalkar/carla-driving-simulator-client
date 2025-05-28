@@ -46,7 +46,7 @@ class ScenarioRegistry:
             world_manager=world_manager,
             vehicle_controller=vehicle_controller,
             logger=logger,
-            **default_config  # Unpack config as keyword arguments
+            config=default_config  # Pass config as a single dictionary
         )
 
     @classmethod
