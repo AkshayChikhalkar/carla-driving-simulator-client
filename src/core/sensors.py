@@ -10,6 +10,11 @@ import math
 import numpy as np
 from dataclasses import dataclass
 from ..utils.config import SensorConfig
+from ..utils.logging import Logger
+import time
+
+# Get logger instance
+logger = Logger()
 
 @dataclass
 class SensorData:
@@ -66,6 +71,10 @@ class SensorSubject(ABC):
         for observer in self._observers:
             observer.on_sensor_data(data)
 
+    def detach_all(self) -> None:
+        """Detach all observers"""
+        self._observers.clear()
+
 class CollisionSensor(SensorSubject):
     """Collision detection sensor"""
     
@@ -114,7 +123,6 @@ class CollisionSensor(SensorSubject):
 
 class CameraSensor(SensorSubject):
     """Camera sensor"""
-    
     def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any]):
         super().__init__()
         self.vehicle = vehicle
@@ -123,35 +131,35 @@ class CameraSensor(SensorSubject):
         
         # Create camera sensor
         bp = world.get_blueprint_library().find('sensor.camera.rgb')
-        bp.set_attribute('image_size_x', str(config['width']))
-        bp.set_attribute('image_size_y', str(config['height']))
-        bp.set_attribute('fov', str(config['fov']))
+        if not bp:
+            return
+            
+        # Use third-person chase view values for camera position
+        bp.set_attribute('image_size_x', str(1280))
+        bp.set_attribute('image_size_y', str(720))
+        bp.set_attribute('fov', str(90))
         
-        # Spawn the camera
         spawn_point = carla.Transform(
-            carla.Location(x=config['x'], y=config['y'], z=config['z']),
-            carla.Rotation(pitch=-15)  # Tilt camera down slightly
+            carla.Location(x=-6.0, y=0.0, z=3.0),
+            carla.Rotation(pitch=-15)
         )
+        
         self.sensor = world.spawn_actor(bp, spawn_point, attach_to=vehicle)
         
-        # Weak reference to avoid circular reference
-        weak_self = weakref.ref(self)
-        self.sensor.listen(lambda image: CameraSensor._on_image(weak_self, image))
-    
+        if self.sensor is not None:
+            weak_self = weakref.ref(self)
+            self.sensor.listen(lambda image: CameraSensor._on_image(weak_self, image))
+
     @staticmethod
     def _on_image(weak_self: weakref.ReferenceType, image: carla.Image) -> None:
-        """Image callback"""
         self = weak_self()
         if not self:
             return
-        
+            
         try:
-            # Convert image to numpy array
             array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
             array = np.reshape(array, (image.height, image.width, 4))
-            array = array[:, :, :3]  # Remove alpha channel
-            
-            # Create camera data
+            array = array[:, :, :3]
             data = CameraData(
                 frame=image.frame,
                 timestamp=image.timestamp,
@@ -160,14 +168,11 @@ class CameraSensor(SensorSubject):
                 width=image.width,
                 height=image.height
             )
-            
-            # Notify observers
             self.notify(data)
-        except Exception as e:
-            print(f"Error processing camera image: {e}")
-    
+        except Exception:
+            pass
+
     def destroy(self) -> None:
-        """Clean up the sensor"""
         if self.sensor is not None:
             self.sensor.destroy()
 
@@ -215,58 +220,52 @@ class GNSSSensor(SensorSubject):
 
 class SensorManager:
     """Manages all vehicle sensors"""
-    
     def __init__(self, vehicle: carla.Vehicle, config: SensorConfig):
-        """Initialize sensor manager with vehicle and configuration"""
         self.vehicle = vehicle
         self.config = config
         self.sensors: Dict[str, SensorSubject] = {}
-        
-        print("Initializing sensor manager...")
-        
-        # Initialize collision sensor
         if config.collision.enabled:
-            print("Setting up collision sensor...")
-            self.sensors['collision'] = CollisionSensor(vehicle, {})
-        
-        # Initialize camera sensor
+            self.sensors['collision'] = CollisionSensor(vehicle, {'enabled': True})
         if config.camera.enabled:
-            print("Setting up camera sensor...")
-            camera_config = {
-                'width': config.camera.width,
-                'height': config.camera.height,
-                'fov': config.camera.fov,
-                'x': config.camera.x,
-                'y': config.camera.y,
-                'z': config.camera.z
-            }
-            self.sensors['camera'] = CameraSensor(vehicle, camera_config)
-            print("Camera sensor setup complete")
-        
-        # Initialize GNSS sensor
+            self.sensors['camera'] = CameraSensor(vehicle, {'enabled': True})
         if config.gnss.enabled:
-            print("Setting up GNSS sensor...")
-            self.sensors['gnss'] = GNSSSensor(vehicle, {})
-    
+            self.sensors['gnss'] = GNSSSensor(vehicle, {'enabled': True})
+
     def add_observer(self, sensor_type: str, observer: SensorObserver) -> None:
-        """Add an observer to a specific sensor"""
         if sensor_type in self.sensors:
-            print(f"Adding observer to {sensor_type} sensor")
             self.sensors[sensor_type].attach(observer)
-        else:
-            print(f"Warning: Attempted to add observer to non-existent sensor: {sensor_type}")
-    
     def remove_observer(self, sensor_type: str, observer: SensorObserver) -> None:
-        """Remove an observer from a specific sensor"""
         if sensor_type in self.sensors:
             self.sensors[sensor_type].detach(observer)
-    
     def get_sensor(self, sensor_type: str) -> Optional[SensorSubject]:
-        """Get a specific sensor by type"""
         return self.sensors.get(sensor_type)
-    
-    def destroy(self) -> None:
+    def get_sensor_data(self) -> Dict[str, Any]:
+        return {}
+    def cleanup(self) -> None:
         """Clean up all sensors"""
-        for sensor in self.sensors.values():
-            sensor.destroy()
-        self.sensors.clear() 
+        try:
+            logger.debug("[SensorManager] Starting sensor cleanup...")
+            
+            # First detach all observers
+            for sensor in self.sensors.values():
+                if sensor:
+                    sensor.detach_all()
+            
+            # Then destroy each sensor
+            for sensor_type, sensor in self.sensors.items():
+                if sensor:
+                    try:
+                        logger.debug(f"[SensorManager] Destroying sensor: {sensor_type}")
+                        sensor.destroy()
+                        time.sleep(0.1)  # Small delay between sensor destruction
+                    except Exception as e:
+                        logger.error(f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}")
+            
+            # Clear the sensors dictionary
+            self.sensors.clear()
+            
+            logger.debug("[SensorManager] Sensor cleanup completed")
+                
+        except Exception as e:
+            logger.error(f"[SensorManager] Error during sensor cleanup: {str(e)}")
+            raise 

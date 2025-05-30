@@ -55,7 +55,7 @@ class WorldConfig:
     traffic: TrafficConfig
     fixed_delta_seconds: float = 0.1
     target_distance: float = 500.0
-    num_vehicles: int = 20
+    num_vehicles: int = 5
     enable_collision: bool = False
     synchronous_mode: bool = True
 
@@ -83,6 +83,14 @@ class AvoidObstacleConfig:
     obstacle_spacing: float
     completion_distance: float
     collision_threshold: float
+    max_simulation_time: float
+    waypoint_tolerance: float
+    min_waypoint_distance: float
+    max_waypoint_distance: float
+    num_waypoints: int
+    num_obstacles: int
+    min_obstacle_distance: float
+    obstacle_types: List[str]
 
 @dataclass
 class EmergencyBrakeConfig:
@@ -94,10 +102,19 @@ class EmergencyBrakeConfig:
 @dataclass
 class VehicleCuttingConfig:
     """Vehicle cutting scenario configuration"""
-    target_speed: float
-    spawn_distance: float
-    lateral_offset: float
+    target_distance: float
+    cutting_distance: float
+    completion_distance: float
+    collision_threshold: float
+    max_simulation_time: float
+    waypoint_tolerance: float
+    min_waypoint_distance: float
+    max_waypoint_distance: float
+    num_waypoints: int
     cutting_vehicle_model: str
+    normal_speed: float
+    cutting_speed: float
+    cutting_trigger_distance: float
 
 @dataclass
 class ScenarioConfig:
@@ -248,6 +265,16 @@ class ControllerConfig:
     keyboard: KeyboardConfig
 
 @dataclass
+class VehicleConfig:
+    """Vehicle configuration parameters"""
+    model: str
+    mass: float
+    drag_coefficient: float
+    max_rpm: float
+    moi: float
+    center_of_mass: List[float]
+
+@dataclass
 class Config:
     """Main configuration class"""
     server: ServerConfig
@@ -257,7 +284,7 @@ class Config:
     display: DisplayConfig
     sensors: SensorConfig
     controller: ControllerConfig
-    vehicle_model: str
+    vehicle: VehicleConfig
     scenarios: ScenarioConfig
 
 def load_config(config_path: str) -> Config:
@@ -288,6 +315,6 @@ def load_config(config_path: str) -> Config:
             brake_speed=config_dict['controller']['brake_speed'],
             keyboard=KeyboardConfig(**config_dict['controller']['keyboard'])
         ),
-        vehicle_model=config_dict['vehicle_model'],
+        vehicle=VehicleConfig(**config_dict['vehicle']),
         scenarios=ScenarioConfig(**config_dict['scenarios'])
     ) 
