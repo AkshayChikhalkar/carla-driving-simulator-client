@@ -14,26 +14,23 @@ from src.core.sensors import SensorManager
 from src.control.controller import VehicleController, KeyboardController, AutopilotController
 from src.utils.logging import Logger
 from src.scenarios.scenario_registry import ScenarioRegistry
-
-# Default configuration values
-DEFAULT_CONFIG = {
-    'scenario': 'follow_route',
-    'debug': False
-}
-
-# Default config file path
-DEFAULT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config', 'simulation.yaml')
+from src.utils.paths import get_config_path
+from src.utils.default_config import SIMULATION_CONFIG
+from src.utils.config import load_config
 
 class SimulationRunner:
     """Class to handle simulation execution and management"""
     
-    def __init__(self, config_file: str = DEFAULT_CONFIG_FILE):
-        self.config_file = config_file
+    def __init__(self, config_file: str = None):
+        self.config_file = config_file or get_config_path()
+        self.config = load_config(self.config_file)
         self.logger = Logger()
         
     def setup_logger(self, debug: bool = False) -> None:
         """Setup logger with debug mode"""
-        self.logger.set_debug_mode(debug)
+        # Use debug from config if available, otherwise use provided value
+        debug_mode = getattr(self.config, 'debug', debug)
+        self.logger.set_debug_mode(debug_mode)
         
     def register_scenarios(self) -> None:
         """Register all available scenarios"""
@@ -64,17 +61,18 @@ class SimulationRunner:
         )
         
         # Create controller based on config type
-        self.logger.debug(f"Creating controller with type: {app.controller_config.type}")
+        controller_type = getattr(app.controller_config, 'type', 'autopilot')
+        self.logger.debug(f"Creating controller with type: {controller_type}")
         vehicle_controller = VehicleController(app.controller_config)
         
-        if app.controller_config.type == 'keyboard':
+        if controller_type == 'keyboard':
             self.logger.debug("Initializing keyboard controller")
             controller = KeyboardController(app.controller_config)
-        elif app.controller_config.type == 'autopilot':
+        elif controller_type == 'autopilot':
             self.logger.debug("Initializing autopilot controller")
             controller = AutopilotController(vehicle, app.controller_config, app.connection.client)
         else:
-            raise ValueError(f"Unsupported controller type: {app.controller_config.type}")
+            raise ValueError(f"Unsupported controller type: {controller_type}")
             
         self.logger.debug(f"Setting controller strategy: {type(controller).__name__}")
         vehicle_controller.set_strategy(controller)
@@ -165,11 +163,14 @@ class SimulationRunner:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
         
-        # Add arguments with defaults from DEFAULT_CONFIG
+        # Get debug setting from config or use default
+        debug_default = getattr(self.config, 'debug', SIMULATION_CONFIG['debug'])
+        
+        # Add arguments with defaults from config
         parser.add_argument(
             '--debug',
             action='store_true',
-            default=DEFAULT_CONFIG['debug'],
+            default=debug_default,
             help='Enable debug mode for detailed logging'
         )
         
@@ -177,10 +178,13 @@ class SimulationRunner:
         self.register_scenarios()
         available_scenarios = ScenarioRegistry.get_available_scenarios()
         
+        # Get default scenario from config or use default
+        default_scenario = getattr(self.config, 'scenario', SIMULATION_CONFIG['scenario'])
+        
         parser.add_argument(
             '--scenario',
             type=str,
-            default=DEFAULT_CONFIG['scenario'],
+            default=default_scenario,
             help='Type of scenario to run. Can be "all" or comma-separated list of scenarios: ' + ', '.join(available_scenarios)
         )
         

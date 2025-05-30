@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from ..core.sensors import SensorObserver, CameraData, SensorData
 from ..utils.config import DisplayConfig
+from ..utils.default_config import DISPLAY_CONFIG
 import time
 import os
 import sys
@@ -215,6 +216,11 @@ class DisplayManager:
         """Initialize display manager"""
         self.config = config
         
+        # Get display dimensions from config or use defaults
+        self.width = getattr(config, 'width', DISPLAY_CONFIG['width'])
+        self.height = getattr(config, 'height', DISPLAY_CONFIG['height'])
+        self.fps = getattr(config, 'fps', DISPLAY_CONFIG['fps'])
+        
         # Initialize pygame display
         pygame.init()
         pygame.event.set_allowed([
@@ -236,12 +242,12 @@ class DisplayManager:
         
         # Create resizable window with standard controls
         self.display = pygame.display.set_mode(
-            (config.width, config.height),
+            (self.width, self.height),
             pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
         )
         pygame.display.set_caption(f"CARLA Simulator - Instance {window_count + 1}")
         
-        # Initialize components
+        # Initialize components with config
         self.hud = HUD(config)
         self.minimap = Minimap(config)
         self.camera_view = CameraView(config)
@@ -250,7 +256,7 @@ class DisplayManager:
         self.minimized = False
         self.focused = True
         self.should_quit = False
-        self.current_size = (config.width, config.height)
+        self.current_size = (self.width, self.height)
         self.last_event_time = time.time()
         self.force_exit = False
         self.frame_count = 0
@@ -319,7 +325,7 @@ class DisplayManager:
             
             # Update frame count and clock
             self.frame_count += 1
-            self.clock.tick(60)  # Cap at 60 FPS
+            self.clock.tick(self.fps)  # Use configured FPS
             
             return True
         except Exception as e:

@@ -10,7 +10,7 @@ from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
 from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
 from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 from src.utils.config import Config, load_config
-import os
+from src.utils.paths import get_config_path
 
 class ScenarioRegistry:
     """Registry for managing available scenarios and their configurations."""
@@ -75,8 +75,7 @@ class ScenarioRegistry:
         """
         if not cls._config:
             # Load config if not already loaded
-            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config', 'simulation.yaml')
-            cls._config = load_config(config_path)
+            cls._config = load_config(get_config_path())
             
         # Get the scenario config from the Config object
         scenario_config = getattr(cls._config.scenarios, scenario_type, None)

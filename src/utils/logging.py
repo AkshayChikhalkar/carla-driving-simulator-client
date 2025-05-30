@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Optional, Any, Dict, TextIO
 from pathlib import Path
 from .settings import DEBUG_MODE
+from .default_config import SIMULATION_CONFIG
 
 @dataclass
 class SimulationData:
@@ -27,92 +28,109 @@ class SimulationData:
     event: str
     event_details: str
 
-# Default configuration
-DEFAULT_CONFIG = {
-    'log_dir': 'logs',
-    'log_level': 'INFO',
-    'log_to_file': True,
-    'log_to_console': True
-}
-
 class Logger:
-    """Logger class for the CARLA Driving Simulator"""
+    """Manages logging configuration and setup"""
     
-    _instance = None
-    _initialized = False
+    _instance: Optional['Logger'] = None
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(Logger, cls).__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
-        """Initialize the logger if not already initialized"""
-        if not self._initialized:
-            self._setup_logger()
-            self._initialized = True
-    
-    def _setup_logger(self):
-        """Setup the logger with default configuration"""
-        # Get project root directory
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if self._initialized:
+            return
+            
+        # Get configuration values with fallbacks
+        self.log_level = getattr(SIMULATION_CONFIG, 'log_level', 'INFO')
+        self.log_dir = getattr(SIMULATION_CONFIG, 'log_dir', 'logs')
+        self.log_format = getattr(SIMULATION_CONFIG, 'log_format', 
+            '%(asctime)s - %(levelname)s - %(message)s')
+        self.log_date_format = getattr(SIMULATION_CONFIG, 'log_date_format', 
+            '%Y-%m-%d %H:%M:%S')
+        self.log_to_file = getattr(SIMULATION_CONFIG, 'log_to_file', True)
+        self.log_to_console = getattr(SIMULATION_CONFIG, 'log_to_console', True)
         
-        # Setup log directory
-        log_dir = os.path.join(project_root, DEFAULT_CONFIG['log_dir'])
-        os.makedirs(log_dir, exist_ok=True)
+        # Initialize CSV logging attributes
+        self.csv_file = None
+        self.csv_writer = None
         
-        # Create logger
-        self.logger = logging.getLogger('carla_simulator')
-        self.logger.setLevel('DEBUG' if DEBUG_MODE else 'INFO')
+        self._setup_logging()
+        self._initialized = True
         
-        # Create formatters
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s'
-        )
-        console_formatter = logging.Formatter(
-            '%(levelname)s: %(message)s'
-        )
-        
-        # Add file handler if enabled
-        if DEFAULT_CONFIG['log_to_file']:
-            # Create daily log file
-            current_date = datetime.now().strftime("%Y%m%d")
-            log_file = os.path.join(
-                log_dir,
-                f'simulation_{current_date}.log'
+    def _setup_logging(self) -> None:
+        """Setup logging configuration"""
+        try:
+            # Create log directory if it doesn't exist
+            os.makedirs(self.log_dir, exist_ok=True)
+            
+            # Generate log filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_file = os.path.join(self.log_dir, f'simulation_{timestamp}.log')
+            
+            # Configure root logger
+            handlers = []
+            
+            if self.log_to_file:
+                handlers.append(logging.FileHandler(log_file))
+                
+            if self.log_to_console:
+                handlers.append(logging.StreamHandler())
+                
+            # Configure logging format
+            formatter = logging.Formatter(
+                fmt=self.log_format,
+                datefmt=self.log_date_format
             )
             
-            # Check if file exists and append if it does
-            file_handler = logging.FileHandler(log_file, mode='a')
-            file_handler.setFormatter(file_formatter)
-            self.logger.addHandler(file_handler)
+            # Apply formatter to all handlers
+            for handler in handlers:
+                handler.setFormatter(formatter)
+                
+            # Configure root logger
+            logging.basicConfig(
+                level=self.log_level,
+                handlers=handlers
+            )
             
-            # Setup CSV logging with daily file
-            csv_file = log_file.replace('.log', '.csv')
-            # Check if CSV file exists to determine if we need to write header
-            file_exists = os.path.exists(csv_file)
-            self.csv_file = open(csv_file, 'a', newline='')
-            self.csv_writer = csv.writer(self.csv_file)
+            # Create logger instance
+            self.logger = logging.getLogger(__name__)
+            self.logger.info("Logging system initialized")
             
-            # Write header only if file is new
-            if not file_exists:
+            # Setup CSV logging if enabled
+            if self.log_to_file:
+                csv_file = log_file.replace('.log', '.csv')
+                self.csv_file = open(csv_file, 'a', newline='')
+                self.csv_writer = csv.writer(self.csv_file)
                 self._write_csv_header()
-        
-        # Add console handler if enabled
-        if DEFAULT_CONFIG['log_to_console']:
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(console_formatter)
-            self.logger.addHandler(console_handler)
             
-        # Write header to operations log only if it's a new file
-        if not os.path.exists(log_file) or os.path.getsize(log_file) == 0:
-            self.logger.info("=== CARLA Simulation Operational Log ===")
-            self.logger.info(f"Simulation started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            self.logger.info("=" * 50)
-            self.logger.info("")  # Empty line for readability
+        except Exception as e:
+            print(f"Error setting up logging: {str(e)}")
+            raise
+            
+    def get_logger(self, name: str) -> logging.Logger:
+        """Get a logger instance for the specified name"""
+        logger = logging.getLogger(name)
+        # Remove the src.utils.logging prefix from the logger name
+        logger.name = name.split('.')[-1]
+        return logger
+        
+    def set_level(self, level: str) -> None:
+        """Set the logging level"""
+        try:
+            logging.getLogger().setLevel(level)
+            self.logger.info(f"Logging level set to {level}")
+        except Exception as e:
+            self.logger.error(f"Error setting log level: {str(e)}")
+            raise
     
     def _write_csv_header(self) -> None:
         """Write CSV header"""
+        if not self.csv_writer:
+            return
+            
         header = [
             'elapsed_time', 'speed', 'position_x', 'position_y', 'position_z',
             'throttle', 'brake', 'steer', 'target_distance', 'target_heading',
@@ -157,37 +175,43 @@ class Logger:
             
     def log_data(self, data: SimulationData) -> None:
         """Log simulation data to CSV file"""
-        self.csv_writer.writerow([
-            f"{data.elapsed_time:.2f}",
-            f"{data.speed * 3.6:.2f}",  # Convert m/s to km/h
-            f"{data.position[0]:.2f}",
-            f"{data.position[1]:.2f}",
-            f"{data.position[2]:.2f}",
-            f"{data.controls['throttle']:.2f}",
-            f"{data.controls['brake']:.2f}",
-            f"{data.controls['steer']:.2f}",
-            f"{data.target_info['distance']:.2f}",
-            f"{data.target_info['heading']:.2f}",
-            f"{data.vehicle_state['heading']:.2f}",
-            f"{data.target_info['heading_diff']:.2f}",
-            f"{data.vehicle_state['acceleration']:.2f}",
-            f"{data.vehicle_state['angular_velocity']:.2f}",
-            data.controls['gear'],
-            1 if data.controls['hand_brake'] else 0,
-            1 if data.controls['reverse'] else 0,
-            1 if data.controls['manual_gear_shift'] else 0,
-            f"{data.vehicle_state['collision_intensity']:.2f}",
-            f"{data.weather['cloudiness']:.2f}",
-            f"{data.weather['precipitation']:.2f}",
-            data.traffic_count,
-            f"{data.fps:.1f}",
-            data.event,
-            data.event_details,
-            f"{data.vehicle_state['rotation'][0]:.2f}",
-            f"{data.vehicle_state['rotation'][1]:.2f}",
-            f"{data.vehicle_state['rotation'][2]:.2f}"
-        ])
-        self.csv_file.flush()
+        if not self.csv_writer:
+            return
+            
+        try:
+            self.csv_writer.writerow([
+                f"{data.elapsed_time:.2f}",
+                f"{data.speed * 3.6:.2f}",  # Convert m/s to km/h
+                f"{data.position[0]:.2f}",
+                f"{data.position[1]:.2f}",
+                f"{data.position[2]:.2f}",
+                f"{data.controls['throttle']:.2f}",
+                f"{data.controls['brake']:.2f}",
+                f"{data.controls['steer']:.2f}",
+                f"{data.target_info['distance']:.2f}",
+                f"{data.target_info['heading']:.2f}",
+                f"{data.vehicle_state['heading']:.2f}",
+                f"{data.target_info['heading_diff']:.2f}",
+                f"{data.vehicle_state['acceleration']:.2f}",
+                f"{data.vehicle_state['angular_velocity']:.2f}",
+                data.controls['gear'],
+                1 if data.controls['hand_brake'] else 0,
+                1 if data.controls['reverse'] else 0,
+                1 if data.controls['manual_gear_shift'] else 0,
+                f"{data.vehicle_state['collision_intensity']:.2f}",
+                f"{data.weather['cloudiness']:.2f}",
+                f"{data.weather['precipitation']:.2f}",
+                data.traffic_count,
+                f"{data.fps:.1f}",
+                data.event,
+                data.event_details,
+                f"{data.vehicle_state['rotation'][0]:.2f}",
+                f"{data.vehicle_state['rotation'][1]:.2f}",
+                f"{data.vehicle_state['rotation'][2]:.2f}"
+            ])
+            self.csv_file.flush()
+        except Exception as e:
+            self.logger.error(f"Error writing to CSV: {str(e)}")
     
     def log_event(self, elapsed_time: float, event: str, details: str) -> None:
         """Log significant events to operations log"""
@@ -197,5 +221,8 @@ class Logger:
         """Close all log files"""
         self.logger.info("")  # Empty line for readability
         self.logger.info(f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        if hasattr(self, 'csv_file'):
-            self.csv_file.close() 
+        if self.csv_file:
+            try:
+                self.csv_file.close()
+            except Exception as e:
+                self.logger.error(f"Error closing CSV file: {str(e)}") 
