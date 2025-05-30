@@ -124,7 +124,7 @@ class EmergencyBrakeScenario(BaseScenario):
                     self._set_completed(success=False)
                     return
                     
-                self.logger.info(f"Spawned obstacle at location {obstacle_waypoint.transform.location}")
+                self.logger.debug(f"Spawned obstacle at location {obstacle_waypoint.transform.location}")
             except Exception as e:
                 self.logger.error(f"Error spawning obstacle: {str(e)}")
                 self._set_completed(success=False)

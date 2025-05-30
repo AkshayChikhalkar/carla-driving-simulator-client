@@ -290,7 +290,7 @@ class AvoidObstacleScenario(BaseScenario):
                         
                         if obstacle:
                             self.obstacles.append(obstacle)
-                            self.logger.info(f"Spawned obstacle {j+1} between waypoints {i} and {i+1} at location {obstacle_waypoint.transform.location}")
+                            self.logger.debug(f"Spawned obstacle {j+1} between waypoints {i} and {i+1} at location {obstacle_waypoint.transform.location}")
                         else:
                             self.logger.error(f"Failed to spawn obstacle {j+1} between waypoints {i} and {i+1}")
                     except Exception as e:
@@ -349,7 +349,7 @@ class AvoidObstacleScenario(BaseScenario):
             
             # Check if we're within road boundaries
             if not self.check_road_boundaries(self._current_loc):
-                self.logger.warning("Vehicle too close to road boundary!")
+                #self.logger.warning("Vehicle too close to road boundary!")
                 self.apply_emergency_brake()
                 return
             

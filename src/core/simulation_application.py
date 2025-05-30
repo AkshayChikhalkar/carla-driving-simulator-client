@@ -275,8 +275,12 @@ class SimulationApplication:
                 self.logger.debug("Stopping simulation...")
             self.stop()
             
-            # Clean up scenario first
+            # Store scenario completion status before cleanup
+            scenario_completed = False
+            scenario_success = False
             if self.current_scenario:
+                scenario_completed = self.current_scenario.is_completed()
+                scenario_success = self.current_scenario.is_successful()
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up current scenario...")
                 self.current_scenario.cleanup()
@@ -315,13 +319,12 @@ class SimulationApplication:
             import gc
             gc.collect()
             
-            if self.logger:
-                self.logger.info("Simulation cleanup completed")
-                if DEBUG_MODE:
-                    self.logger.debug("Cleanup completed successfully")
+            # Return completion status
+            return scenario_completed, scenario_success
+            
         except Exception as e:
-            self.logger.error("Error during cleanup", exc_info=e)
-            raise
+            self.logger.error(f"Error in cleanup: {str(e)}")
+            return False, False
 
     @property
     def logging_config(self):

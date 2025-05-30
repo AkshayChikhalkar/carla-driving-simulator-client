@@ -120,11 +120,10 @@ class SimulationRunner:
                 # Run simulation
                 app.run()
                 
-                # Get scenario result
-                if hasattr(app, 'current_scenario'):
-                    scenario_obj = app.current_scenario
-                    if scenario_obj.is_completed():
-                        success = scenario_obj.is_successful()
+                # Get scenario result from cleanup
+                if hasattr(app, 'cleanup'):
+                    completed, success = app.cleanup()
+                    if completed:
                         message = "Scenario completed successfully" if success else "Scenario failed to meet success criteria"
                         return success, message
                     else:
@@ -132,9 +131,6 @@ class SimulationRunner:
                 return True, "Scenario completed"
                 
             finally:
-                # Clean up after scenario
-                if hasattr(app, 'cleanup'):
-                    app.cleanup()
                 # Disconnect from CARLA server
                 if hasattr(app, 'connection') and app.connection:
                     app.connection.disconnect()
