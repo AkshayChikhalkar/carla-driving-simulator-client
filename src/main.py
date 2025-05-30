@@ -24,10 +24,7 @@ from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
 from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 # Default configuration values
-DEFAULT_CONFIG = {
-    'scenario': 'follow_route',
-    'debug': False
-}
+DEFAULT_CONFIG = {"scenario": "vehicle_cutting", "debug": False}
 
 # Default config file path
 DEFAULT_CONFIG_FILE = os.path.join(project_root, 'config', 'simulation.yaml')
@@ -79,10 +76,19 @@ def register_scenarios():
         'vehicle_cutting',
         VehicleCuttingScenario,
         default_config={
-            'target_speed': 40.0,
-            'spawn_distance': 20.0,
-            'lateral_offset': 5.0,
-            'cutting_vehicle_model': "vehicle.fuso.mitsubishi"
+            'target_distance': 100.0,
+            'cutting_distance': 30.0,
+            'completion_distance': 110.0,
+            'collision_threshold': 1.0,
+            'max_simulation_time': 120.0,
+            'waypoint_tolerance': 5.0,
+            'min_waypoint_distance': 30.0,
+            'max_waypoint_distance': 50.0,
+            'num_waypoints': 3,
+            'cutting_vehicle_model': "vehicle.fuso.mitsubishi",
+            'normal_speed': 30.0,
+            'cutting_speed': 40.0,
+            'cutting_trigger_distance': 20.0
         }
     )
 
