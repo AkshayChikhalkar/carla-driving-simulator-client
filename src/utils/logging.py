@@ -66,15 +66,18 @@ class Logger:
             # Create log directory if it doesn't exist
             os.makedirs(self.log_dir, exist_ok=True)
             
-            # Generate log filename with timestamp
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            log_file = os.path.join(self.log_dir, f'simulation_{timestamp}.log')
+            # Generate log filename with current date
+            current_date = datetime.now().strftime('%Y%m%d')
+            log_file = os.path.join(self.log_dir, f'simulation_{current_date}.log')
             
             # Configure root logger
             handlers = []
             
             if self.log_to_file:
-                handlers.append(logging.FileHandler(log_file))
+                # Use buffered file handler with 8KB buffer
+                file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+                file_handler.setLevel(self.log_level)
+                handlers.append(file_handler)
                 
             if self.log_to_console:
                 handlers.append(logging.StreamHandler())
@@ -102,9 +105,13 @@ class Logger:
             # Setup CSV logging if enabled
             if self.log_to_file:
                 csv_file = log_file.replace('.log', '.csv')
-                self.csv_file = open(csv_file, 'a', newline='')
+                # Check if CSV file exists to determine if we need to write header
+                file_exists = os.path.exists(csv_file)
+                # Use buffered I/O with 8KB buffer
+                self.csv_file = open(csv_file, 'a', newline='', buffering=8192)
                 self.csv_writer = csv.writer(self.csv_file)
-                self._write_csv_header()
+                if not file_exists:
+                    self._write_csv_header()
             
         except Exception as e:
             print(f"Error setting up logging: {str(e)}")
@@ -209,7 +216,12 @@ class Logger:
                 f"{data.vehicle_state['rotation'][1]:.2f}",
                 f"{data.vehicle_state['rotation'][2]:.2f}"
             ])
-            self.csv_file.flush()
+            # Only flush periodically (every 100 rows) to reduce I/O operations
+            if not hasattr(self, '_row_count'):
+                self._row_count = 0
+            self._row_count += 1
+            if self._row_count % 100 == 0:
+                self.csv_file.flush()
         except Exception as e:
             self.logger.error(f"Error writing to CSV: {str(e)}")
     
