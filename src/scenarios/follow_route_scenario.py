@@ -60,7 +60,7 @@ class FollowRouteScenario(BaseScenario):
             if waypoint:
                 self.waypoints.append(waypoint.transform.location)
                 current_point = waypoint.transform.location
-                self.logger.info(f"Added waypoint at {current_point}")
+                self.logger.debug(f"Added waypoint at {current_point}")
 
         if not self.waypoints:
             self.logger.error("Failed to generate valid waypoints")
@@ -101,18 +101,12 @@ class FollowRouteScenario(BaseScenario):
     def _generate_waypoints(self) -> None:
         """Generate waypoints for the route"""
         try:
-            # Get current map
-            world = self.world_manager.get_world()
-            map = world.get_map()
+            # Get map and spawn point
+            map = self.world_manager.get_map()
+            spawn_point = self.world_manager.get_random_spawn_point()
+            current_point = spawn_point
             
-            # Get spawn points
-            spawn_points = map.get_spawn_points()
-            if not spawn_points:
-                self.logger.error("No spawn points found in map")
-                return
-                
             # Generate waypoints
-            current_point = spawn_points[0]
             self.waypoints = []
             
             for _ in range(self.config.num_waypoints):
@@ -120,20 +114,20 @@ class FollowRouteScenario(BaseScenario):
                 waypoint = map.get_waypoint(current_point.location)
                 if not waypoint:
                     self.logger.error("Failed to get waypoint")
-                    break
+                    continue
                     
                 # Add to waypoints list
                 self.waypoints.append(waypoint)
-                self.logger.info(f"Added waypoint at {current_point}")
+                self.logger.debug(f"Added waypoint at {current_point}")
                 
-                # Move to next point
+                # Update current point
                 current_point = waypoint.transform
                 
             if not self.waypoints:
                 self.logger.error("Failed to generate valid waypoints")
                 return
                 
-            self.logger.info(f"Follow route scenario started with {len(self.waypoints)} waypoints")
+            self.logger.debug(f"Generated {len(self.waypoints)} waypoints")
             
         except Exception as e:
             self.logger.error("Error generating waypoints", exc_info=e) 

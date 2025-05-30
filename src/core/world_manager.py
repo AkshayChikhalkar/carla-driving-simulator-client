@@ -137,7 +137,7 @@ class WorldManager(IWorldManager):
             try:
                 actor = self.world.spawn_actor(blueprint, spawn_point)
                 if actor and actor.is_alive:
-                    self.logger.info(f"Actor spawned successfully on attempt {attempt + 1}")
+                    self.logger.info(f"{actor.type_id} spawned successfully")
                     return actor
                 elif actor:
                     actor.destroy()
@@ -185,19 +185,18 @@ class WorldManager(IWorldManager):
                         try:
                             vehicle_bp.set_attribute('engine_power', str(self.vehicle_max_rpm * 0.7))
                         except Exception as e:
-                            self.logger.debug(f"Could not set engine_power: {str(e)}")
+                            self.logger.debug(f"Could not set engine_power for {self.vehicle.type_id}: {str(e)}")
                             
                         try:
                             vehicle_bp.set_attribute('engine_torque', str(self.vehicle_mass * 0.5))
                         except Exception as e:
-                            self.logger.debug(f"Could not set engine_torque: {str(e)}")
+                            self.logger.debug(f"Could not set engine_torque for {self.vehicle.type_id}: {str(e)}")
                             
                         try:
                             vehicle_bp.set_attribute('engine_max_rpm', str(self.vehicle_max_rpm))
                         except Exception as e:
-                            self.logger.debug(f"Could not set engine_max_rpm: {str(e)}")
+                            self.logger.debug(f"Could not set engine_max_rpm for {self.vehicle.type_id}: {str(e)}")
                 
-                self.logger.info(f"Vehicle spawned successfully: {self.vehicle.id}")
                 return self.vehicle
                 
             except Exception as e:
@@ -293,6 +292,9 @@ class WorldManager(IWorldManager):
             carla.Location(target_x, target_y, spawn_point.location.z)
         )
         
+        # Log waypoint details in debug mode
+        self.logger.debug(f"Generated waypoint at location: {waypoint.transform.location}")
+        
         # Spawn target markers
         target_actors = []
         for i in range(15):
@@ -307,6 +309,7 @@ class WorldManager(IWorldManager):
             target = self.spawn_actor(target_bp, target_transform)
             if target:
                 target_actors.append(target)
+                self.logger.debug(f"Spawned target marker at {target_loc}")
         
         self.target = TargetPoint(
             location=waypoint.transform.location,
@@ -332,10 +335,10 @@ class WorldManager(IWorldManager):
                 try:
                     if actor.is_alive:
                         actor.destroy()
-                        self.logger.info(f"Destroyed {actor_type} {actor.id}")
+                        self.logger.info(f"Destroyed {actor.type_id}")
                         return True
                 except Exception as e:
-                    self.logger.error(f"Error destroying {actor_type} {actor.id if actor else 'unknown'}: {str(e)}")
+                    self.logger.error(f"Error destroying {actor.type_id if actor else 'unknown'}: {str(e)}")
                     return False
             
             # Only destroy vehicles and dynamic actors, not map actors

@@ -58,26 +58,8 @@ class EmergencyBrakeScenario(BaseScenario):
             current_point = self.vehicle.get_location()
             
             # Generate waypoints
-            for _ in range(self.num_waypoints):
-                # Get random point between min and max distance away
-                distance = random.uniform(self.min_waypoint_distance, self.max_waypoint_distance)
-                angle = random.uniform(0, 2 * math.pi)
-                
-                # Calculate next point
-                next_x = current_point.x + distance * math.cos(angle)
-                next_y = current_point.y + distance * math.sin(angle)
-                
-                # Get valid waypoint on road
-                waypoint = self.world_manager.get_map().get_waypoint(
-                    carla.Location(x=next_x, y=next_y, z=current_point.z),
-                    project_to_road=True
-                )
-                
-                if waypoint:
-                    self.waypoints.append(waypoint.transform.location)
-                    current_point = waypoint.transform.location
-                    self.logger.info(f"Added waypoint at {current_point}")
-
+            self._generate_waypoints()
+            
             if not self.waypoints:
                 self.logger.error("Failed to generate valid waypoints")
                 self._set_completed(success=False)
@@ -159,6 +141,51 @@ class EmergencyBrakeScenario(BaseScenario):
             self.logger.error(f"Error in scenario setup: {str(e)}")
             self.cleanup()
             raise
+
+    def _generate_waypoints(self) -> None:
+        """Generate waypoints for the route"""
+        try:
+            # Get current map
+            world = self.world_manager.get_world()
+            map = world.get_map()
+            
+            # Get spawn points
+            spawn_points = map.get_spawn_points()
+            if not spawn_points:
+                self.logger.error("No spawn points found in map")
+                return
+                
+            # Generate waypoints
+            current_point = spawn_points[0]
+            self.waypoints = []
+            
+            for _ in range(self.num_waypoints):
+                # Calculate next point
+                distance = random.uniform(self.min_waypoint_distance, self.max_waypoint_distance)
+                angle = random.uniform(-math.pi/4, math.pi/4)
+                
+                # Get valid waypoint on road
+                waypoint = map.get_waypoint(
+                    carla.Location(
+                        current_point.location.x + distance * math.cos(angle),
+                        current_point.location.y + distance * math.sin(angle),
+                        current_point.location.z
+                    )
+                )
+                
+                if waypoint:
+                    self.waypoints.append(waypoint.transform.location)
+                    current_point = waypoint.transform
+                    self.logger.debug(f"Added waypoint at {current_point.location}")
+                    
+            if not self.waypoints:
+                self.logger.error("Failed to generate valid waypoints")
+                return
+                
+            self.logger.debug(f"Generated {len(self.waypoints)} waypoints")
+            
+        except Exception as e:
+            self.logger.error("Error generating waypoints", exc_info=e)
 
     def apply_emergency_brake(self):
         """Apply emergency brake"""

@@ -66,7 +66,7 @@ class VehicleCuttingScenario(BaseScenario):
                 if waypoint:
                     self.waypoints.append(waypoint.transform.location)
                     current_point = waypoint.transform.location
-                    self.logger.info(f"Added waypoint at {current_point}")
+                    self.logger.debug(f"Added waypoint at {current_point}")
             if not self.waypoints:
                 self.logger.error("Failed to generate valid waypoints")
                 self._set_completed(success=False)
