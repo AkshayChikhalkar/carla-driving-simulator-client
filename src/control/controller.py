@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import datetime
 from ..utils.config import ControllerConfig, LoggingConfig
-from ..utils.logging import SimulationLogger
+from ..utils.logging import Logger
 from ..utils.settings import DEBUG_MODE  # Import from settings module
 import math
 
@@ -45,7 +45,7 @@ class ControllerStrategy(ABC):
 class KeyboardController(ControllerStrategy):
     """Keyboard-based vehicle control"""
 
-    def __init__(self, config: ControllerConfig, logger: Optional[SimulationLogger] = None):
+    def __init__(self, config: ControllerConfig, logger: Optional[Logger] = None):
         self._control = VehicleControl()
         self._steer_cache = 0.0
         self.config = config
@@ -168,9 +168,9 @@ class KeyboardController(ControllerStrategy):
         self._control.gear = 1
 
         if self.logger and DEBUG_MODE:
-            self.logger.log_info("Keyboard controller initialization complete")
-            self.logger.log_info(f"Controller type: {config.type}")
-            self.logger.log_info(f"Initial mode: {'Manual' if self.is_manual_mode else 'Automatic'}")
+            self.logger.info("Keyboard controller initialization complete")
+            self.logger.info(f"Controller type: {config.type}")
+            self.logger.info(f"Initial mode: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
     def process_input(self) -> bool:
         """Process keyboard input"""
@@ -183,7 +183,7 @@ class KeyboardController(ControllerStrategy):
                 # Check quit
                 if event.key in self.keys['quit']:
                     if self.logger and DEBUG_MODE:
-                        self.logger.log_info("Quitting simulation")
+                        self.logger.info("Quitting simulation")
                     return True
 
                 # Toggle manual/automatic mode
@@ -191,7 +191,7 @@ class KeyboardController(ControllerStrategy):
                     self.is_manual_mode = not self.is_manual_mode
                     self._control.manual_gear_shift = self.is_manual_mode
                     if self.logger and DEBUG_MODE:
-                        self.logger.log_info(f"Transmission: {'Manual' if self.is_manual_mode else 'Automatic'}")
+                        self.logger.info(f"Transmission: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
                 # Handle reverse toggle
                 if event.key in self.keys['reverse']:
@@ -200,12 +200,12 @@ class KeyboardController(ControllerStrategy):
                         self._control.reverse = not self._control.reverse
                         self._control.gear = -1 if self._control.reverse else 1
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
+                            self.logger.info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
                     else:
                         # In automatic mode, just toggle reverse
                         self._control.reverse = not self._control.reverse
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
+                            self.logger.info(f"Gear: {'Reverse' if self._control.reverse else 'Forward'}")
 
                 # Handle gear shifting (only in manual mode)
                 if self.is_manual_mode:
@@ -213,38 +213,38 @@ class KeyboardController(ControllerStrategy):
                         self._control.gear = 1
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 1")
+                            self.logger.info("Gear: 1")
                     elif event.key in self.keys['gear_2']:
                         self._control.gear = 2
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 2")
+                            self.logger.info("Gear: 2")
                     elif event.key in self.keys['gear_3']:
                         self._control.gear = 3
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 3")
+                            self.logger.info("Gear: 3")
                     elif event.key in self.keys['gear_4']:
                         self._control.gear = 4
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 4")
+                            self.logger.info("Gear: 4")
                     elif event.key in self.keys['gear_5']:
                         self._control.gear = 5
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 5")
+                            self.logger.info("Gear: 5")
                     elif event.key in self.keys['gear_6']:
                         self._control.gear = 6
                         self._control.reverse = False
                         if self.logger and DEBUG_MODE:
-                            self.logger.log_info("Gear: 6")
+                            self.logger.info("Gear: 6")
 
                 # Handle hand brake
                 if event.key in self.keys['hand_brake']:
                     self._control.hand_brake = not self._control.hand_brake
                     if self.logger and DEBUG_MODE:
-                        self.logger.log_info(f"Hand brake: {'On' if self._control.hand_brake else 'Off'}")
+                        self.logger.info(f"Hand brake: {'On' if self._control.hand_brake else 'Off'}")
 
         # Get pressed keys
         keys = pygame.key.get_pressed()
@@ -258,23 +258,23 @@ class KeyboardController(ControllerStrategy):
         if any(keys[key] for key in self.keys['forward']):
             self._control.throttle = 1.0  # Set to full throttle when key is pressed
             if DEBUG_MODE and self.logger:
-                self.logger.log_info("Throttle: 100%")
+                self.logger.info("Throttle: 100%")
 
         # Brake (Space)
         if any(keys[key] for key in self.keys['brake']):
             self._control.brake = 1.0  # Set to full brake when key is pressed
             if DEBUG_MODE and self.logger:
-                self.logger.log_info("Brake: 100%")
+                self.logger.info("Brake: 100%")
 
         # Steering
         if any(keys[key] for key in self.keys['left']):
             self._control.steer = -0.7  # Set to full left when key is pressed
             if DEBUG_MODE and self.logger:
-                self.logger.log_info("Steering: Left")
+                self.logger.info("Steering: Left")
         elif any(keys[key] for key in self.keys['right']):
             self._control.steer = 0.7  # Set to full right when key is pressed
             if DEBUG_MODE and self.logger:
-                self.logger.log_info("Steering: Right")
+                self.logger.info("Steering: Right")
         else:
             self._control.steer = 0.0  # Reset steering when no keys are pressed
 
@@ -493,3 +493,58 @@ class VehicleController:
         )
         
         return carla_control 
+
+    def initialize(self) -> bool:
+        """Initialize the controller"""
+        try:
+            self.logger.info("Initializing controller")
+            self.logger.info(f"Controller type: {self.__class__.__name__}")
+            self.logger.info(f"Initial mode: {self.mode}")
+            return True
+        except Exception as e:
+            self.logger.error("Error initializing controller", exc_info=e)
+            return False
+
+    def update(self) -> None:
+        """Update controller state"""
+        try:
+            # Update control values
+            self._update_control()
+            
+            # Apply control to vehicle
+            self.vehicle.apply_control(self.control)
+            
+            # Log vehicle state in debug mode
+            if DEBUG_MODE:
+                self.logger.debug(f"Vehicle state: {self.get_vehicle_state()}")
+                
+        except Exception as e:
+            self.logger.error("Error updating controller", exc_info=e)
+
+    def cleanup(self) -> None:
+        """Clean up controller resources"""
+        try:
+            self.logger.info("Cleaning up controller")
+            # Reset control values
+            self.control = carla.VehicleControl()
+            self.vehicle.apply_control(self.control)
+        except Exception as e:
+            self.logger.error("Error cleaning up controller", exc_info=e)
+
+    def get_vehicle_state(self) -> dict:
+        """Get current vehicle state"""
+        try:
+            transform = self.vehicle.get_transform()
+            velocity = self.vehicle.get_velocity()
+            return {
+                'location': (transform.location.x, transform.location.y, transform.location.z),
+                'rotation': (transform.rotation.pitch, transform.rotation.yaw, transform.rotation.roll),
+                'velocity': (velocity.x, velocity.y, velocity.z),
+                'throttle': self.control.throttle,
+                'brake': self.control.brake,
+                'steer': self.control.steer,
+                'gear': self.control.gear
+            }
+        except Exception as e:
+            self.logger.error("Error getting vehicle state", exc_info=e)
+            return {} 

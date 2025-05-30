@@ -2,5 +2,5 @@
 Global settings for the CARLA Driving Simulator.
 """
 
-# Global debug state
+# Debug mode flag
 DEBUG_MODE = False 

@@ -1,27 +1,27 @@
 """
-Manages the CARLA world, including weather, traffic, and target points.
+World management system for CARLA simulation.
 """
 
 import carla
 import random
 import math
-from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 import time
 import logging
-
-from src.utils.settings import DEBUG_MODE
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from ..utils.logging import Logger
 from ..utils.config import WorldConfig, VehicleConfig
 from src.core.interfaces import IWorldManager
+from ..utils.default_config import SIMULATION_CONFIG
 
-# Set up logging
-logger = logging.getLogger(__name__)
+# Get logger instance
+logger = Logger()
 
 @dataclass
 class TargetPoint:
-    """Represents a target point in the world"""
+    """Target point information"""
     location: carla.Location
-    actors: List[carla.Actor]
+    transform: carla.Transform
     waypoint: carla.Waypoint
 
 class WorldManager(IWorldManager):
@@ -38,22 +38,59 @@ class WorldManager(IWorldManager):
         self.spawn_points = []
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
-        self._setup_world()
+        self.logger = logging.getLogger(__name__)
         
-        # Apply initial settings with more stable timing parameters
-        settings = self.world.get_settings()
-        settings.synchronous_mode = config.synchronous_mode
-        settings.fixed_delta_seconds = config.fixed_delta_seconds
-        settings.substepping = True
-        settings.max_substep_delta_time = config.physics.max_substep_delta_time
-        settings.max_substeps = config.physics.max_substeps
-        self.world.apply_settings(settings)
+        # Get configuration values with fallbacks
+        self.synchronous_mode = getattr(config, 'synchronous_mode', True)
+        self.fixed_delta_seconds = getattr(config, 'fixed_delta_seconds', 0.05)
+        self.enable_collision = getattr(config, 'enable_collision', False)
+        
+        # Get vehicle configuration values with fallbacks
+        self.vehicle_mass = getattr(vehicle_config, 'mass', 1500.0)
+        self.vehicle_drag = getattr(vehicle_config, 'drag_coefficient', 0.3)
+        self.vehicle_max_rpm = getattr(vehicle_config, 'max_rpm', 6000.0)
+        self.vehicle_moi = getattr(vehicle_config, 'moi', 1.0)
+        self.vehicle_model = getattr(vehicle_config, 'model', 'vehicle.tesla.model3')
+        
+        self._setup_world()
         
         # Wait for the world to be ready
         self.world.tick()
 
+    def connect(self) -> bool:
+        """Connect to CARLA server"""
+        try:
+            self.client = carla.Client(self.host, self.port)
+            self.client.set_timeout(2.0)
+            self.world = self.client.get_world()
+            self.logger.info(f"Connected to CARLA server at {self.host}:{self.port}")
+            return True
+        except Exception as e:
+            self.logger.error("Failed to connect to CARLA server", exc_info=e)
+            return False
+
+    def disconnect(self) -> None:
+        """Disconnect from CARLA server"""
+        try:
+            if self.client:
+                self.client = None
+                self.world = None
+                self.logger.info("Disconnected from CARLA server")
+        except Exception as e:
+            self.logger.error("Error disconnecting from CARLA server", exc_info=e)
+
+    def get_world(self) -> carla.World:
+        """Get the current world"""
+        if not self.world:
+            self.logger.error("Not connected to CARLA server")
+            raise RuntimeError("Not connected to CARLA server")
+        return self.world
+
     def get_map(self) -> carla.Map:
-        """Get the current CARLA map"""
+        """Get the current map"""
+        if not self.world:
+            self.logger.error("Not connected to CARLA server")
+            raise RuntimeError("Not connected to CARLA server")
         return self.world.get_map()
 
     def spawn_actor(self, blueprint: carla.ActorBlueprint, transform: carla.Transform) -> Optional[carla.Actor]:
@@ -70,16 +107,16 @@ class WorldManager(IWorldManager):
             actor.destroy()
 
     def _setup_world(self) -> None:
-        """Setup the CARLA world with specified configuration"""
+        """Setup the CARLA world"""
         try:
-            # Get world
+            # Get the world
             self.world = self.client.get_world()
             
             # Set synchronous mode if configured
-            if self.config.synchronous_mode:
+            if self.synchronous_mode:
                 settings = self.world.get_settings()
                 settings.synchronous_mode = True
-                settings.fixed_delta_seconds = self.config.fixed_delta_seconds
+                settings.fixed_delta_seconds = self.fixed_delta_seconds
                 self.world.apply_settings(settings)
             
             # Get blueprint library
@@ -88,50 +125,88 @@ class WorldManager(IWorldManager):
             # Get spawn points
             self.spawn_points = self.world.get_map().get_spawn_points()
             
+            self.logger.info("World setup completed successfully")
+            
         except Exception as e:
-            raise RuntimeError(f"Failed to setup world: {str(e)}")
+            self.logger.error(f"Error setting up world: {str(e)}")
+            raise
+
+    def _spawn_with_retry(self, blueprint: carla.ActorBlueprint, spawn_point: carla.Transform, max_attempts: int = 10) -> Optional[carla.Actor]:
+        """Attempt to spawn an actor with retry logic"""
+        for attempt in range(max_attempts):
+            try:
+                actor = self.world.spawn_actor(blueprint, spawn_point)
+                if actor and actor.is_alive:
+                    self.logger.info(f"{actor.type_id} spawned successfully")
+                    return actor
+                elif actor:
+                    actor.destroy()
+            except Exception as e:
+                self.logger.warning(f"Spawn attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_attempts - 1:
+                    time.sleep(0.5)  # Wait before retry
+                continue
+        return None
 
     def create_vehicle(self) -> Optional[carla.Vehicle]:
         """Create and spawn a vehicle in the world"""
         try:
-            # Get vehicle blueprint from config
-            vehicle_bp = self.blueprint_library.find(self.vehicle_config.model)
+            # Get vehicle blueprint
+            vehicle_bp = self.blueprint_library.find(self.vehicle_model)
             if not vehicle_bp:
-                raise RuntimeError(f"Failed to find vehicle blueprint: {self.vehicle_config.model}")
-            
-            # Get spawn points
-            if not self.spawn_points:
-                raise RuntimeError("No spawn points available")
-            
-            # Try multiple spawn points until successful
-            for spawn_point in self.spawn_points:
-                try:
-                    # Spawn vehicle
-                    self.vehicle = self.spawn_actor(vehicle_bp, spawn_point)
-                    if self.vehicle:
-                        # Set vehicle physics after spawning
-                        physics_control = self.vehicle.get_physics_control()
-                        
-                        # Update physics control with configuration values
-                        physics_control.mass = self.vehicle_config.mass
-                        physics_control.drag_coefficient = self.vehicle_config.drag_coefficient
-                        physics_control.max_rpm = self.vehicle_config.max_rpm
-                        physics_control.moi = self.vehicle_config.moi
-                        physics_control.center_of_mass = carla.Vector3D(*self.vehicle_config.center_of_mass)
-                        
-                        # Apply the physics control
-                        self.vehicle.apply_physics_control(physics_control)
-                        
-                        print(f"Successfully spawned vehicle at location: {spawn_point.location}")
-                        return self.vehicle
-                except Exception as e:
-                    print(f"Failed to spawn at location {spawn_point.location}: {str(e)}")
-                    continue
-            
-            raise RuntimeError("Failed to spawn vehicle at any spawn point")
+                self.logger.error(f"Vehicle blueprint {self.vehicle_model} not found")
+                return None
+                
+            # Set vehicle attributes with proper CARLA attribute names
+            try:
+                # Physics control attributes
+                physics_control = carla.VehiclePhysicsControl(
+                    mass=self.vehicle_mass,
+                    drag_coefficient=self.vehicle_drag,
+                    max_rpm=self.vehicle_max_rpm,
+                    moi=self.vehicle_moi
+                )
+                
+                # Try to spawn vehicle with retries
+                spawn_point = self.spawn_points[0]  # Use first spawn point
+                self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point)
+                
+                if not self.vehicle:
+                    self.logger.error("Failed to spawn vehicle after all attempts")
+                    return None
+                    
+                # Apply physics control after spawning
+                self.vehicle.apply_physics_control(physics_control)
+                
+                # Set additional vehicle attributes if available
+                if hasattr(vehicle_bp, 'set_attribute'):
+                    # Engine attributes
+                    if hasattr(vehicle_bp, 'set_attribute'):
+                        try:
+                            vehicle_bp.set_attribute('engine_power', str(self.vehicle_max_rpm * 0.7))
+                        except Exception as e:
+                            self.logger.debug(f"Could not set engine_power for {self.vehicle.type_id}: {str(e)}")
+                            
+                        try:
+                            vehicle_bp.set_attribute('engine_torque', str(self.vehicle_mass * 0.5))
+                        except Exception as e:
+                            self.logger.debug(f"Could not set engine_torque for {self.vehicle.type_id}: {str(e)}")
+                            
+                        try:
+                            vehicle_bp.set_attribute('engine_max_rpm', str(self.vehicle_max_rpm))
+                        except Exception as e:
+                            self.logger.debug(f"Could not set engine_max_rpm for {self.vehicle.type_id}: {str(e)}")
+                
+                return self.vehicle
+                
+            except Exception as e:
+                self.logger.error(f"Error setting vehicle attributes: {str(e)}")
+                if self.vehicle:
+                    self.vehicle.destroy()
+                return None
             
         except Exception as e:
-            print(f"Error creating vehicle: {str(e)}")
+            self.logger.error(f"Error creating vehicle: {str(e)}")
             return None
 
     def get_vehicle_state(self) -> Dict[str, Any]:
@@ -217,6 +292,9 @@ class WorldManager(IWorldManager):
             carla.Location(target_x, target_y, spawn_point.location.z)
         )
         
+        # Log waypoint details in debug mode
+        self.logger.debug(f"Generated waypoint at location: {waypoint.transform.location}")
+        
         # Spawn target markers
         target_actors = []
         for i in range(15):
@@ -231,10 +309,11 @@ class WorldManager(IWorldManager):
             target = self.spawn_actor(target_bp, target_transform)
             if target:
                 target_actors.append(target)
+                self.logger.debug(f"Spawned target marker at {target_loc}")
         
         self.target = TargetPoint(
             location=waypoint.transform.location,
-            actors=target_actors,
+            transform=waypoint.transform,
             waypoint=waypoint
         )
         return self.target
@@ -246,123 +325,52 @@ class WorldManager(IWorldManager):
     def cleanup(self) -> None:
         """Clean up world resources"""
         try:
-            if DEBUG_MODE:
-                logger.debug("[WorldManager] Starting cleanup...")
-                
-            # First disable autopilot and traffic manager
-            if hasattr(self, 'traffic_manager'):
-                if DEBUG_MODE:
-                    logger.debug("[WorldManager] Disabling traffic manager...")
-                try:
-                    self.traffic_manager.set_synchronous_mode(False)
-                    time.sleep(0.5)  # Wait for traffic manager to update
-                except Exception as e:
-                    if DEBUG_MODE:
-                        logger.error(f"[WorldManager] Error disabling traffic manager: {str(e)}")
+            # Destroy all actors
+            actors = self.world.get_actors()
             
-            # Destroy all actors in proper order
+            def safe_destroy_actor(actor, actor_type="actor"):
+                if not actor:
+                    return False
+                    
+                try:
+                    if actor.is_alive:
+                        actor.destroy()
+                        self.logger.info(f"Destroyed {actor.type_id}")
+                        return True
+                except Exception as e:
+                    self.logger.error(f"Error destroying {actor.type_id if actor else 'unknown'}: {str(e)}")
+                    return False
+            
+            # Only destroy vehicles and dynamic actors, not map actors
+            vehicle_actors = [actor for actor in actors if actor and 
+                            actor.type_id.startswith('vehicle.') and 
+                            not actor.type_id.startswith('traffic.')]
+            for actor in vehicle_actors:
+                safe_destroy_actor(actor, "vehicle")
+            
+            # Wait for vehicles to be destroyed
+            time.sleep(1.0)
+            
+            # Then destroy any remaining dynamic actors (excluding map actors)
+            other_actors = [actor for actor in actors if actor and 
+                          not actor.type_id.startswith(('sensor.', 'vehicle.', 'traffic.', 'static.'))]
+            for actor in other_actors:
+                safe_destroy_actor(actor, "actor")
+            
+            # Final wait and world tick
+            time.sleep(1.0)
             if self.world:
-                if DEBUG_MODE:
-                    logger.debug("[WorldManager] Destroying all actors...")
-                    
                 try:
-                    # Get all actors and create a copy of the list
-                    actors = list(self.world.get_actors())
-                    
-                    # Helper function to safely destroy an actor
-                    def safe_destroy_actor(actor, actor_type="actor"):
-                        if not actor:
-                            return False
-                            
-                        try:
-                            # Check if actor is valid and alive
-                            if not hasattr(actor, 'is_alive') or not actor.is_alive:
-                                if DEBUG_MODE:
-                                    logger.debug(f"[WorldManager] {actor_type} {actor.id if actor else 'unknown'} is not alive")
-                                return False
-                                
-                            # For vehicles, disable autopilot first
-                            if actor_type == "vehicle":
-                                try:
-                                    actor.set_autopilot(False)
-                                    time.sleep(0.1)  # Wait for autopilot to disable
-                                except Exception as e:
-                                    if DEBUG_MODE:
-                                        logger.error(f"[WorldManager] Error disabling autopilot for vehicle {actor.id}: {str(e)}")
-                            
-                            # Destroy the actor
-                            if DEBUG_MODE:
-                                logger.debug(f"[WorldManager] Destroying {actor_type}: {actor.type_id}")
-                            actor.destroy()
-                            
-                            # Wait for destruction to complete
-                            time.sleep(0.2)
-                            
-                            # Verify destruction
-                            if hasattr(actor, 'is_alive') and actor.is_alive:
-                                if DEBUG_MODE:
-                                    logger.error(f"[WorldManager] Failed to destroy {actor_type} {actor.id}")
-                                return False
-                                
-                            return True
-                            
-                        except Exception as e:
-                            if DEBUG_MODE:
-                                logger.error(f"[WorldManager] Error destroying {actor_type} {actor.id if actor else 'unknown'}: {str(e)}")
-                            return False
-                    
-                    # First destroy all sensors
-                    sensor_actors = [actor for actor in actors if actor and actor.type_id.startswith('sensor.')]
-                    for actor in sensor_actors:
-                        safe_destroy_actor(actor, "sensor")
-                    
-                    # Wait for sensors to be destroyed
-                    time.sleep(0.5)
-                    
-                    # Then destroy all vehicles
-                    vehicle_actors = [actor for actor in actors if actor and actor.type_id.startswith('vehicle.')]
-                    for actor in vehicle_actors:
-                        safe_destroy_actor(actor, "vehicle")
-                    
-                    # Wait for vehicles to be destroyed
-                    time.sleep(1.0)
-                    
-                    # Finally destroy any remaining actors
-                    other_actors = [actor for actor in actors if actor and not actor.type_id.startswith(('sensor.', 'vehicle.'))]
-                    for actor in other_actors:
-                        safe_destroy_actor(actor, "actor")
-                    
-                    # Final wait and world tick
-                    time.sleep(1.0)
-                    if self.world:
-                        try:
-                            self.world.tick()
-                        except Exception as e:
-                            if DEBUG_MODE:
-                                logger.error(f"[WorldManager] Error during final world tick: {str(e)}")
-                            
+                    self.world.tick()
                 except Exception as e:
-                    if DEBUG_MODE:
-                        logger.error(f"[WorldManager] Error during actor cleanup: {str(e)}")
-                
-            # Reset vehicle reference
-            self.vehicle = None
-            
-            # Clear traffic actors list
-            self._traffic_actors = []
-            
-            if DEBUG_MODE:
-                logger.debug("[WorldManager] Cleanup completed successfully")
-                
+                    if "connection failed" in str(e).lower():
+                        self.logger.error("Connection lost during cleanup - server may have crashed")
+                    else:
+                        self.logger.error(f"Error during final world tick: {str(e)}")
+                        
         except Exception as e:
-            if DEBUG_MODE:
-                logger.error(f"[WorldManager] Error during cleanup: {str(e)}")
-            # Don't raise the exception, just log it
-            pass
-    
-    def get_world(self) -> carla.World:
-        """Get the CARLA world"""
-        return self.world
+            self.logger.error(f"Error during cleanup: {str(e)}")
+            raise
     
     def get_blueprint_library(self) -> carla.BlueprintLibrary:
         """Get the CARLA blueprint library"""

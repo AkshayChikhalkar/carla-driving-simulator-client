@@ -9,9 +9,12 @@ from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from ..core.sensors import SensorObserver, CameraData, SensorData
 from ..utils.config import DisplayConfig
+from ..utils.default_config import DISPLAY_CONFIG
 import time
 import os
 import sys
+import logging
+import math
 
 @dataclass
 class VehicleState:
@@ -27,42 +30,50 @@ class VehicleState:
 class HUD:
     """Heads Up Display showing vehicle telemetry"""
     
-    def __init__(self, font_size=20):
+    def __init__(self, config: DisplayConfig):
         """Initialize HUD with given font size"""
         pygame.font.init()
-        self.font = pygame.font.Font(pygame.font.get_default_font(), font_size)
+        self.font = pygame.font.Font(pygame.font.get_default_font(), config.hud.font_size)
+        self.alpha = config.hud.alpha
+        self.colors = config.hud.colors
         
     def render(self, display, state):
         """Render HUD with current vehicle state"""
-        # Create info strings
-        scenario_str = f"Scenario: {state.scenario_name}"
-        speed_str = f"Speed: {state.speed_kmh:.1f} km/h"  # Using speed_kmh property
-        control_type = "Keyboard" if state.controls.get('manual_gear_shift', False) else "Autopilot"
-        control_str = f"Control: {control_type}"
-        #heading_str = f"Heading: {state.heading:.1f}°"
-        #distance_str = f"Distance to target: {state.distance_to_target:.1f}m"
-        
-        # Control state strings
-        brake_str = f"Brake: {state.controls.get('brake', 0.0):.2f}"
-        #steer_str = f"Steer: {state.controls.get('steer', 0.0):.2f}"
-        
-        # Additional control info
-        gear_str = f"Gear: {state.controls.get('gear', 1)}"
-        
-        # Render text
-        info_surface = pygame.Surface((300, 200))
-        info_surface.set_alpha(128)
-        info_surface.fill((0, 0, 0))
-        
-        y_offset = 10
-        for text in [scenario_str, speed_str, control_str, #heading_str, #distance_str, 
-                    brake_str, #steer_str, 
-                    gear_str]:
-            text_surface = self.font.render(text, True, (255, 255, 255))
-            info_surface.blit(text_surface, (10, y_offset))
-            y_offset += 20
-        
-        display.blit(info_surface, (10, 10))
+        try:
+            # Create info strings
+            scenario_str = f"Scenario: {state.scenario_name}"
+            
+            # Convert speed from m/s to km/h
+            speed_kmh = state.speed * 3.6 if hasattr(state, 'speed') else 0.0
+            speed_str = f"Speed: {speed_kmh:.1f} km/h"
+            
+            # Get control type
+            control_type = "Keyboard" if state.controls.get('manual_gear_shift', False) else "Autopilot"
+            control_str = f"Control: {control_type}"
+            
+            # Control state strings
+            brake = state.controls.get('brake', 0.0)
+            brake_str = f"Brake: {brake:.2f}"
+            
+            # Additional control info
+            gear = state.controls.get('gear', 1)
+            gear_str = f"Gear: {gear}"
+            
+            # Render text
+            info_surface = pygame.Surface((300, 150))
+            info_surface.set_alpha(self.alpha)
+            info_surface.fill(pygame.Color(self.colors['background']))
+            
+            y_offset = 15
+            line_spacing = 25
+            for text in [scenario_str, speed_str, control_str, brake_str, gear_str]:
+                text_surface = self.font.render(text, True, pygame.Color(self.colors['text']))
+                info_surface.blit(text_surface, (15, y_offset))
+                y_offset += line_spacing
+            
+            display.blit(info_surface, (10, 10))
+        except Exception as e:
+            logging.error("Error rendering HUD", exc_info=e)
 
 class Minimap:
     """Minimap display showing vehicle and target positions"""
@@ -74,42 +85,49 @@ class Minimap:
         self.height = 200
         self.margin = 20
         self.scale = 0.1  # Scale factor for converting world to minimap coordinates
-        self.background = pygame.Color('black')
-        self.vehicle_color = pygame.Color('green')
-        self.target_color = pygame.Color('red')
+        self.background = pygame.Color(config.hud.colors['background'])
+        self.vehicle_color = pygame.Color(config.hud.colors['vehicle'])
+        self.target_color = pygame.Color(config.hud.colors['target'])
         self.road_color = pygame.Color('gray')
-        self.alpha = 128
+        self.alpha = config.hud.alpha
     
     def render(self, surface: pygame.Surface, state: VehicleState, target_pos: carla.Location) -> None:
         """Render minimap with vehicle and target positions"""
-        # Create minimap surface
-        minimap = pygame.Surface((self.width, self.height))
-        minimap.fill(self.background)
-        minimap.set_alpha(self.alpha)
-        
-        # Convert world coordinates to minimap coordinates
-        vehicle_x = int(state.position[0] * self.scale + self.width / 2)
-        vehicle_y = int(state.position[1] * self.scale + self.height / 2)
-        target_x = int(target_pos.x * self.scale + self.width / 2)
-        target_y = int(target_pos.y * self.scale + self.height / 2)
-        
-        # Draw vehicle (as triangle pointing in heading direction)
-        vehicle_points = self._get_vehicle_triangle(vehicle_x, vehicle_y, state.heading)
-        pygame.draw.polygon(minimap, self.vehicle_color, vehicle_points)
-        
-        # Draw target (as cross)
-        cross_size = 5
-        pygame.draw.line(minimap, self.target_color,
-                        (target_x - cross_size, target_y - cross_size),
-                        (target_x + cross_size, target_y + cross_size), 2)
-        pygame.draw.line(minimap, self.target_color,
-                        (target_x - cross_size, target_y + cross_size),
-                        (target_x + cross_size, target_y - cross_size), 2)
-        
-        # Blit minimap to main surface
-        surface.blit(minimap, (surface.get_width() - self.width - 10,
-                              surface.get_height() - self.height - 10))
-    
+        try:
+            # Create minimap surface
+            minimap = pygame.Surface((self.width, self.height))
+            minimap.fill(self.background)
+            minimap.set_alpha(self.alpha)
+            
+            # Get vehicle position
+            vehicle_pos = state.position if hasattr(state, 'position') else (0, 0, 0)
+            vehicle_heading = state.heading if hasattr(state, 'heading') else 0.0
+            
+            # Convert world coordinates to minimap coordinates
+            vehicle_x = int(vehicle_pos[0] * self.scale + self.width / 2)
+            vehicle_y = int(vehicle_pos[1] * self.scale + self.height / 2)
+            target_x = int(target_pos.x * self.scale + self.width / 2)
+            target_y = int(target_pos.y * self.scale + self.height / 2)
+            
+            # Draw vehicle (as triangle pointing in heading direction)
+            vehicle_points = self._get_vehicle_triangle(vehicle_x, vehicle_y, vehicle_heading)
+            pygame.draw.polygon(minimap, self.vehicle_color, vehicle_points)
+            
+            # Draw target (as cross)
+            cross_size = 5
+            pygame.draw.line(minimap, self.target_color,
+                            (target_x - cross_size, target_y - cross_size),
+                            (target_x + cross_size, target_y + cross_size), 2)
+            pygame.draw.line(minimap, self.target_color,
+                            (target_x - cross_size, target_y + cross_size),
+                            (target_x + cross_size, target_y - cross_size), 2)
+            
+            # Blit minimap to main surface
+            surface.blit(minimap, (surface.get_width() - self.width - 10,
+                                  surface.get_height() - self.height - 10))
+        except Exception as e:
+            logging.error("Error rendering minimap", exc_info=e)
+
     def _get_vehicle_triangle(self, x: int, y: int, heading: float) -> list:
         """Get triangle points for vehicle representation"""
         size = 8
@@ -171,6 +189,11 @@ class CameraView(SensorObserver):
                 display.fill((32, 32, 32))
         except Exception:
             display.fill((32, 32, 32))  # Fallback to dark gray
+            
+    def cleanup(self) -> None:
+        """Clean up camera view resources"""
+        self.surface = None
+        self.last_frame = None
 
 def get_window_count():
     """Get count of existing CARLA Simulator windows"""
@@ -193,6 +216,11 @@ class DisplayManager:
         """Initialize display manager"""
         self.config = config
         
+        # Get display dimensions from config or use defaults
+        self.width = getattr(config, 'width', DISPLAY_CONFIG['width'])
+        self.height = getattr(config, 'height', DISPLAY_CONFIG['height'])
+        self.fps = getattr(config, 'fps', DISPLAY_CONFIG['fps'])
+        
         # Initialize pygame display
         pygame.init()
         pygame.event.set_allowed([
@@ -203,7 +231,8 @@ class DisplayManager:
             pygame.WINDOWFOCUSGAINED,
             pygame.WINDOWMINIMIZED,
             pygame.WINDOWRESTORED,
-            pygame.WINDOWEXPOSED
+            pygame.WINDOWEXPOSED,
+            pygame.WINDOWRESIZED
         ])
         
         # Set up window position
@@ -213,13 +242,13 @@ class DisplayManager:
         
         # Create resizable window with standard controls
         self.display = pygame.display.set_mode(
-            (config.width, config.height),
+            (self.width, self.height),
             pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
         )
         pygame.display.set_caption(f"CARLA Simulator - Instance {window_count + 1}")
         
-        # Initialize components
-        self.hud = HUD()
+        # Initialize components with config
+        self.hud = HUD(config)
         self.minimap = Minimap(config)
         self.camera_view = CameraView(config)
         
@@ -227,7 +256,7 @@ class DisplayManager:
         self.minimized = False
         self.focused = True
         self.should_quit = False
-        self.current_size = (config.width, config.height)
+        self.current_size = (self.width, self.height)
         self.last_event_time = time.time()
         self.force_exit = False
         self.frame_count = 0
@@ -237,6 +266,9 @@ class DisplayManager:
         self.fps_font = pygame.font.Font(None, 24)
         self.last_fps_update = time.time()
         self.current_fps = 0
+        
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
     
     def handle_resize(self, size):
         """Handle window resize"""
@@ -265,55 +297,100 @@ class DisplayManager:
                 self.focused = True
         return True
     
-    def render(self, state: VehicleState, target_pos: carla.Location) -> bool:
-        """Render the current frame"""
+    def render(self, vehicle_state: VehicleState, target_position: carla.Location) -> bool:
+        """Render the display"""
         try:
             # Process events first
             if not self.process_events():
                 return False
-
+                
             # Skip rendering if minimized
             if self.minimized:
                 return True
-
-            # Clear display
-            self.display.fill((0, 0, 0))
-
-            # Render camera view
-            self.camera_view.render(self.display)
-
-            # Render HUD
-            self.hud.render(self.display, state)
-
-            # Render minimap
-            self.minimap.render(self.display, state, target_pos)
+                
+            # Update camera view first (as background)
+            self._update_camera()
             
-            # Update FPS counter
+            # Update HUD
+            self._update_hud(vehicle_state)
+            
+            # Update minimap
+            self._update_minimap(vehicle_state, target_position)
+            
+            # Render FPS counter
+            self._render_fps()
+            
+            # Update display
+            pygame.display.flip()
+            
+            # Update frame count and clock
+            self.frame_count += 1
+            self.clock.tick(self.fps)  # Use configured FPS
+            
+            return True
+        except Exception as e:
+            self.logger.error("Error in display rendering", exc_info=e)
+            return False
+
+    def _render_fps(self):
+        """Render FPS counter"""
+        try:
+            # Update FPS every second
             current_time = time.time()
-            if current_time - self.last_fps_update >= 0.5:  # Update FPS every 0.5 seconds
+            if current_time - self.last_fps_update >= 1.0:
                 self.current_fps = self.clock.get_fps()
                 self.last_fps_update = current_time
             
-            # Render FPS in top-right corner
-            fps_text = self.fps_font.render(f"FPS: {self.current_fps:.1f}", True, (255, 255, 255))
-            self.display.blit(fps_text, (self.current_size[0] - 120, 10))
-
-            # Update display
-            pygame.display.flip()
-            self.frame_count += 1
+            # Render FPS text
+            fps_text = f"FPS: {self.current_fps:.1f}"
+            fps_surface = self.fps_font.render(fps_text, True, (255, 255, 255))
             
-            # Control frame rate
-            self.clock.tick(60)
-
-            return True
-
+            # Create semi-transparent background
+            bg_surface = pygame.Surface((100, 30))
+            bg_surface.set_alpha(128)
+            bg_surface.fill((0, 0, 0))
+            
+            # Blit background and text
+            self.display.blit(bg_surface, (10, self.display.get_height() - 40))
+            self.display.blit(fps_surface, (15, self.display.get_height() - 35))
+            
         except Exception as e:
-            print(f"Error in display rendering: {e}")
-            return False
-    
-    def cleanup(self) -> None:
-        """Clean up resources"""
+            self.logger.error("Error rendering FPS", exc_info=e)
+
+    def _update_hud(self, vehicle_state: VehicleState) -> None:
+        """Update HUD with vehicle state"""
         try:
+            if not vehicle_state:
+                return
+                
+            # Render HUD directly with vehicle state
+            self.hud.render(self.display, vehicle_state)
+            
+        except Exception as e:
+            self.logger.error("Error updating HUD", exc_info=e)
+    
+    def _update_minimap(self, vehicle_state: VehicleState, target_position: carla.Location) -> None:
+        """Update minimap with vehicle and target positions"""
+        try:
+            if not vehicle_state or not target_position:
+                return
+                
+            self.minimap.render(self.display, vehicle_state, target_position)
+        except Exception as e:
+            self.logger.error("Error updating minimap", exc_info=e)
+    
+    def _update_camera(self) -> None:
+        """Update camera view"""
+        try:
+            self.camera_view.render(self.display)
+        except Exception as e:
+            self.logger.error("Error updating camera view", exc_info=e)
+
+    def cleanup(self) -> None:
+        """Clean up display resources"""
+        try:
+            if self.camera_view:
+                self.camera_view.cleanup()
             pygame.quit()
         except Exception as e:
-            print(f"Error during cleanup: {e}") 
+            self.logger.error("Error during cleanup", exc_info=e) 

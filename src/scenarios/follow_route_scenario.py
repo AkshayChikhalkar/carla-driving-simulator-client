@@ -2,7 +2,7 @@ import time
 import math
 import random
 import carla
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from src.scenarios.base_scenario import BaseScenario
 from src.core.interfaces import IWorldManager, IVehicleController, ILogger
 
@@ -13,19 +13,26 @@ class FollowRouteScenario(BaseScenario):
                  world_manager: IWorldManager,
                  vehicle_controller: IVehicleController,
                  logger: ILogger,
-                 num_waypoints: int = 5,
-                 waypoint_tolerance: float = 5.0,
-                 min_distance: float = 50.0,
-                 max_distance: float = 100.0):
+                 config: Dict[str, Any]):
         super().__init__(world_manager, vehicle_controller, logger)
-        self.num_waypoints = num_waypoints
+        
+        # Load configuration parameters
+        self.num_waypoints = config.get('num_waypoints', 5)
+        self.waypoint_tolerance = config.get('waypoint_tolerance', 5.0)  # meters
+        self.min_distance = config.get('min_distance', 50.0)  # meters
+        self.max_distance = config.get('max_distance', 100.0)  # meters
+        
+        # Scenario state
         self.waypoints: List[carla.Location] = []
         self.current_waypoint = 0
-        self.waypoint_tolerance = waypoint_tolerance  # meters
-        self.min_distance = min_distance  # meters
-        self.max_distance = max_distance  # meters
         # Pre-allocate location for distance calculations
         self._current_loc = carla.Location()
+        self._name = "Follow Route"  # User-friendly display name
+
+    @property
+    def name(self) -> str:
+        """Get the user-friendly name of the scenario"""
+        return self._name
 
     def setup(self) -> None:
         """Setup the route following scenario"""
@@ -53,16 +60,16 @@ class FollowRouteScenario(BaseScenario):
             if waypoint:
                 self.waypoints.append(waypoint.transform.location)
                 current_point = waypoint.transform.location
-                self.logger.log_info(f"Added waypoint at {current_point}")
+                self.logger.debug(f"Added waypoint at {current_point}")
 
         if not self.waypoints:
-            self.logger.log_error("Failed to generate valid waypoints")
+            self.logger.error("Failed to generate valid waypoints")
             self._set_completed(success=False)
             return
 
         # Set first waypoint as target
         self.vehicle_controller.set_target(self.waypoints[0])
-        self.logger.log_info(f"Follow route scenario started with {len(self.waypoints)} waypoints")
+        self.logger.info(f"Follow route scenario started with {len(self.waypoints)} waypoints")
 
     def update(self) -> None:
         """Update scenario state"""
@@ -82,11 +89,45 @@ class FollowRouteScenario(BaseScenario):
             else:
                 # Set next waypoint as target
                 self.vehicle_controller.set_target(self.waypoints[self.current_waypoint])
-                self.logger.log_info(
+                self.logger.info(
                     f"Reached waypoint {self.current_waypoint}/{len(self.waypoints)}"
                 )
 
     def cleanup(self) -> None:
         """Clean up scenario resources"""
         super().cleanup()
-        self.waypoints.clear() 
+        self.waypoints.clear()
+
+    def _generate_waypoints(self) -> None:
+        """Generate waypoints for the route"""
+        try:
+            # Get map and spawn point
+            map = self.world_manager.get_map()
+            spawn_point = self.world_manager.get_random_spawn_point()
+            current_point = spawn_point
+            
+            # Generate waypoints
+            self.waypoints = []
+            
+            for _ in range(self.config.num_waypoints):
+                # Get next waypoint
+                waypoint = map.get_waypoint(current_point.location)
+                if not waypoint:
+                    self.logger.error("Failed to get waypoint")
+                    continue
+                    
+                # Add to waypoints list
+                self.waypoints.append(waypoint)
+                self.logger.debug(f"Added waypoint at {current_point}")
+                
+                # Update current point
+                current_point = waypoint.transform
+                
+            if not self.waypoints:
+                self.logger.error("Failed to generate valid waypoints")
+                return
+                
+            self.logger.debug(f"Generated {len(self.waypoints)} waypoints")
+            
+        except Exception as e:
+            self.logger.error("Error generating waypoints", exc_info=e) 

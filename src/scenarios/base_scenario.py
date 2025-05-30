@@ -20,10 +20,10 @@ class BaseScenario(IScenario):
         self._vehicle = None
 
     def setup(self) -> None:
-        """Base setup method to be overridden by specific scenarios"""
+        """Setup the scenario"""
         self._start_time = time.time()
         self._vehicle = self.vehicle_controller.get_vehicle()
-        self.logger.log_info(f"Starting scenario: {self.__class__.__name__}")
+        self.logger.info(f"Starting scenario: {self.__class__.__name__}")
 
     def update(self) -> None:
         """Base update method to be overridden by specific scenarios"""
@@ -34,7 +34,7 @@ class BaseScenario(IScenario):
         if self._is_completed:
             self._completion_time = time.time() - self._start_time
             status = "successfully" if self._is_successful else "unsuccessfully"
-            self.logger.log_info(
+            self.logger.info(
                 f"Scenario completed {status} in {self._completion_time:.1f} seconds"
             )
 
