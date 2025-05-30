@@ -1,127 +1,129 @@
-from typing import Dict, Type, Optional, Any
+"""
+Registry for managing available scenarios and their configurations.
+"""
+
+from typing import Dict, Type, List, Any, Optional
 from src.core.interfaces import IScenario, IWorldManager, IVehicleController, ILogger
+from src.scenarios.base_scenario import BaseScenario
 from src.scenarios.follow_route_scenario import FollowRouteScenario
 from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
 from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
 from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
+from src.utils.config import Config, load_config
+import os
 
 class ScenarioRegistry:
-    """Registry for scenario types"""
+    """Registry for managing available scenarios and their configurations."""
     
-    # Define all available scenarios in one place
-    AVAILABLE_SCENARIOS = {
-        'follow_route': {
-            'class': FollowRouteScenario,
-            'default_config': {
-                'num_waypoints': 5,
-                'waypoint_tolerance': 5.0,
-                'min_distance': 50.0,
-                'max_distance': 100.0
-            }
-        },
-        'avoid_obstacle': {
-            'class': AvoidObstacleScenario,
-            'default_config': {
-                'target_distance': 100.0,
-                'obstacle_spacing': 25.0,
-                'completion_distance': 110.0,
-                'collision_threshold': 1.0,
-                'max_simulation_time': 120.0,
-                'waypoint_tolerance': 5.0,
-                'min_waypoint_distance': 30.0,
-                'max_waypoint_distance': 50.0,
-                'num_waypoints': 3
-            }
-        },
-        'emergency_brake': {
-            'class': EmergencyBrakeScenario,
-            'default_config': {
-                'trigger_distance': 50.0,
-                'target_speed': 40.0,
-                'obstacle_type': "static.prop.streetbarrier"
-            }
-        },
-        'vehicle_cutting': {
-            'class': VehicleCuttingScenario,
-            'default_config': {
-                'target_distance': 100.0,
-                'cutting_distance': 30.0,
-                'completion_distance': 110.0,
-                'collision_threshold': 1.0,
-                'max_simulation_time': 120.0,
-                'waypoint_tolerance': 5.0,
-                'min_waypoint_distance': 30.0,
-                'max_waypoint_distance': 50.0,
-                'num_waypoints': 3,
-                'cutting_vehicle_model': "vehicle.fuso.mitsubishi",
-                'normal_speed': 30.0,
-                'cutting_speed': 40.0,
-                'cutting_trigger_distance': 20.0
-            }
-        }
-    }
+    _scenarios: Dict[str, Type[BaseScenario]] = {}
+    _config: Config = None
     
-    _scenarios: Dict[str, Type[IScenario]] = {}
-    _scenario_configs: Dict[str, Dict] = {}
-
     @classmethod
-    def register_all(cls) -> None:
-        """Register all available scenarios"""
-        for scenario_type, scenario_info in cls.AVAILABLE_SCENARIOS.items():
-            cls.register(
-                scenario_type=scenario_type,
-                scenario_class=scenario_info['class'],
-                default_config=scenario_info['default_config']
-            )
-
-    @classmethod
-    def register(cls, 
-                scenario_type: str, 
-                scenario_class: Type[IScenario],
-                default_config: Optional[Dict] = None) -> None:
+    def register_scenario(cls, scenario_type: str, scenario_class: Type[BaseScenario]) -> None:
         """
-        Register a new scenario type
+        Register a scenario type with its class.
         
         Args:
-            scenario_type: String identifier for the scenario
-            scenario_class: Class implementing IScenario interface
-            default_config: Optional default configuration for the scenario
+            scenario_type: Type identifier for the scenario
+            scenario_class: Class implementing the scenario
         """
         if not issubclass(scenario_class, IScenario):
             raise ValueError(f"Scenario class must implement IScenario interface")
-            
         cls._scenarios[scenario_type] = scenario_class
-        if default_config:
-            cls._scenario_configs[scenario_type] = default_config
-
+        
     @classmethod
-    def create_scenario(cls, scenario_type: str, world_manager: IWorldManager, 
-                       vehicle_controller: IVehicleController, logger: ILogger, config: Dict[str, Any] = None) -> IScenario:
-        """Create a new scenario instance"""
+    def get_scenario_class(cls, scenario_type: str) -> Type[BaseScenario]:
+        """
+        Get the class for a registered scenario type.
+        
+        Args:
+            scenario_type: Type identifier for the scenario
+            
+        Returns:
+            Type[BaseScenario]: Class implementing the scenario
+            
+        Raises:
+            ValueError: If scenario type is not registered
+        """
         if scenario_type not in cls._scenarios:
             raise ValueError(f"Unknown scenario type: {scenario_type}")
+        return cls._scenarios[scenario_type]
+        
+    @classmethod
+    def get_available_scenarios(cls) -> List[str]:
+        """
+        Get list of available scenario types.
+        
+        Returns:
+            List[str]: List of registered scenario types
+        """
+        return list(cls._scenarios.keys())
+        
+    @classmethod
+    def get_scenario_config(cls, scenario_type: str) -> Dict[str, Any]:
+        """
+        Get configuration for a specific scenario type.
+        
+        Args:
+            scenario_type: Type identifier for the scenario
             
-        # Get default config for this scenario type
-        default_config = cls._scenario_configs.get(scenario_type, {})
+        Returns:
+            Dict[str, Any]: Configuration for the scenario
+            
+        Raises:
+            ValueError: If scenario type is not registered or configuration not found
+        """
+        if not cls._config:
+            # Load config if not already loaded
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config', 'simulation.yaml')
+            cls._config = load_config(config_path)
+            
+        # Get the scenario config from the Config object
+        scenario_config = getattr(cls._config.scenarios, scenario_type, None)
+        if not scenario_config:
+            raise ValueError(f"No configuration found for scenario type: {scenario_type}")
+            
+        # Convert the config object to a dictionary
+        return {k: v for k, v in scenario_config.__dict__.items() if not k.startswith('_')}
+        
+    @classmethod
+    def create_scenario(cls, scenario_type: str, world_manager: IWorldManager, 
+                       vehicle_controller: IVehicleController, logger: ILogger, 
+                       config: Optional[Dict[str, Any]] = None) -> IScenario:
+        """
+        Create a new scenario instance.
+        
+        Args:
+            scenario_type: Type identifier for the scenario
+            world_manager: World manager instance
+            vehicle_controller: Vehicle controller instance
+            logger: Logger instance
+            config: Optional configuration overrides
+            
+        Returns:
+            IScenario: New scenario instance
+            
+        Raises:
+            ValueError: If scenario type is not registered
+        """
+        scenario_class = cls.get_scenario_class(scenario_type)
+        scenario_config = cls.get_scenario_config(scenario_type)
         
         # Merge with provided config if any
         if config:
-            default_config.update(config)
+            scenario_config.update(config)
             
-        scenario_class = cls._scenarios[scenario_type]
         return scenario_class(
             world_manager=world_manager,
             vehicle_controller=vehicle_controller,
             logger=logger,
-            config=default_config  # Pass config as a single dictionary
+            config=scenario_config
         )
-
+        
     @classmethod
-    def get_available_scenarios(cls) -> list[str]:
-        """Get list of registered scenario types"""
-        return list(cls._scenarios.keys())
-
-    @classmethod
-    def get_scenario_config(cls, scenario_type: str) -> Optional[Dict]:
-        """Get default configuration for a scenario type"""
-        return cls._scenario_configs.get(scenario_type) 
+    def register_all(cls) -> None:
+        """Register all available scenario types."""
+        cls.register_scenario('follow_route', FollowRouteScenario)
+        cls.register_scenario('avoid_obstacle', AvoidObstacleScenario)
+        cls.register_scenario('emergency_brake', EmergencyBrakeScenario)
+        cls.register_scenario('vehicle_cutting', VehicleCuttingScenario)
