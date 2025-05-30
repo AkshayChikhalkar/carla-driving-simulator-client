@@ -131,6 +131,23 @@ class WorldManager(IWorldManager):
             self.logger.error(f"Error setting up world: {str(e)}")
             raise
 
+    def _spawn_with_retry(self, blueprint: carla.ActorBlueprint, spawn_point: carla.Transform, max_attempts: int = 10) -> Optional[carla.Actor]:
+        """Attempt to spawn an actor with retry logic"""
+        for attempt in range(max_attempts):
+            try:
+                actor = self.world.spawn_actor(blueprint, spawn_point)
+                if actor and actor.is_alive:
+                    self.logger.info(f"Actor spawned successfully on attempt {attempt + 1}")
+                    return actor
+                elif actor:
+                    actor.destroy()
+            except Exception as e:
+                self.logger.warning(f"Spawn attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_attempts - 1:
+                    time.sleep(0.5)  # Wait before retry
+                continue
+        return None
+
     def create_vehicle(self) -> Optional[carla.Vehicle]:
         """Create and spawn a vehicle in the world"""
         try:
@@ -150,12 +167,12 @@ class WorldManager(IWorldManager):
                     moi=self.vehicle_moi
                 )
                 
-                # Set physics control after spawning
+                # Try to spawn vehicle with retries
                 spawn_point = self.spawn_points[0]  # Use first spawn point
-                self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+                self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point)
                 
                 if not self.vehicle:
-                    self.logger.error("Failed to spawn vehicle")
+                    self.logger.error("Failed to spawn vehicle after all attempts")
                     return None
                     
                 # Apply physics control after spawning
