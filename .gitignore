@@ -57,6 +57,7 @@ site/
 scenario_runner/
 *.ini
 reports/
+temp_test_scenarios.py
 # OS specific
 .DS_Store
 Thumbs.db 
