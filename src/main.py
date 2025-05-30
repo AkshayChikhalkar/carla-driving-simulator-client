@@ -24,7 +24,10 @@ from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
 from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 # Default configuration values
-DEFAULT_CONFIG = {"scenario": "vehicle_cutting", "debug": False}
+DEFAULT_CONFIG = {
+    'scenario': 'follow_route',
+    'debug': False
+}
 
 # Default config file path
 DEFAULT_CONFIG_FILE = os.path.join(project_root, 'config', 'simulation.yaml')

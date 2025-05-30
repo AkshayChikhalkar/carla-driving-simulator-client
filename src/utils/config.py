@@ -102,10 +102,19 @@ class EmergencyBrakeConfig:
 @dataclass
 class VehicleCuttingConfig:
     """Vehicle cutting scenario configuration"""
-    target_speed: float
-    spawn_distance: float
-    lateral_offset: float
+    target_distance: float
+    cutting_distance: float
+    completion_distance: float
+    collision_threshold: float
+    max_simulation_time: float
+    waypoint_tolerance: float
+    min_waypoint_distance: float
+    max_waypoint_distance: float
+    num_waypoints: int
     cutting_vehicle_model: str
+    normal_speed: float
+    cutting_speed: float
+    cutting_trigger_distance: float
 
 @dataclass
 class ScenarioConfig:
