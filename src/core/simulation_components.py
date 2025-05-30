@@ -40,25 +40,32 @@ class ConnectionManager:
         self.client = None
 
     def connect(self) -> bool:
-        """Connect to CARLA server"""
-        try:
-            print(f"Connecting to CARLA server at {self.config.host}:{self.config.port}...")
-            self.client = carla.Client(self.config.host, self.config.port)
-            self.client.set_timeout(self.config.timeout)
-            
-            # Test connection
-            world = self.client.get_world()
-            if not world:
-                print("Failed to get CARLA world")
-                return False
+        """Connect to CARLA server with retries"""
+        max_retries = 3
+        delay = 30
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})...")
+                self.client = carla.Client(self.config.host, self.config.port)
+                self.client.set_timeout(self.config.timeout)
                 
-            print("Successfully connected to CARLA server")
-            return True
-        except Exception as e:
-            print(f"Failed to connect to CARLA server: {str(e)}")
-            print("Make sure the CARLA server is running and accessible")
-            self.client = None
-            return False
+                # Test connection
+                world = self.client.get_world()
+                if not world:
+                    print("Failed to get CARLA world")
+                    raise RuntimeError("Failed to get CARLA world")
+                print("Successfully connected to CARLA server")
+                return True
+            except Exception as e:
+                print(f"Failed to connect to CARLA server (attempt {attempt}): {str(e)}")
+                print("Make sure the CARLA server is running and accessible")
+                self.client = None
+                if attempt < max_retries:
+                    print(f"Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                else:
+                    print("All connection attempts failed.")
+                    return False
 
     def disconnect(self) -> None:
         """Disconnect from CARLA server"""
