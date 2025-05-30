@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,10 +18,6 @@ from src.core.sensors import SensorManager
 from src.control.controller import VehicleController, KeyboardController, AutopilotController
 from src.utils.logging import Logger
 from src.scenarios.scenario_registry import ScenarioRegistry
-from src.scenarios.follow_route_scenario import FollowRouteScenario
-from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
-from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
-from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -32,140 +28,27 @@ DEFAULT_CONFIG = {
 # Default config file path
 DEFAULT_CONFIG_FILE = os.path.join(project_root, 'config', 'simulation.yaml')
 
-def register_scenarios():
-    """Register available scenarios"""
-    # Register follow route scenario
-    ScenarioRegistry.register(
-        'follow_route',
-        FollowRouteScenario,
-        default_config={
-            'num_waypoints': 5,
-            'waypoint_tolerance': 5.0,
-            'min_distance': 50.0,
-            'max_distance': 100.0
-        }
-    )
+class SimulationRunner:
+    """Class to handle simulation execution and management"""
     
-    # Register avoid obstacle scenario
-    ScenarioRegistry.register(
-        'avoid_obstacle',
-        AvoidObstacleScenario,
-        default_config={
-            'target_distance': 100.0,
-            'obstacle_spacing': 25.0,
-            'completion_distance': 110.0,
-            'collision_threshold': 1.0,
-            'max_simulation_time': 120.0,
-            'waypoint_tolerance': 5.0,
-            'min_waypoint_distance': 30.0,
-            'max_waypoint_distance': 50.0,
-            'num_waypoints': 3
-        }
-    )
-    
-    # Register emergency brake scenario
-    ScenarioRegistry.register(
-        'emergency_brake',
-        EmergencyBrakeScenario,
-        default_config={
-            'trigger_distance': 50.0,
-            'target_speed': 40.0,
-            'obstacle_type': "static.prop.streetbarrier"
-        }
-    )
-    
-    # Register vehicle cutting scenario
-    ScenarioRegistry.register(
-        'vehicle_cutting',
-        VehicleCuttingScenario,
-        default_config={
-            'target_distance': 100.0,
-            'cutting_distance': 30.0,
-            'completion_distance': 110.0,
-            'collision_threshold': 1.0,
-            'max_simulation_time': 120.0,
-            'waypoint_tolerance': 5.0,
-            'min_waypoint_distance': 30.0,
-            'max_waypoint_distance': 50.0,
-            'num_waypoints': 3,
-            'cutting_vehicle_model': "vehicle.fuso.mitsubishi",
-            'normal_speed': 30.0,
-            'cutting_speed': 40.0,
-            'cutting_trigger_distance': 20.0
-        }
-    )
-
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    """
-    Parse command line arguments with standardized defaults.
-    
-    Args:
-        argv: Optional list of command line arguments. If None, uses sys.argv[1:]
+    def __init__(self, config_file: str = DEFAULT_CONFIG_FILE):
+        self.config_file = config_file
+        self.logger = Logger()
         
-    Returns:
-        argparse.Namespace: Parsed arguments
-    """
-    parser = argparse.ArgumentParser(
-        description='CARLA Driving Simulator',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
-    # Add arguments with defaults from DEFAULT_CONFIG
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        default=DEFAULT_CONFIG['debug'],
-        help='Enable debug mode for detailed logging'
-    )
-    
-    parser.add_argument(
-        '--scenario',
-        type=str,
-        default=DEFAULT_CONFIG['scenario'],
-        choices=['follow_route', 'avoid_obstacle', 'emergency_brake', 'vehicle_cutting', 'all'],
-        help='Type of scenario to run'
-    )
-    
-    # Parse arguments
-    args = parser.parse_args(argv)
-    
-    # Validate config file exists
-    if not os.path.exists(DEFAULT_CONFIG_FILE):
-        parser.error(f"Default configuration file not found: {DEFAULT_CONFIG_FILE}")
-    
-    return args
-
-def main(argv: Optional[List[str]] = None) -> None:
-    """
-    Main entry point for the CARLA Driving Simulator.
-    
-    Args:
-        argv: Optional list of command line arguments. If None, uses sys.argv[1:]
-    """
-    # Parse command line arguments
-    args = parse_args(argv)
-    
-    # Initialize logger
-    logger = Logger()
-    
-    # Set debug mode
-    logger.set_debug_mode(args.debug)
-    
-    try:
-        # Log startup configuration
-        logger.info(f"Starting CARLA Driving Simulator")
-        logger.info(f"Configuration: scenario={args.scenario}, debug={args.debug}")
+    def setup_logger(self, debug: bool = False) -> None:
+        """Setup logger with debug mode"""
+        self.logger.set_debug_mode(debug)
         
-        # Create application instance
-        app = SimulationApplication(DEFAULT_CONFIG_FILE, args.scenario)
+    def register_scenarios(self) -> None:
+        """Register all available scenarios"""
+        ScenarioRegistry.register_all()
         
-        # Register available scenarios
-        register_scenarios()
+    def create_application(self, scenario: str) -> SimulationApplication:
+        """Create a new simulation application instance"""
+        return SimulationApplication(self.config_file, scenario)
         
-        # Connect to CARLA server first
-        if not app.connection.connect():
-            raise RuntimeError("Failed to connect to CARLA server")
-            
+    def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
+        """Setup simulation components and return them"""
         # Create and setup components with required arguments
         world_manager = WorldManager(
             client=app.connection.client,
@@ -185,42 +68,179 @@ def main(argv: Optional[List[str]] = None) -> None:
         )
         
         # Create controller based on config type
-        logger.debug(f"Creating controller with type: {app.controller_config.type}")
+        self.logger.debug(f"Creating controller with type: {app.controller_config.type}")
         vehicle_controller = VehicleController(app.controller_config)
         
         if app.controller_config.type == 'keyboard':
-            logger.debug("Initializing keyboard controller")
+            self.logger.debug("Initializing keyboard controller")
             controller = KeyboardController(app.controller_config)
         elif app.controller_config.type == 'autopilot':
-            logger.debug("Initializing autopilot controller")
+            self.logger.debug("Initializing autopilot controller")
             controller = AutopilotController(vehicle, app.controller_config, app.connection.client)
         else:
             raise ValueError(f"Unsupported controller type: {app.controller_config.type}")
             
-        logger.debug(f"Setting controller strategy: {type(controller).__name__}")
+        self.logger.debug(f"Setting controller strategy: {type(controller).__name__}")
         vehicle_controller.set_strategy(controller)
-        logger.debug("Setting vehicle for controller")
+        self.logger.debug("Setting vehicle for controller")
         vehicle_controller.set_vehicle(vehicle)
         
-        # Setup application
-        app.setup(
-            world_manager=world_manager,
-            vehicle_controller=vehicle_controller,
-            sensor_manager=sensor_manager,
-            logger=logger
+        return {
+            'world_manager': world_manager,
+            'vehicle_controller': vehicle_controller,
+            'sensor_manager': sensor_manager
+        }
+        
+    def run_single_scenario(self, scenario: str) -> bool:
+        """
+        Run a single scenario
+        
+        Args:
+            scenario: Name of the scenario to run
+            
+        Returns:
+            bool: True if scenario completed successfully, False otherwise
+        """
+        try:
+            # Create application instance for current scenario
+            app = self.create_application(scenario)
+            
+            # Connect to CARLA server
+            if not app.connection.connect():
+                raise RuntimeError("Failed to connect to CARLA server")
+            
+            try:
+                # Setup components
+                components = self.setup_components(app)
+                
+                # Setup application
+                app.setup(
+                    world_manager=components['world_manager'],
+                    vehicle_controller=components['vehicle_controller'],
+                    sensor_manager=components['sensor_manager'],
+                    logger=self.logger
+                )
+                
+                # Run simulation
+                app.run()
+                return True
+                
+            finally:
+                # Clean up after scenario
+                if hasattr(app, 'cleanup'):
+                    app.cleanup()
+                # Disconnect from CARLA server
+                if hasattr(app, 'connection') and app.connection:
+                    app.connection.disconnect()
+                    
+        except Exception as e:
+            self.logger.error(f"Error running scenario {scenario}: {str(e)}")
+            return False
+            
+    def run_scenarios(self, scenarios: List[str]) -> None:
+        """
+        Run multiple scenarios in sequence
+        
+        Args:
+            scenarios: List of scenario names to run
+        """
+        total_scenarios = len(scenarios)
+        for index, scenario in enumerate(scenarios, 1):
+            self.logger.info(f"================================")
+            self.logger.info(f"Running scenario {index}/{total_scenarios}: {scenario}")
+            self.logger.info(f"================================")
+            
+            success = self.run_single_scenario(scenario)
+            if not success:
+                self.logger.error(f"Scenario {scenario} failed")
+                
+    def parse_args(self, argv: Optional[List[str]] = None) -> argparse.Namespace:
+        """
+        Parse command line arguments
+        
+        Args:
+            argv: Optional list of command line arguments
+            
+        Returns:
+            argparse.Namespace: Parsed arguments
+        """
+        parser = argparse.ArgumentParser(
+            description='CARLA Driving Simulator',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
         
-        # Run simulation
-        app.run()
+        # Add arguments with defaults from DEFAULT_CONFIG
+        parser.add_argument(
+            '--debug',
+            action='store_true',
+            default=DEFAULT_CONFIG['debug'],
+            help='Enable debug mode for detailed logging'
+        )
         
-    except KeyboardInterrupt:
-        logger.info("Simulation stopped by user")
-    except Exception as e:
-        logger.error("Error running simulation", exc_info=e)
-        sys.exit(1)
-    finally:
-        logger.info("Simulation completed")
-        logger.close()  # Make sure to close the logger and its files
+        # Register scenarios first to get available scenarios
+        self.register_scenarios()
+        available_scenarios = ScenarioRegistry.get_available_scenarios()
+        
+        parser.add_argument(
+            '--scenario',
+            type=str,
+            default=DEFAULT_CONFIG['scenario'],
+            help='Type of scenario to run. Can be "all" or comma-separated list of scenarios: ' + ', '.join(available_scenarios)
+        )
+        
+        # Parse arguments
+        args = parser.parse_args(argv)
+        
+        # Validate config file exists
+        if not os.path.exists(self.config_file):
+            parser.error(f"Default configuration file not found: {self.config_file}")
+        
+        return args
+        
+    def run(self, argv: Optional[List[str]] = None) -> None:
+        """
+        Main entry point for running simulations
+        
+        Args:
+            argv: Optional list of command line arguments
+        """
+        try:
+            # Parse command line arguments
+            args = self.parse_args(argv)
+            
+            # Setup logger
+            self.setup_logger(args.debug)
+            
+            # Log startup configuration
+            self.logger.info(f"Starting CARLA Driving Simulator")
+            self.logger.info(f"Configuration: scenario={args.scenario}, debug={args.debug}")
+            
+            # Determine which scenarios to run
+            if args.scenario.lower() == 'all':
+                scenarios_to_run = ScenarioRegistry.get_available_scenarios()
+            else:
+                scenarios_to_run = [s.strip() for s in args.scenario.split(',')]
+                # Validate scenarios
+                invalid_scenarios = [s for s in scenarios_to_run if s not in ScenarioRegistry.get_available_scenarios()]
+                if invalid_scenarios:
+                    raise ValueError(f"Invalid scenario(s): {', '.join(invalid_scenarios)}. Available scenarios: {', '.join(ScenarioRegistry.get_available_scenarios())}")
+            
+            # Run scenarios
+            self.run_scenarios(scenarios_to_run)
+            
+        except KeyboardInterrupt:
+            self.logger.info("Simulation stopped by user")
+        except Exception as e:
+            self.logger.error("Error running simulation", exc_info=e)
+            sys.exit(1)
+        finally:
+            self.logger.info("Simulation completed")
+            self.logger.close()
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """Entry point for the application"""
+    runner = SimulationRunner()
+    runner.run(argv)
 
 if __name__ == '__main__':
     main(sys.argv[1:]) 

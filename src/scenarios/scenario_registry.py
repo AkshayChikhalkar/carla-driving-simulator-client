@@ -1,11 +1,78 @@
 from typing import Dict, Type, Optional, Any
 from src.core.interfaces import IScenario, IWorldManager, IVehicleController, ILogger
+from src.scenarios.follow_route_scenario import FollowRouteScenario
+from src.scenarios.avoid_obstacle_scenario import AvoidObstacleScenario
+from src.scenarios.emergency_brake_scenario import EmergencyBrakeScenario
+from src.scenarios.vehicle_cutting_scenario import VehicleCuttingScenario
 
 class ScenarioRegistry:
     """Registry for scenario types"""
     
+    # Define all available scenarios in one place
+    AVAILABLE_SCENARIOS = {
+        'follow_route': {
+            'class': FollowRouteScenario,
+            'default_config': {
+                'num_waypoints': 5,
+                'waypoint_tolerance': 5.0,
+                'min_distance': 50.0,
+                'max_distance': 100.0
+            }
+        },
+        'avoid_obstacle': {
+            'class': AvoidObstacleScenario,
+            'default_config': {
+                'target_distance': 100.0,
+                'obstacle_spacing': 25.0,
+                'completion_distance': 110.0,
+                'collision_threshold': 1.0,
+                'max_simulation_time': 120.0,
+                'waypoint_tolerance': 5.0,
+                'min_waypoint_distance': 30.0,
+                'max_waypoint_distance': 50.0,
+                'num_waypoints': 3
+            }
+        },
+        'emergency_brake': {
+            'class': EmergencyBrakeScenario,
+            'default_config': {
+                'trigger_distance': 50.0,
+                'target_speed': 40.0,
+                'obstacle_type': "static.prop.streetbarrier"
+            }
+        },
+        'vehicle_cutting': {
+            'class': VehicleCuttingScenario,
+            'default_config': {
+                'target_distance': 100.0,
+                'cutting_distance': 30.0,
+                'completion_distance': 110.0,
+                'collision_threshold': 1.0,
+                'max_simulation_time': 120.0,
+                'waypoint_tolerance': 5.0,
+                'min_waypoint_distance': 30.0,
+                'max_waypoint_distance': 50.0,
+                'num_waypoints': 3,
+                'cutting_vehicle_model': "vehicle.fuso.mitsubishi",
+                'normal_speed': 30.0,
+                'cutting_speed': 40.0,
+                'cutting_trigger_distance': 20.0
+            }
+        }
+    }
+    
     _scenarios: Dict[str, Type[IScenario]] = {}
     _scenario_configs: Dict[str, Dict] = {}
+
+    @classmethod
+    def register_all(cls) -> None:
+        """Register all available scenarios"""
+        for scenario_type, scenario_info in cls.AVAILABLE_SCENARIOS.items():
+            cls.register(
+                scenario_type=scenario_type,
+                scenario_class=scenario_info['class'],
+                default_config=scenario_info['default_config']
+            )
 
     @classmethod
     def register(cls, 
