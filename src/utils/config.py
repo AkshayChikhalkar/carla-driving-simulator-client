@@ -317,4 +317,163 @@ def load_config(config_path: str) -> Config:
         ),
         vehicle=VehicleConfig(**config_dict['vehicle']),
         scenarios=ScenarioConfig(**config_dict['scenarios'])
-    ) 
+    )
+
+def save_config(config: Config, config_path: str) -> None:
+    """Save configuration to YAML file"""
+    config_dict = {
+        'server': {
+            'host': config.server.host,
+            'port': config.server.port,
+            'timeout': config.server.timeout,
+            'connection': {
+                'retries': config.server.connection.max_retries,
+                'retry_delay': config.server.connection.retry_delay
+            }
+        },
+        'world': {
+            'map': config.world.map,
+            'weather': {
+                'cloudiness': config.world.weather.cloudiness,
+                'precipitation': config.world.weather.precipitation,
+                'precipitation_deposits': config.world.weather.precipitation_deposits,
+                'wind_intensity': config.world.weather.wind_intensity,
+                'sun_azimuth_angle': config.world.weather.sun_azimuth_angle,
+                'sun_altitude_angle': config.world.weather.sun_altitude_angle,
+                'fog_density': config.world.weather.fog_density,
+                'fog_distance': config.world.weather.fog_distance,
+                'wetness': config.world.weather.wetness,
+                'fog_falloff': config.world.weather.fog_falloff
+            },
+            'physics': {
+                'gravity': config.world.physics.max_substep_delta_time,
+                'max_substeps': config.world.physics.max_substeps,
+                'substep_time': config.world.physics.max_substep_delta_time
+            },
+            'traffic': {
+                'distance_to_leading_vehicle': config.world.traffic.distance_to_leading_vehicle,
+                'speed_difference_percentage': config.world.traffic.speed_difference_percentage,
+                'ignore_lights_percentage': config.world.traffic.ignore_lights_percentage,
+                'ignore_signs_percentage': config.world.traffic.ignore_signs_percentage
+            },
+            'fixed_delta_seconds': config.world.fixed_delta_seconds,
+            'target_distance': config.world.target_distance,
+            'num_vehicles': config.world.num_vehicles,
+            'enable_collision': config.world.enable_collision,
+            'synchronous_mode': config.world.synchronous_mode
+        },
+        'simulation': {
+            'max_speed': config.simulation.max_speed,
+            'simulation_time': config.simulation.simulation_time,
+            'update_rate': config.simulation.update_rate,
+            'speed_change_threshold': config.simulation.speed_change_threshold,
+            'position_change_threshold': config.simulation.position_change_threshold,
+            'heading_change_threshold': config.simulation.heading_change_threshold,
+            'target_tolerance': config.simulation.target_tolerance,
+            'max_collision_force': config.simulation.max_collision_force
+        },
+        'logging': {
+            'simulation_file': config.logging.simulation_file,
+            'operations_file': config.logging.operations_file,
+            'log_level': config.logging.log_level,
+            'format': config.logging.format,
+            'enabled': config.logging.enabled,
+            'directory': config.logging.directory
+        },
+        'display': {
+            'width': config.display.width,
+            'height': config.display.height,
+            'fps': config.display.fps,
+            'hud': {
+                'font_size': config.display.hud.font_size,
+                'font_name': config.display.hud.font_name,
+                'alpha': config.display.hud.alpha,
+                'colors': {
+                    'text': config.display.hud.colors.text,
+                    'background': config.display.hud.colors.background,
+                    'border': config.display.hud.colors.border
+                }
+            },
+            'minimap': {
+                'width': config.display.minimap.width,
+                'height': config.display.minimap.height,
+                'scale': config.display.minimap.scale,
+                'alpha': config.display.minimap.alpha,
+                'colors': {
+                    'text': config.display.minimap.colors.text,
+                    'background': config.display.minimap.colors.background,
+                    'border': config.display.minimap.colors.border
+                }
+            },
+            'camera': {
+                'font_size': config.display.camera.font_size,
+                'font_name': config.display.camera.font_name
+            },
+            'hud_enabled': config.display.hud_enabled,
+            'minimap_enabled': config.display.minimap_enabled
+        },
+        'sensors': {
+            'camera': {
+                'width': config.sensors.camera.width,
+                'height': config.sensors.camera.height,
+                'fov': config.sensors.camera.fov,
+                'sensor_tick': config.sensors.camera.sensor_tick
+            },
+            'collision': {
+                'sensor_tick': config.sensors.collision.sensor_tick
+            },
+            'gnss': {
+                'sensor_tick': config.sensors.gnss.sensor_tick,
+                'noise_alt_bias': config.sensors.gnss.noise_alt_bias,
+                'noise_alt_stddev': config.sensors.gnss.noise_alt_stddev,
+                'noise_lat_bias': config.sensors.gnss.noise_lat_bias,
+                'noise_lat_stddev': config.sensors.gnss.noise_lat_stddev,
+                'noise_lon_bias': config.sensors.gnss.noise_lon_bias,
+                'noise_lon_stddev': config.sensors.gnss.noise_lon_stddev
+            }
+        },
+        'controller': {
+            'type': config.controller.type,
+            'steer_speed': config.controller.steer_speed,
+            'throttle_speed': config.controller.throttle_speed,
+            'brake_speed': config.controller.brake_speed,
+            'keyboard': {
+                'forward': config.controller.keyboard.forward,
+                'backward': config.controller.keyboard.backward,
+                'left': config.controller.keyboard.left,
+                'right': config.controller.keyboard.right,
+                'brake': config.controller.keyboard.brake,
+                'hand_brake': config.controller.keyboard.hand_brake,
+                'reverse': config.controller.keyboard.reverse,
+                'quit': config.controller.keyboard.quit
+            }
+        },
+        'vehicle': {
+            'model': config.vehicle.model,
+            'mass': config.vehicle.mass,
+            'drag_coefficient': config.vehicle.drag_coefficient,
+            'max_rpm': config.vehicle.max_rpm,
+            'moi': config.vehicle.moi
+        },
+        'scenarios': {
+            'follow_route': {
+                'num_waypoints': config.scenarios.follow_route.num_waypoints,
+                'waypoint_distance': config.scenarios.follow_route.waypoint_distance
+            },
+            'avoid_obstacle': {
+                'obstacle_distance': config.scenarios.avoid_obstacle.target_distance,
+                'obstacle_size': config.scenarios.avoid_obstacle.obstacle_spacing
+            },
+            'emergency_brake': {
+                'trigger_distance': config.scenarios.emergency_brake.trigger_distance,
+                'min_speed': config.scenarios.emergency_brake.target_speed
+            },
+            'vehicle_cutting': {
+                'cutting_distance': config.scenarios.vehicle_cutting.cutting_distance,
+                'cutting_speed': config.scenarios.vehicle_cutting.cutting_speed
+            }
+        }
+    }
+    
+    with open(config_path, 'w') as f:
+        yaml.dump(config_dict, f, default_flow_style=False) 
