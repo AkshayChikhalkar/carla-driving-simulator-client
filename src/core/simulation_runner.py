@@ -72,7 +72,7 @@ class SimulationRunner:
             controller = KeyboardController(app.controller_config)
         elif controller_type == 'autopilot':
             self.logger.debug("Initializing autopilot controller")
-            controller = AutopilotController(vehicle, app.controller_config, app.connection.client)
+            controller = AutopilotController(vehicle, app.controller_config, app.connection.client, world_manager)
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
             

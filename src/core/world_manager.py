@@ -39,6 +39,8 @@ class WorldManager(IWorldManager):
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
         self.logger = logging.getLogger(__name__)
+        self.traffic_manager = None
+        self.traffic_manager_port = 8001  # Default port for traffic manager
         
         # Get configuration values with fallbacks
         self.synchronous_mode = getattr(config, 'synchronous_mode', True)
@@ -285,10 +287,16 @@ class WorldManager(IWorldManager):
         """Get list of all traffic actors in the world"""
         return self._traffic_actors
     
-    def setup_traffic(self, tm_port: int) -> None:
+    def setup_traffic(self, tm_port: Optional[int] = None) -> None:
         """Initialize traffic in the world with specific traffic manager port"""
+        if self.traffic_manager is not None:
+            return  # Traffic manager already initialized
+            
+        # Use provided port or default
+        self.traffic_manager_port = tm_port or self.traffic_manager_port
+        
         # Get traffic manager with specific port
-        self.traffic_manager = self.client.get_trafficmanager(tm_port)
+        self.traffic_manager = self.client.get_trafficmanager(self.traffic_manager_port)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_global_distance_to_leading_vehicle(3.5)
         self.traffic_manager.global_percentage_speed_difference(15.0)
@@ -301,12 +309,20 @@ class WorldManager(IWorldManager):
             
             npc = self.spawn_actor(bp, transform)
             if npc is not None:
-                npc.set_autopilot(True, tm_port)
+                npc.set_autopilot(True, self.traffic_manager_port)
                 self.traffic_manager.ignore_lights_percentage(npc, 0)
                 self.traffic_manager.vehicle_percentage_speed_difference(npc, random.uniform(-10, 10))
                 self._traffic_actors.append(npc)
                 # Tick the world to ensure proper spawning
                 self.world.tick()
+                
+    def get_traffic_manager(self) -> Optional[carla.TrafficManager]:
+        """Get the traffic manager instance"""
+        return self.traffic_manager
+        
+    def get_traffic_manager_port(self) -> int:
+        """Get the traffic manager port"""
+        return self.traffic_manager_port
     
     def generate_target_point(self, spawn_point: carla.Transform) -> TargetPoint:
         """Generate a target point at specified distance from spawn point"""

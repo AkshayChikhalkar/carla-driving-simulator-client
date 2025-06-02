@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 import logging
 import os
 from datetime import datetime
+
 from ..utils.config import ControllerConfig, LoggingConfig
 from ..utils.logging import Logger
 from ..utils.settings import DEBUG_MODE  # Import from settings module
@@ -357,12 +358,21 @@ class GamepadController(ControllerStrategy):
 class AutopilotController(ControllerStrategy):
     """AI-based autopilot control"""
     
-    def __init__(self, vehicle: carla.Vehicle, config: ControllerConfig, client: carla.Client):
+    def __init__(self, vehicle: carla.Vehicle, config: ControllerConfig, client: carla.Client, world_manager: Optional['IWorldManager'] = None):
         self.vehicle = vehicle
         self.config = config
+        self.world_manager = world_manager
         
-        # Get traffic manager directly from client
-        self.traffic_manager = client.get_trafficmanager()
+        # Get traffic manager from world manager if available, otherwise create new one
+        if world_manager and hasattr(world_manager, 'get_traffic_manager'):
+            self.traffic_manager = world_manager.get_traffic_manager()
+            if not self.traffic_manager:
+                # If traffic manager doesn't exist yet, create it
+                world_manager.setup_traffic()
+                self.traffic_manager = world_manager.get_traffic_manager()
+        else:
+            # Fallback to creating new traffic manager if world manager not available
+            self.traffic_manager = client.get_trafficmanager()
         
         # Get traffic settings from config
         traffic_config = getattr(config, 'traffic', {})
