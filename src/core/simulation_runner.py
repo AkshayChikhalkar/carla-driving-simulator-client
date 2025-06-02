@@ -5,8 +5,10 @@ Core simulation runner class for managing simulation execution.
 import os
 import sys
 import argparse
+import pytest
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from src.core.simulation_application import SimulationApplication
 from src.core.world_manager import WorldManager
@@ -85,7 +87,7 @@ class SimulationRunner:
             'sensor_manager': sensor_manager
         }
         
-    def run_single_scenario(self, scenario: str) -> bool:
+    def run_single_scenario(self, scenario: str) -> tuple[bool, str]:
         """
         Run a single scenario
         
@@ -93,7 +95,7 @@ class SimulationRunner:
             scenario: Name of the scenario to run
             
         Returns:
-            bool: True if scenario completed successfully, False otherwise
+            tuple[bool, str]: (success status, result message)
         """
         try:
             # Create application instance for current scenario
@@ -101,7 +103,7 @@ class SimulationRunner:
             
             # Connect to CARLA server
             if not app.connection.connect():
-                raise RuntimeError("Failed to connect to CARLA server")
+                return False, "Failed to connect to CARLA server"
             
             try:
                 # Setup components
@@ -117,19 +119,26 @@ class SimulationRunner:
                 
                 # Run simulation
                 app.run()
-                return True
+                
+                # Get scenario result from cleanup
+                if hasattr(app, 'cleanup'):
+                    completed, success = app.cleanup()
+                    if completed:
+                        message = "Scenario completed successfully" if success else "Scenario failed to meet success criteria"
+                        return success, message
+                    else:
+                        return False, "Scenario did not complete"
+                return True, "Scenario completed"
                 
             finally:
-                # Clean up after scenario
-                if hasattr(app, 'cleanup'):
-                    app.cleanup()
                 # Disconnect from CARLA server
                 if hasattr(app, 'connection') and app.connection:
                     app.connection.disconnect()
                     
         except Exception as e:
-            self.logger.error(f"Error running scenario {scenario}: {str(e)}")
-            return False
+            error_msg = f"Error running scenario {scenario}: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
             
     def run_scenarios(self, scenarios: List[str]) -> None:
         """
@@ -144,10 +153,90 @@ class SimulationRunner:
             self.logger.info(f"Running scenario {index}/{total_scenarios}: {scenario}")
             self.logger.info(f"================================")
             
-            success = self.run_single_scenario(scenario)
+            success, message = self.run_single_scenario(scenario)
             if not success:
-                self.logger.error(f"Scenario {scenario} failed")
+                self.logger.error(f"Scenario {scenario} failed: {message}")
                 
+    def run_with_report(self, scenarios: List[str], debug: bool = False) -> None:
+        """
+        Run scenarios as tests and generate HTML report
+        
+        Args:
+            scenarios: List of scenarios to run
+            debug: Whether to enable debug logging
+        """
+        # Create reports directory
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        
+        # Configure pytest arguments
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        html_report = reports_dir / f"scenario_report_{timestamp}.html"
+        
+        # Create temporary test file
+        test_file = Path("tests/temp_test_scenarios.py")
+        test_file.parent.mkdir(exist_ok=True)
+        
+        # Generate test file content
+        test_content = f'''import pytest
+from src.core.simulation_runner import SimulationRunner
+
+class TestScenario:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.runner = SimulationRunner()
+        self.runner.setup_logger(debug={debug})
+        self.runner.register_scenarios()
+        yield
+        if hasattr(self.runner, 'logger'):
+            self.runner.logger.close()
+
+    def run_scenario(self, scenario_name):
+        """Run a single scenario and return result with message"""
+        success, message = self.runner.run_single_scenario(scenario_name)
+        return success, message
+'''
+        
+        # Add test methods for each scenario
+        for scenario in scenarios:
+            test_content += f'''
+    def test_{scenario}(self):
+        """Test {scenario} scenario"""
+        success, message = self.run_scenario("{scenario}")
+        assert success, message
+'''
+        
+        # Write test file
+        test_file.write_text(test_content)
+        
+        try:
+            # Run pytest with proper argument handling
+            import sys
+            # Save original sys.argv
+            original_argv = sys.argv.copy()
+            
+            # Set up pytest arguments
+            sys.argv = [
+                'pytest',
+                str(test_file),
+                '-v',
+                f'--html={html_report}',
+                '--self-contained-html'
+            ]
+            
+            if debug:
+                sys.argv.append('--log-cli-level=DEBUG')
+                
+            # Run pytest
+            pytest.main()
+            
+        finally:
+            # Restore original sys.argv
+            sys.argv = original_argv
+            # Clean up temporary test file
+            if test_file.exists():
+                test_file.unlink()
+            
     def parse_args(self, argv: Optional[List[str]] = None) -> argparse.Namespace:
         """
         Parse command line arguments
@@ -172,6 +261,12 @@ class SimulationRunner:
             action='store_true',
             default=debug_default,
             help='Enable debug mode for detailed logging'
+        )
+        
+        parser.add_argument(
+            '--report',
+            action='store_true',
+            help='Run scenarios as tests and generate HTML report'
         )
         
         # Register scenarios first to get available scenarios
@@ -225,8 +320,11 @@ class SimulationRunner:
                 if invalid_scenarios:
                     raise ValueError(f"Invalid scenario(s): {', '.join(invalid_scenarios)}. Available scenarios: {', '.join(ScenarioRegistry.get_available_scenarios())}")
             
-            # Run scenarios
-            self.run_scenarios(scenarios_to_run)
+            # Run scenarios with or without report
+            if args.report:
+                self.run_with_report(scenarios_to_run, args.debug)
+            else:
+                self.run_scenarios(scenarios_to_run)
             
         except KeyboardInterrupt:
             self.logger.info("Simulation stopped by user")

@@ -132,20 +132,59 @@ class WorldManager(IWorldManager):
             raise
 
     def _spawn_with_retry(self, blueprint: carla.ActorBlueprint, spawn_point: carla.Transform, max_attempts: int = 10) -> Optional[carla.Actor]:
-        """Attempt to spawn an actor with retry logic"""
+        """
+        Attempt to spawn an actor with retry logic and location adjustment
+        
+        Args:
+            blueprint: Actor blueprint to spawn
+            spawn_point: Initial spawn point
+            max_attempts: Maximum number of spawn attempts
+            
+        Returns:
+            Optional[carla.Actor]: Spawned actor if successful, None otherwise
+        """
+        # Get all available spawn points
+        spawn_points = self.world.get_map().get_spawn_points()
+        if not spawn_points:
+            self.logger.error("No spawn points available in the map")
+            return None
+            
+        # Try initial spawn point first
         for attempt in range(max_attempts):
             try:
+                # Try to spawn at current spawn point
                 actor = self.world.spawn_actor(blueprint, spawn_point)
                 if actor and actor.is_alive:
-                    self.logger.info(f"{actor.type_id} spawned successfully")
+                    self.logger.info(f"{actor.type_id} spawned successfully at {spawn_point.location}")
                     return actor
                 elif actor:
                     actor.destroy()
+                    
+                # If spawn failed, try a different spawn point
+                if attempt < max_attempts - 1:
+                    # Get a random spawn point different from the current one
+                    new_spawn_point = random.choice(spawn_points)
+                    while new_spawn_point.location == spawn_point.location and len(spawn_points) > 1:
+                        new_spawn_point = random.choice(spawn_points)
+                    
+                    # Adjust spawn point slightly to avoid collisions
+                    new_spawn_point.location.x += random.uniform(-2.0, 2.0)
+                    new_spawn_point.location.y += random.uniform(-2.0, 2.0)
+                    new_spawn_point.location.z += 0.5  # Lift slightly to avoid ground collision
+                    
+                    spawn_point = new_spawn_point
+                    self.logger.info(f"Trying new spawn point at {spawn_point.location}")
+                    time.sleep(0.5)  # Wait before retry
+                    
             except Exception as e:
                 self.logger.warning(f"Spawn attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_attempts - 1:
+                    # Try a different spawn point on next attempt
+                    spawn_point = random.choice(spawn_points)
                     time.sleep(0.5)  # Wait before retry
                 continue
+                
+        self.logger.error(f"Failed to spawn {blueprint.id} after {max_attempts} attempts")
         return None
 
     def create_vehicle(self) -> Optional[carla.Vehicle]:
