@@ -67,7 +67,9 @@ class SimulationApplication:
         # Initialize display manager
         if DEBUG_MODE:
             print("[SimulationApplication] Initializing display manager...")
-        self.display_manager = DisplayManager(self._config.display_config)
+        # Check if we're in web mode
+        is_web_mode = getattr(self._config, 'web_mode', False)
+        self.display_manager = DisplayManager(self._config.display_config, web_mode=is_web_mode)
         if DEBUG_MODE:
             print("[SimulationApplication] Display manager initialized")
         
