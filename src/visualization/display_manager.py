@@ -149,6 +149,7 @@ class CameraView(SensorObserver):
         self.config = config
         self.surface: Optional[pygame.Surface] = None
         self.last_frame = None
+        self.logger = logging.getLogger(__name__)
     
     def on_sensor_data(self, data: SensorData) -> None:
         """Handle new camera data"""
@@ -156,11 +157,28 @@ class CameraView(SensorObserver):
             try:
                 # Convert numpy array to pygame surface
                 array = data.image
-                array = array[:, :, ::-1]  # Convert from RGB to BGR
-                array = array.swapaxes(0, 1)  # Swap axes for pygame
-                self.last_frame = array  # Store the last frame
+                if array is None:
+                    self.logger.warning("Received empty camera data")
+                    return
+                    
+                # Convert from RGB to BGR if needed
+                if array.shape[2] == 3:  # Ensure it's a color image
+                    array = array[:, :, ::-1]  # Convert from RGB to BGR
+                
+                # Swap axes for pygame
+                array = array.swapaxes(0, 1)
+                
+                # Store the last frame
+                self.last_frame = array
+                
+                # Create surface
                 self.surface = pygame.surfarray.make_surface(array)
+                
+                if self.surface is None:
+                    self.logger.warning("Failed to create surface from camera data")
+                    
             except Exception as e:
+                self.logger.error("Error processing camera data", exc_info=e)
                 self.surface = None
     
     def render(self, display: pygame.Surface) -> None:
@@ -173,8 +191,9 @@ class CameraView(SensorObserver):
                     try:
                         scaled_surface = pygame.transform.scale(self.surface, display_size)
                         display.blit(scaled_surface, (0, 0))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.error("Error scaling camera surface", exc_info=e)
+                        display.fill((32, 32, 32))
                 else:
                     display.blit(self.surface, (0, 0))
             elif self.last_frame is not None:
@@ -182,12 +201,14 @@ class CameraView(SensorObserver):
                 try:
                     self.surface = pygame.surfarray.make_surface(self.last_frame)
                     display.blit(self.surface, (0, 0))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.error("Error recreating surface from last frame", exc_info=e)
+                    display.fill((32, 32, 32))
             else:
                 # If no camera data, fill with a dark gray color
                 display.fill((32, 32, 32))
-        except Exception:
+        except Exception as e:
+            self.logger.error("Error rendering camera view", exc_info=e)
             display.fill((32, 32, 32))  # Fallback to dark gray
             
     def cleanup(self) -> None:
@@ -212,78 +233,73 @@ def get_window_count():
 class DisplayManager:
     """Facade for all visualization components"""
     
-    def __init__(self, config: DisplayConfig):
-        """Initialize display manager"""
+    def __init__(self, config: DisplayConfig, web_mode: bool = False):
+        """Initialize display manager
+        
+        Args:
+            config: Display configuration
+            web_mode: If True, run in web mode (headless)
+        """
         self.config = config
+        self.web_mode = web_mode
+        self.screen = None
+        self.clock = None
+        self.font = None
+        self.minimized = False
+        self.camera_view = None
+        self.current_frame = None
+        self.frame_buffer = None
         
-        # Get display dimensions from config or use defaults
-        self.width = getattr(config, 'width', DISPLAY_CONFIG['width'])
-        self.height = getattr(config, 'height', DISPLAY_CONFIG['height'])
-        self.fps = getattr(config, 'fps', DISPLAY_CONFIG['fps'])
-        
-        # Initialize pygame display
+        # Initialize pygame
         pygame.init()
-        pygame.event.set_allowed([
-            pygame.QUIT,
-            pygame.KEYDOWN,
-            pygame.KEYUP,
-            pygame.WINDOWFOCUSLOST,
-            pygame.WINDOWFOCUSGAINED,
-            pygame.WINDOWMINIMIZED,
-            pygame.WINDOWRESTORED,
-            pygame.WINDOWEXPOSED,
-            pygame.WINDOWRESIZED
-        ])
         
-        # Set up window position
-        window_count = get_window_count()
-        offset = window_count * 30
-        os.environ['SDL_VIDEO_WINDOW_POS'] = f"{200 + offset},{200 + offset}"
-        
-        # Create resizable window with standard controls
-        self.display = pygame.display.set_mode(
-            (self.width, self.height),
-            pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
-        )
-        pygame.display.set_caption(f"CARLA Simulator - Instance {window_count + 1}")
+        if web_mode:
+            # Set environment variables for headless mode
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            os.environ['SDL_AUDIODRIVER'] = 'dummy'
+            # Create a surface for rendering without a window
+            self.screen = pygame.Surface((config.width, config.height))
+        else:
+            # Create a window for CLI mode
+            pygame.display.set_caption("CARLA Driving Simulator")
+            self.screen = pygame.display.set_mode(
+                (config.width, config.height),
+                pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
+            )
+            
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 24)
         
         # Initialize components with config
         self.hud = HUD(config)
         self.minimap = Minimap(config)
         self.camera_view = CameraView(config)
         
-        # Window state
-        self.minimized = False
-        self.focused = True
-        self.should_quit = False
-        self.current_size = (self.width, self.height)
-        self.last_event_time = time.time()
-        self.force_exit = False
-        self.frame_count = 0
-        
-        # FPS tracking
-        self.clock = pygame.time.Clock()
-        self.fps_font = pygame.font.Font(None, 24)
-        self.last_fps_update = time.time()
-        self.current_fps = 0
+        # Store the last rendered frame
+        self.last_frame = None
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
+        
+        # FPS tracking
+        self.last_fps_update = time.time()
+        self.current_fps = 0
     
     def handle_resize(self, size):
         """Handle window resize"""
-        self.current_size = size
-        self.display = pygame.display.set_mode(size, pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE)
+        if not self.web_mode:
+            self.screen = pygame.display.set_mode(size, pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE)
     
     def process_events(self):
         """Process pygame events"""
+        if self.web_mode:
+            return True
+            
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.should_quit = True
                 return False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.should_quit = True
                     return False
             elif event.type == pygame.WINDOWRESIZED:
                 self.handle_resize(event.size)
@@ -291,22 +307,21 @@ class DisplayManager:
                 self.minimized = True
             elif event.type == pygame.WINDOWRESTORED:
                 self.minimized = False
-            elif event.type == pygame.WINDOWFOCUSLOST:
-                self.focused = False
-            elif event.type == pygame.WINDOWFOCUSGAINED:
-                self.focused = True
         return True
     
     def render(self, vehicle_state: VehicleState, target_position: carla.Location) -> bool:
         """Render the display"""
         try:
-            # Process events first
-            if not self.process_events():
+            # Process events first if not in web mode
+            if not self.web_mode and not self.process_events():
                 return False
                 
-            # Skip rendering if minimized
-            if self.minimized:
+            # Skip rendering if minimized and not in web mode
+            if not self.web_mode and self.minimized:
                 return True
+                
+            # Clear the screen first
+            self.screen.fill((0, 0, 0))
                 
             # Update camera view first (as background)
             self._update_camera()
@@ -317,55 +332,54 @@ class DisplayManager:
             # Update minimap
             self._update_minimap(vehicle_state, target_position)
             
+            # Update FPS counter for both CLI and web UI modes
+            current_time = time.time()
+            if not hasattr(self, '_last_fps_update'):
+                self._last_fps_update = current_time
+                self._frame_count = 0
+                self._current_fps = 0
+            
+            self._frame_count += 1
+            
+            # Update FPS every second
+            if current_time - self._last_fps_update >= 1.0:
+                self._current_fps = self._frame_count / (current_time - self._last_fps_update)
+                self._frame_count = 0
+                self._last_fps_update = current_time
+            
             # Render FPS counter
-            self._render_fps()
+            fps_text = self.font.render(f"FPS: {self._current_fps:.1f}", True, (255, 255, 255))
+            # Position FPS text at bottom left with 10px padding
+            fps_rect = fps_text.get_rect()
+            fps_rect.bottomleft = (10, self.screen.get_height() - 10)
+            self.screen.blit(fps_text, fps_rect)
             
-            # Update display
-            pygame.display.flip()
+            # Update the display and tick clock if not in web mode
+            if not self.web_mode:
+                pygame.display.flip()
+                self.clock.tick(self.config.fps)
             
-            # Update frame count and clock
-            self.frame_count += 1
-            self.clock.tick(self.fps)  # Use configured FPS
+            # Store frame for web UI
+            frame = pygame.surfarray.array3d(self.screen)
+            frame = frame.swapaxes(0, 1)  # Swap axes for correct orientation
+            
+            # Convert to BGR if in web mode
+            if self.web_mode:
+                frame = frame[:, :, ::-1]
+                
+            self.last_frame = frame
             
             return True
         except Exception as e:
             self.logger.error("Error in display rendering", exc_info=e)
             return False
 
-    def _render_fps(self):
-        """Render FPS counter"""
-        try:
-            # Update FPS every second
-            current_time = time.time()
-            if current_time - self.last_fps_update >= 1.0:
-                self.current_fps = self.clock.get_fps()
-                self.last_fps_update = current_time
-            
-            # Render FPS text
-            fps_text = f"FPS: {self.current_fps:.1f}"
-            fps_surface = self.fps_font.render(fps_text, True, (255, 255, 255))
-            
-            # Create semi-transparent background
-            bg_surface = pygame.Surface((100, 30))
-            bg_surface.set_alpha(128)
-            bg_surface.fill((0, 0, 0))
-            
-            # Blit background and text
-            self.display.blit(bg_surface, (10, self.display.get_height() - 40))
-            self.display.blit(fps_surface, (15, self.display.get_height() - 35))
-            
-        except Exception as e:
-            self.logger.error("Error rendering FPS", exc_info=e)
-
     def _update_hud(self, vehicle_state: VehicleState) -> None:
         """Update HUD with vehicle state"""
         try:
             if not vehicle_state:
                 return
-                
-            # Render HUD directly with vehicle state
-            self.hud.render(self.display, vehicle_state)
-            
+            self.hud.render(self.screen, vehicle_state)
         except Exception as e:
             self.logger.error("Error updating HUD", exc_info=e)
     
@@ -374,17 +388,26 @@ class DisplayManager:
         try:
             if not vehicle_state or not target_position:
                 return
-                
-            self.minimap.render(self.display, vehicle_state, target_position)
+            self.minimap.render(self.screen, vehicle_state, target_position)
         except Exception as e:
             self.logger.error("Error updating minimap", exc_info=e)
     
     def _update_camera(self) -> None:
         """Update camera view"""
         try:
-            self.camera_view.render(self.display)
+            if self.camera_view:
+                self.camera_view.render(self.screen)
+            else:
+                # Fill with a dark gray color if no camera view
+                self.screen.fill((32, 32, 32))
         except Exception as e:
             self.logger.error("Error updating camera view", exc_info=e)
+            # Fill with a dark gray color on error
+            self.screen.fill((32, 32, 32))
+
+    def get_current_frame(self) -> Optional[np.ndarray]:
+        """Get the current frame as a numpy array"""
+        return self.last_frame
 
     def cleanup(self) -> None:
         """Clean up display resources"""
