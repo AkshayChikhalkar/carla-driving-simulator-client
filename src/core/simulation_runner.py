@@ -65,9 +65,12 @@ class SimulationRunner:
         # Create controller based on config type
         controller_type = getattr(app.controller_config, 'type', 'autopilot')
         self.logger.debug(f"Creating controller with type: {controller_type}")
-        vehicle_controller = VehicleController(app.controller_config)
         
-        if controller_type == 'keyboard':
+        # Check if we're in web mode
+        is_web_mode = getattr(app._config, 'web_mode', False)
+        vehicle_controller = VehicleController(app.controller_config, headless=is_web_mode)
+        
+        if controller_type == 'keyboard' and not is_web_mode:
             self.logger.debug("Initializing keyboard controller")
             controller = KeyboardController(app.controller_config)
         elif controller_type == 'autopilot':
