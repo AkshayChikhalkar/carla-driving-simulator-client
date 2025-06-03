@@ -13,7 +13,7 @@ class WebDisplayManager(DisplayManager):
     
     def __init__(self, config):
         """Initialize web display manager"""
-        super().__init__(config)
+        super().__init__(config, web_mode=True)  # Always run in headless mode for web UI
         self._last_frame = None
     
     def render(self, vehicle_state: VehicleState, target_position: carla.Location) -> bool:
