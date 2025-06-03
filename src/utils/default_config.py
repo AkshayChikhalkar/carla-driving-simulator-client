@@ -8,7 +8,8 @@ from typing import Dict, Any
 # Default simulation configuration (fallback values)
 SIMULATION_CONFIG: Dict[str, Any] = {
     'scenario': 'follow_route',  # Default scenario if none specified
-    'debug': False  # Default debug mode
+    'debug': False,  # Default debug mode
+    'web_mode': False  # Default web mode state
 }
 
 # Default logging configuration (fallback values)
