@@ -30,6 +30,21 @@ function App() {
           </Routes>
         </Layout>
       </Router>
+      <img
+        src={process.env.PUBLIC_URL + '/th-owl-logo.png'}
+        alt="TH OWL Logo"
+        style={{
+          position: 'fixed',
+          top: 12,
+          left: 12,
+          height: 56,
+          zIndex: 1000,
+          background: 'rgba(0,0,0,0.7)',
+          borderRadius: 8,
+          padding: 4,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+        }}
+      />
     </ThemeProvider>
   );
 }
