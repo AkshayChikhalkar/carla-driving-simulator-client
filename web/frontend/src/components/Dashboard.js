@@ -352,8 +352,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             />
           ) : (
             <img
-              src="/logo_monocab.png"
-              alt="Monocab Logo"
+              src="/wavy_logo_loading.gif"
+              alt="Loading"
               style={{
                 width: '100%',
                 height: '100%',
