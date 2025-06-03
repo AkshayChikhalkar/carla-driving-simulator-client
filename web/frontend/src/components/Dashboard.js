@@ -337,18 +337,34 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             borderColor: 'divider'
           }}
         >
-          <canvas
-            ref={canvasRef}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              display: 'block',
-              background: '#000',
-              margin: 0,
-              padding: 0
-            }}
-          />
+          {isRunning ? (
+            <canvas
+              ref={canvasRef}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                display: 'block',
+                background: '#000',
+                margin: 0,
+                padding: 0
+              }}
+            />
+          ) : (
+            <img
+              src="/logo_monocab.png"
+              alt="Monocab Logo"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                display: 'block',
+                background: '#000',
+                margin: 0,
+                padding: 0
+              }}
+            />
+          )}
         </Box>
       </Box>
     </>
