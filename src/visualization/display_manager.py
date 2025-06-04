@@ -34,8 +34,9 @@ class HUD:
         """Initialize HUD with given font size"""
         pygame.font.init()
         self.font = pygame.font.Font(pygame.font.get_default_font(), config.hud.font_size)
+        self.text_color = pygame.Color(config.hud.colors['text'])
+        self.bg_color = pygame.Color(config.hud.colors['background'])
         self.alpha = config.hud.alpha
-        self.colors = config.hud.colors
         
     def render(self, display, state):
         """Render HUD with current vehicle state"""
@@ -59,19 +60,22 @@ class HUD:
             gear = state.controls.get('gear', 1)
             gear_str = f"Gear: {gear}"
             
-            # Render text
-            info_surface = pygame.Surface((300, 150))
-            info_surface.set_alpha(self.alpha)
-            info_surface.fill(pygame.Color(self.colors['background']))
+            # Create semi-transparent background surface
+            bg_surface = pygame.Surface((250, 120))
+            bg_surface.set_alpha(self.alpha)  # Use alpha from config
+            bg_surface.fill(self.bg_color)
             
+            # Blit the semi-transparent background
+            display.blit(bg_surface, (10, 10))
+            
+            # Render text directly to display
             y_offset = 15
             line_spacing = 25
             for text in [scenario_str, speed_str, control_str, brake_str, gear_str]:
-                text_surface = self.font.render(text, True, pygame.Color(self.colors['text']))
-                info_surface.blit(text_surface, (15, y_offset))
+                text_surface = self.font.render(text, True, self.text_color)
+                display.blit(text_surface, (15, y_offset))
                 y_offset += line_spacing
             
-            display.blit(info_surface, (10, 10))
         except Exception as e:
             logging.error("Error rendering HUD", exc_info=e)
 

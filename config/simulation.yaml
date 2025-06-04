@@ -65,26 +65,26 @@ sensors:
     enabled: true
   camera:
     enabled: true
-    width: 1280
-    height: 720
-    fov: 90
-    x: -2.5  # camera position relative to vehicle (moved closer)
+    width: 1920
+    height: 890
+    fov: 100
+    x: -2.0  # moved closer to vehicle
     y: 0.0
-    z: 2.0  # lowered camera height
+    z: 1.7  # adjusted height for better view
   gnss:
     enabled: true
 
 # Display settings
 display:
-  width: 1280
-  height: 720
+  width: 1920
+  height: 890
   fps: 60
   hud_enabled: true
   minimap_enabled: true
   hud:
     font_size: 15
     font_name: "default"
-    alpha: 128
+    alpha: 200
     colors:
       target: "red"
       vehicle: "white"
