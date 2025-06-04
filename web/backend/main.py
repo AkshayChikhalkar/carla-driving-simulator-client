@@ -12,6 +12,9 @@ import asyncio
 from fastapi import WebSocketDisconnect
 import atexit
 import signal
+from fastapi.responses import FileResponse
+from datetime import datetime
+import yaml
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -19,9 +22,10 @@ sys.path.append(str(project_root))
 
 from src.core.simulation_runner import SimulationRunner
 from src.scenarios.scenario_registry import ScenarioRegistry
-from src.utils.config import load_config, save_config
+from src.utils.config import Config, load_config, save_config
 from src.visualization.display_manager import DisplayManager
 from src.utils.logging import Logger
+from src.utils.paths import get_project_root
 
 app = FastAPI()
 logger = Logger()
@@ -40,6 +44,9 @@ runner = SimulationRunner()
 
 # Web frontend log file handle
 web_log_file = None
+
+# Use robust project root
+project_root = get_project_root()
 
 class LogWriteRequest(BaseModel):
     content: str
@@ -163,10 +170,28 @@ async def update_config(config_update: ConfigUpdate):
     """Update configuration"""
     try:
         logger.info("Updating configuration")
+        
+        # Validate the config data
+        if not isinstance(config_update.config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid configuration format")
+            
+        # Try to create a Config object to validate the structure
+        try:
+            Config(**config_update.config_data)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid configuration structure: {str(e)}")
+            
+        # Save the configuration
         save_config(config_update.config_data, runner.config_file)
+        
+        # Reload the configuration
         runner.config = load_config(runner.config_file)
+        
         logger.info("Configuration updated successfully")
-        return {"message": "Configuration updated successfully"}
+        return {"message": "Configuration updated successfully", "config": runner.config}
+    except yaml.YAMLError as e:
+        logger.error(f"YAML parsing error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid YAML format: {str(e)}")
     except Exception as e:
         logger.error(f"Error updating configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -195,6 +220,9 @@ async def start_simulation(request: SimulationRequest):
             
             # Set web mode in configuration
             runner.app._config.web_mode = True
+            # Set report flag in configuration if requested
+            if request.report:
+                setattr(runner.app._config, 'report', True)
             
             # Connect to CARLA server
             logger.info("Connecting to CARLA server...")
@@ -315,6 +343,87 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"Error in websocket: {str(e)}")
     finally:
         logger.info("WebSocket connection closed")
+
+@app.get("/api/reports")
+async def list_reports():
+    """List all HTML reports in the /reports directory."""
+    try:
+        reports_dir = project_root / "reports"
+        logger.logger.info(f"Looking for reports in: {reports_dir.resolve()}")
+        reports_dir.mkdir(exist_ok=True)
+        reports = []
+        for file in sorted(reports_dir.glob("*.html"), reverse=True):
+            created = datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            reports.append({"filename": file.name, "created": created})
+        return {"reports": reports}
+    except Exception as e:
+        logger.logger.error(f"Error listing reports: {str(e)}")
+        return {"reports": [], "error": str(e)}
+
+@app.get("/api/reports/{filename}")
+async def get_report(filename: str):
+    """Serve a specific HTML report file."""
+    try:
+        reports_dir = project_root / "reports"
+        file_path = reports_dir / filename
+        if not file_path.exists() or not file_path.suffix == ".html":
+            raise HTTPException(status_code=404, detail="Report not found")
+        return FileResponse(str(file_path), media_type="text/html")
+    except Exception as e:
+        logger.error(f"Error serving report {filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/reports/{filename}")
+async def delete_report(filename: str):
+    reports_dir = project_root / "reports"
+    file_path = reports_dir / filename
+    if not file_path.exists() or not file_path.suffix == ".html":
+        raise HTTPException(status_code=404, detail="Report not found")
+    try:
+        file_path.unlink()
+        return {"success": True, "message": "Report deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/logs")
+async def list_logs():
+    """List all log files in the /logs directory."""
+    try:
+        logs_dir = project_root / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        logs = []
+        for file in sorted(logs_dir.glob("*.log"), reverse=True):
+            created = datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            logs.append({"filename": file.name, "created": created})
+        return {"logs": logs}
+    except Exception as e:
+        logger.error(f"Error listing logs: {str(e)}")
+        return {"logs": [], "error": str(e)}
+
+@app.get("/api/logs/{filename}")
+async def get_log(filename: str):
+    """Serve a specific log file."""
+    try:
+        logs_dir = project_root / "logs"
+        file_path = logs_dir / filename
+        if not file_path.exists() or not file_path.suffix == ".log":
+            raise HTTPException(status_code=404, detail="Log not found")
+        return FileResponse(str(file_path), media_type="text/plain")
+    except Exception as e:
+        logger.error(f"Error serving log {filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/logs/{filename}")
+async def delete_log(filename: str):
+    logs_dir = project_root / "logs"
+    file_path = logs_dir / filename
+    if not file_path.exists() or not file_path.suffix == ".log":
+        raise HTTPException(status_code=404, detail="Log not found")
+    try:
+        file_path.unlink()
+        return {"success": True, "message": "Log deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

@@ -8,7 +8,11 @@ import {
   Grid,
   Alert,
   Snackbar,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import logger from '../utils/logger';
 
@@ -51,18 +55,37 @@ function Settings() {
     }));
   };
 
+  const handleConfigChangeByPath = (path, value) => {
+    setEditedConfig(prev => {
+      const keys = path.split('.');
+      const newConfig = { ...prev };
+      let obj = newConfig;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!obj[keys[i]]) obj[keys[i]] = {};
+        obj = obj[keys[i]];
+      }
+      obj[keys[keys.length - 1]] = value;
+      return newConfig;
+    });
+  };
+
   const handleSave = async () => {
     try {
       logger.info('Saving configuration changes');
-      await axios.post(`${API_BASE_URL}/config`, {
+      const response = await axios.post(`${API_BASE_URL}/config`, {
         config_data: editedConfig,
       });
+      
+      // Update the config with the server response
+      setConfig(response.data.config);
+      setEditedConfig(response.data.config);
+      
       showNotification('Configuration saved successfully');
-      setConfig(editedConfig);
       logger.info('Configuration saved successfully');
     } catch (error) {
+      const errorMessage = error.response?.data?.detail || 'Error saving configuration';
       logger.error('Error saving configuration:', error);
-      showNotification('Error saving configuration', 'error');
+      showNotification(errorMessage, 'error');
     }
   };
 
@@ -71,18 +94,18 @@ function Settings() {
     setEditedConfig(config);
   };
 
-  const renderConfigField = (key, value) => {
+  const renderConfigField = (key, value, parentKey = '', isTopLevel = false) => {
+    const fullKey = parentKey ? `${parentKey}.${key}` : key;
+
     if (typeof value === 'boolean') {
       return (
         <TextField
           select
           fullWidth
           label={key}
-          value={editedConfig[key] ? 'true' : 'false'}
-          onChange={(e) => handleConfigChange(key, e.target.value === 'true')}
-          SelectProps={{
-            native: true,
-          }}
+          value={getValueByPath(editedConfig, fullKey) ? 'true' : 'false'}
+          onChange={(e) => handleConfigChangeByPath(fullKey, e.target.value === 'true')}
+          SelectProps={{ native: true }}
         >
           <option value="true">True</option>
           <option value="false">False</option>
@@ -94,20 +117,61 @@ function Settings() {
           fullWidth
           type="number"
           label={key}
-          value={editedConfig[key]}
-          onChange={(e) => handleConfigChange(key, Number(e.target.value))}
+          value={getValueByPath(editedConfig, fullKey)}
+          onChange={(e) => handleConfigChangeByPath(fullKey, Number(e.target.value))}
         />
       );
-    } else {
+    } else if (typeof value === 'string') {
       return (
         <TextField
           fullWidth
           label={key}
-          value={editedConfig[key]}
-          onChange={(e) => handleConfigChange(key, e.target.value)}
+          value={getValueByPath(editedConfig, fullKey)}
+          onChange={(e) => handleConfigChangeByPath(fullKey, e.target.value)}
         />
       );
+    } else if (Array.isArray(value)) {
+      return (
+        <TextField
+          fullWidth
+          label={key}
+          value={getValueByPath(editedConfig, fullKey).join(', ')}
+          onChange={(e) => handleConfigChangeByPath(fullKey, e.target.value.split(',').map(v => v.trim()))}
+        />
+      );
+    } else if (typeof value === 'object' && value !== null) {
+      // Accordion for all object levels
+      return (
+        <Accordion
+          defaultExpanded
+          sx={{
+            mb: 2,
+            boxShadow: 'none',
+            border: '1px solid #444',
+            background: 'transparent'
+          }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant={isTopLevel ? 'h6' : 'subtitle2'}>{key}</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              {Object.entries(value).map(([childKey, childValue]) => (
+                <Grid item xs={12} md={6} key={childKey}>
+                  {renderConfigField(childKey, childValue, fullKey)}
+                </Grid>
+              ))}
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      );
+    } else {
+      return null;
     }
+  };
+
+  const getValueByPath = (obj, path) => {
+    return path.split('.').reduce((acc, part) => (acc && acc[part] !== undefined ? acc[part] : ''), obj);
   };
 
   return (
@@ -119,8 +183,8 @@ function Settings() {
 
         <Grid container spacing={3}>
           {Object.entries(config).map(([key, value]) => (
-            <Grid item xs={12} md={6} key={key}>
-              {renderConfigField(key, value)}
+            <Grid item xs={12} key={key}>
+              {renderConfigField(key, value, '', true)}
             </Grid>
           ))}
         </Grid>
