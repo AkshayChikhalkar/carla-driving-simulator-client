@@ -20,16 +20,21 @@ import {
 
 const drawerWidth = 240;
 
-const logoStyle = {
-  position: 'fixed',
-  top: 12,
-  left: 12,
-  height: 56,
-  zIndex: 2000,
-  background: 'rgba(0,0,0,0.7)',
-  borderRadius: 8,
-  padding: 4,
-  boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+const logoBoxStyle = {
+  width: '100%',
+  height: 100,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  p: 2,
+  background: 'transparent',
+};
+
+const logoImgStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain',
+  display: 'block',
 };
 
 function Layout({ children }) {
@@ -48,7 +53,13 @@ function Layout({ children }) {
 
   const drawer = (
     <div>
-      <Toolbar />
+      <Box sx={logoBoxStyle}>
+        <img
+          src={process.env.PUBLIC_URL + '/th-owl-logo.png'}
+          alt="TH OWL Logo"
+          style={logoImgStyle}
+        />
+      </Box>
       <List>
         {menuItems.map((item) => (
           <ListItem
@@ -67,11 +78,6 @@ function Layout({ children }) {
 
   return (
     <div style={{ minHeight: '100vh', width: '100vw', margin: 0, padding: 0, background: '#000' }}>
-      <img
-        src={process.env.PUBLIC_URL + '/th-owl-logo.png'}
-        alt="TH OWL Logo"
-        style={logoStyle}
-      />
       <Box sx={{ display: 'flex' }}>
         <AppBar
           position="fixed"
@@ -134,8 +140,9 @@ function Layout({ children }) {
           component="main"
           sx={{
             flexGrow: 1,
-            p: 3,
+            p: 1.5,
             width: { sm: `calc(100% - ${drawerWidth}px)` },
+            boxSizing: 'border-box',
           }}
         >
           <Toolbar />

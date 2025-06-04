@@ -191,10 +191,12 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       <Box sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: '88vh',
-        width: '85vw',
+        height: '100%',
+        width: '100%',
         overflow: 'hidden',
         background: '#111',
+        minHeight: '84vh',
+        minWidth: '84vw',
         margin: 0,
         padding: 0
       }}>
@@ -355,11 +357,11 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               src="/wavy_logo_loading.gif"
               alt="Loading"
               style={{
-                width: '100%',
-                height: '100%',
+                width: '50%',
+                height: '50%',
                 objectFit: 'contain',
                 display: 'block',
-                background: '#000',
+                background: '#111',
                 margin: 0,
                 padding: 0
               }}
