@@ -26,7 +26,7 @@ const logoBoxStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  p: 2,
+  p: 0.5,
   background: 'transparent',
 };
 

@@ -10,6 +10,7 @@ import {
   Snackbar,
 } from '@mui/material';
 import axios from 'axios';
+import logger from '../utils/logger';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -20,19 +21,22 @@ function Settings() {
 
   useEffect(() => {
     // Fetch current configuration
+    logger.info('Fetching current simulation configuration');
     axios.get(`${API_BASE_URL}/config`)
       .then(response => {
         setConfig(response.data);
         setEditedConfig(response.data);
+        logger.info('Configuration loaded successfully');
       })
       .catch(error => {
-        console.error('Error fetching configuration:', error);
+        logger.error('Error fetching configuration:', error);
         showNotification('Error loading configuration', 'error');
       });
   }, []);
 
   const showNotification = (message, severity = 'success') => {
     setNotification({ open: true, message, severity });
+    logger.info(`Notification shown: ${message} (${severity})`);
   };
 
   const handleCloseNotification = () => {
@@ -40,6 +44,7 @@ function Settings() {
   };
 
   const handleConfigChange = (key, value) => {
+    logger.debug(`Configuration change - ${key}: ${value}`);
     setEditedConfig(prev => ({
       ...prev,
       [key]: value,
@@ -48,18 +53,21 @@ function Settings() {
 
   const handleSave = async () => {
     try {
+      logger.info('Saving configuration changes');
       await axios.post(`${API_BASE_URL}/config`, {
         config_data: editedConfig,
       });
       showNotification('Configuration saved successfully');
       setConfig(editedConfig);
+      logger.info('Configuration saved successfully');
     } catch (error) {
-      console.error('Error saving configuration:', error);
+      logger.error('Error saving configuration:', error);
       showNotification('Error saving configuration', 'error');
     }
   };
 
   const handleReset = () => {
+    logger.info('Resetting configuration to last saved state');
     setEditedConfig(config);
   };
 

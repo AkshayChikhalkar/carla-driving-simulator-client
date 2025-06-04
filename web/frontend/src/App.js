@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import Layout from './components/Layout';
+import logger from './utils/logger';
 
 const theme = createTheme({
   palette: {
@@ -19,6 +20,25 @@ const theme = createTheme({
 });
 
 function App() {
+  useEffect(() => {
+    // Initialize file logging when the app starts
+    const initializeLogging = async () => {
+      try {
+        await logger._initializeFileLogging();
+        logger.info('Application started');
+      } catch (error) {
+        console.error('Failed to initialize file logging:', error);
+      }
+    };
+
+    initializeLogging();
+
+    // Cleanup when the app unmounts
+    return () => {
+      logger.close();
+    };
+  }, []);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

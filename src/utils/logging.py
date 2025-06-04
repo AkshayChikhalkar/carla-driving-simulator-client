@@ -12,6 +12,7 @@ from typing import Optional, Any, Dict, TextIO
 from pathlib import Path
 from .settings import DEBUG_MODE
 from .default_config import SIMULATION_CONFIG
+from .paths import get_project_root
 
 @dataclass
 class SimulationData:
@@ -45,7 +46,7 @@ class Logger:
             
         # Get configuration values with fallbacks
         self.log_level = getattr(SIMULATION_CONFIG, 'log_level', 'INFO')
-        self.log_dir = getattr(SIMULATION_CONFIG, 'log_dir', 'logs')
+        self.log_dir = get_project_root() / 'logs'
         self.log_format = getattr(SIMULATION_CONFIG, 'log_format', 
             '%(asctime)s - %(levelname)s - %(message)s')
         self.log_date_format = getattr(SIMULATION_CONFIG, 'log_date_format', 
@@ -68,14 +69,14 @@ class Logger:
             
             # Generate log filename with current date
             current_date = datetime.now().strftime('%Y%m%d')
-            log_file = os.path.join(self.log_dir, f'simulation_{current_date}.log')
+            log_file = self.log_dir / f'simulation_{current_date}.log'
             
             # Configure root logger
             handlers = []
             
             if self.log_to_file:
                 # Use buffered file handler with 8KB buffer
-                file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+                file_handler = logging.FileHandler(str(log_file), mode='a', encoding='utf-8')
                 file_handler.setLevel(self.log_level)
                 handlers.append(file_handler)
                 
@@ -104,7 +105,7 @@ class Logger:
             
             # Setup CSV logging if enabled
             if self.log_to_file:
-                csv_file = log_file.replace('.log', '.csv')
+                csv_file = log_file.with_suffix('.csv')
                 # Check if CSV file exists to determine if we need to write header
                 file_exists = os.path.exists(csv_file)
                 # Use buffered I/O with 8KB buffer

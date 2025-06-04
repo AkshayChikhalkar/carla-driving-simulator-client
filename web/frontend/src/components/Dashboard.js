@@ -24,6 +24,7 @@ import {
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
+import logger from '../utils/logger';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -37,6 +38,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   const [status, setStatus] = useState('');
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [hasReceivedFrame, setHasReceivedFrame] = useState(false);
+  const [error, setError] = useState(null);
   const wsRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -47,10 +50,13 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         setScenarios(response.data.scenarios);
         if (response.data.scenarios.length > 0) {
           setSelectedScenario(response.data.scenarios[0]);
+          logger.info(`Loaded ${response.data.scenarios.length} scenarios, default selected: ${response.data.scenarios[0]}`);
+        } else {
+          logger.warn('No scenarios available');
         }
       })
       .catch(error => {
-        console.error('Error fetching scenarios:', error);
+        logger.error('Error fetching scenarios:', error);
         setStatus('Error loading scenarios');
       });
 
@@ -59,12 +65,12 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       wsRef.current = new WebSocket('ws://localhost:8000/ws/simulation-view');
       
       wsRef.current.onopen = () => {
-        console.log('WebSocket connected');
+        logger.info('WebSocket connected');
         setStatus('Connected to simulation server');
       };
       
       wsRef.current.onclose = () => {
-        console.log('WebSocket disconnected');
+        logger.info('WebSocket disconnected');
         setIsRunning(false);
         setIsPaused(false);
         setStatus('Disconnected from simulation server');
@@ -73,7 +79,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       };
       
       wsRef.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        logger.error('WebSocket error:', error);
         setStatus('Error in simulation connection');
       };
       
@@ -82,9 +88,14 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           // Try to parse as JSON for status updates
           const data = JSON.parse(event.data);
           if (data.type === 'status') {
-            setIsRunning(data.is_running);
-            if (!data.is_running) {
-              setIsPaused(false);
+            // Only update isRunning if we're not in the starting process
+            if (!isStarting) {
+              setIsRunning(data.is_running);
+              if (!data.is_running) {
+                setIsPaused(false);
+                setIsStopping(false);
+                setHasReceivedFrame(false);
+              }
             }
           }
         } catch (e) {
@@ -97,6 +108,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               canvas.width = img.width;
               canvas.height = img.height;
               ctx.drawImage(img, 0, 0);
+              setHasReceivedFrame(true);
             }
           };
           img.src = `data:image/jpeg;base64,${event.data}`;
@@ -118,8 +130,10 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     
     try {
       setIsStarting(true);
-      setIsRunning(true);
       setStatus('Starting simulation...');
+      setError(null); // Clear any previous errors
+      
+      logger.info(`Starting simulation with scenario: ${selectedScenario}, debug: ${debug}, report: ${report}`);
       
       const response = await axios.post(`${API_BASE_URL}/simulation/start`, {
         scenario: selectedScenario,
@@ -127,13 +141,20 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         report,
       });
 
+      // Only set isRunning to true after successful API call
+      setIsRunning(true);
       setStatus(response.data.message);
+      logger.info(`Simulation started successfully: ${response.data.message}`);
     } catch (error) {
-      console.error('Error starting simulation:', error);
+      logger.error('Error starting simulation:', error);
       setStatus('Error starting simulation');
+      setError('Failed to start simulation, please try again!');
       setIsRunning(false);
     } finally {
-      setIsStarting(false);
+      // Reset isStarting after a short delay to ensure the button state is visible
+      setTimeout(() => {
+        setIsStarting(false);
+      }, 1000);
     }
   };
 
@@ -143,41 +164,72 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     try {
       setIsStopping(true);
       setStatus('Stopping simulation...');
-      const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
-      setStatus(response.data.message);
+      setError(null); // Clear any previous errors
       
-      // Clear the canvas when simulation stops
+      logger.info('Initiating simulation stop');
+      
+      // Reset the entire view
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
+        // Clear the entire canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Reset canvas dimensions
+        canvas.width = 0;
+        canvas.height = 0;
+        logger.debug('Canvas completely reset after stop button click');
       }
+      
+      // Reset all view states
+      setIsRunning(false);
+      setHasReceivedFrame(false);
+      
+      // Wait for the transition to complete before stopping the simulation
+      setTimeout(async () => {
+        try {
+          const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
+          setStatus(response.data.message);
+          logger.info(`Simulation stopped successfully: ${response.data.message}`);
+        } catch (error) {
+          logger.error('Error stopping simulation:', error);
+          setStatus('Error stopping simulation');
+          setError('Failed to stop simulation properly. Please try again.');
+        } finally {
+          // Add a small delay before resetting the stopping state
+          setTimeout(() => {
+            setIsStopping(false);
+            setStatus('Ready to start');
+          }, 500);
+        }
+      }, 500); // Match the transition duration
     } catch (error) {
-      console.error('Error stopping simulation:', error);
+      logger.error('Error stopping simulation:', error);
       setStatus('Error stopping simulation');
-    } finally {
+      setError('Failed to stop simulation. Please try again.');
       setIsStopping(false);
     }
   };
 
   const handlePause = () => {
-    setIsPaused(!isPaused);
-    setStatus(isPaused ? 'Simulation resumed' : 'Simulation paused');
+    const newPauseState = !isPaused;
+    setIsPaused(newPauseState);
+    setStatus(newPauseState ? 'Simulation paused' : 'Simulation resumed');
+    logger.info(`Simulation ${newPauseState ? 'paused' : 'resumed'}`);
   };
 
   // Helper function to determine if start button should be disabled
   const isStartDisabled = () => {
-    return isRunning || !selectedScenario || isStarting;
+    return isRunning || !selectedScenario || isStarting || isStopping;
   };
 
   // Helper function to determine if stop button should be disabled
   const isStopDisabled = () => {
-    return !isRunning || isStopping;
+    return !isRunning || isStopping || isStarting;
   };
 
   // Helper function to determine if pause button should be disabled
   const isPauseDisabled = () => {
-    return !isRunning || isStopping;
+    return !isRunning || isStopping || isStarting || isPaused;
   };
 
   return (
@@ -196,7 +248,6 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         overflow: 'hidden',
         background: '#111',
         minHeight: '84vh',
-        minWidth: '84vw',
         margin: 0,
         padding: 0
       }}>
@@ -334,25 +385,47 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             overflow: 'hidden',
             p: 0,
             m: 0,
-            background: 'background.paper',
+            background: '#000',
             border: '1px solid',
-            borderColor: 'divider'
+            borderColor: 'divider',
+            position: 'relative'
           }}
         >
-          {isRunning ? (
-            <canvas
-              ref={canvasRef}
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                display: 'block',
-                background: '#000',
-                margin: 0,
-                padding: 0
-              }}
-            />
-          ) : (
+          <canvas
+            ref={canvasRef}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: isRunning && hasReceivedFrame && !isStopping ? 'block' : 'none',
+              background: '#000',
+              margin: 0,
+              padding: 0,
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              opacity: isRunning && hasReceivedFrame && !isStopping ? 1 : 0,
+              transition: 'opacity 0.5s ease-in-out',
+              zIndex: 0
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#000',
+              opacity: (!isRunning || !hasReceivedFrame || isStopping) ? 1 : 0,
+              transition: 'opacity 0.5s ease-in-out',
+              zIndex: 1
+            }}
+          >
             <img
               src="/wavy_logo_loading.gif"
               alt="Loading"
@@ -361,12 +434,42 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 height: '50%',
                 objectFit: 'contain',
                 display: 'block',
-                background: '#111',
+                background: '#000',
                 margin: 0,
-                padding: 0
+                padding: 0,
+                opacity: isStopping ? 1 : (!isRunning || !hasReceivedFrame ? 1 : 0),
+                transition: 'opacity 0.5s ease-in-out'
               }}
             />
-          )}
+            <Typography
+              variant="h6"
+              sx={{
+                color: 'white',
+                mt: 2,
+                textAlign: 'center',
+                textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                whiteSpace: 'pre-line'
+              }}
+            >
+              {error ? error : 
+               isStarting && !hasReceivedFrame ? 'Hang on,\nLoading Simulation...' : 
+               isStopping ? 'Stopping Simulation...' : 
+               'Ready to Start'}
+            </Typography>
+            {error && (
+              <Typography
+                variant="body2"
+                sx={{
+                  color: '#ff6b6b',
+                  mt: 1,
+                  textAlign: 'center',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                }}
+              >
+                Click Start button to try again
+              </Typography>
+            )}
+          </Box>
         </Box>
       </Box>
     </>
