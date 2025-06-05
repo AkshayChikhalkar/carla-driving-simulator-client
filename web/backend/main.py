@@ -210,33 +210,39 @@ async def update_config(config_update: ConfigUpdate):
 
 @app.post("/api/simulation/skip")
 async def skip_scenario():
-    """Skip the current scenario and move to the next one"""
     try:
-        if not hasattr(runner, 'app') or not runner.app or not runner.app.state.is_running:
-            return {"success": False, "message": "No simulation running"}
-        
-        # Mark current scenario as skipped
-        current_scenario = runner.state.current_scenario
-        if current_scenario:
-            runner.state.scenario_results.append({
-                "name": current_scenario,
-                "result": "Skipped",
-                "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
-            })
-        
-        # Move to next scenario
-        runner.state.current_scenario_index += 1
-        if runner.state.current_scenario_index < len(runner.state.scenarios_to_run):
+        if not hasattr(runner, 'app') or not runner.app:
+            raise HTTPException(status_code=400, detail="No simulation running")
+            
+        if not runner.app.state.is_running:
+            raise HTTPException(status_code=400, detail="Simulation is not running")
+            
+        # Get next scenario
+        if runner.state.current_scenario_index < len(runner.state.scenarios_to_run) - 1:
+            # Cleanup current scenario first
+            if hasattr(runner.app, 'cleanup'):
+                runner.app.cleanup()
+            
+            # Move to next scenario
+            runner.state.current_scenario_index += 1
             next_scenario = runner.state.scenarios_to_run[runner.state.current_scenario_index]
             runner.state.current_scenario = next_scenario
+            
+            # Setup next scenario
             runner.app._setup_scenario(next_scenario)
+            
+            # Log scenario transition
+            logger.info(f"================================")
+            logger.info(f"Running scenario {runner.state.current_scenario_index + 1}/{len(runner.state.scenarios_to_run)}: {next_scenario}")
+            logger.info(f"================================")
+            
             return {"success": True, "message": f"Skipped to scenario: {next_scenario}"}
         else:
             # All scenarios completed
             runner.app.state.is_running = False
             # Generate final report
             if hasattr(runner.app, 'metrics'):
-                runner.app.metrics.generate_html_report_multi(
+                runner.app.metrics.generate_html_report(
                     runner.state.scenario_results,
                     runner.state.batch_start_time,
                     datetime.now()
@@ -310,7 +316,12 @@ async def start_simulation(request: SimulationRequest):
                     try:
                         logger.info("Simulation loop started")
                         # Run all selected scenarios
+                        total_scenarios = len(scenarios_to_run)
                         for i, scenario in enumerate(scenarios_to_run):
+                            logger.info(f"================================")
+                            logger.info(f"Running scenario {i+1}/{total_scenarios}: {scenario}")
+                            logger.info(f"================================")
+                            
                             if i > 0:  # Skip first scenario as it's already set up
                                 runner.state.current_scenario = scenario
                                 runner.state.current_scenario_index = i
@@ -349,7 +360,7 @@ async def start_simulation(request: SimulationRequest):
                             runner.app.state.is_running = False
                         # Generate final report
                         if hasattr(runner.app, 'metrics'):
-                            runner.app.metrics.generate_html_report_multi(
+                            runner.app.metrics.generate_html_report(
                                 runner.state.scenario_results,
                                 runner.state.batch_start_time,
                                 datetime.now()

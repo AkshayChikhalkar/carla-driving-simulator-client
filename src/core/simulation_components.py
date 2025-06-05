@@ -24,6 +24,8 @@ from src.utils.config import (
     KeyboardConfig
 )
 from src.utils.logging import SimulationData
+from datetime import datetime
+from pathlib import Path
 
 @dataclass
 class ServerConfig:
@@ -118,6 +120,10 @@ class SimulationMetrics:
             'collisions': 0,
             'min_frame_time': 0.001  # Minimum frame time to avoid division by zero
         }
+        self.scenario = None
+        self.start_time = datetime.now()
+        self.end_time = None
+        self.success = None
 
     def update(self, vehicle_state: Dict[str, Any]) -> None:
         """Update metrics with current state"""
@@ -178,6 +184,184 @@ class SimulationMetrics:
         
         # Log to file only
         self.logger.log_data(data)
+
+    def generate_html_report(self, scenario_name=None, success=None):
+        """Generate a pytest-html style HTML report in the reports directory at the project root."""
+        import platform
+        import sys
+        self.end_time = datetime.now()
+        scenario = scenario_name or self.scenario or 'N/A'
+        success_val = (success if success is not None else self.success)
+        success_str = 'Passed' if success_val else 'Failed'
+        result_color = '#d32f2f' if not success_val else '#388e3c'
+        python_version = platform.python_version()
+        platform_str = platform.platform()
+        duration = str(self.end_time - self.start_time).split('.')[0]
+        now_str = self.end_time.strftime('%d-%b-%Y at %H:%M:%S')
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang='en'>
+        <head>
+            <meta charset='utf-8'>
+            <title>CARLA Driving Simulator - Scenario Test Report</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; background: #fff; color: #222; }}
+                h1 {{ font-size: 2em; margin-bottom: 0.2em; }}
+                .env-table, .summary-table {{ border-collapse: collapse; margin-bottom: 1.5em; }}
+                .env-table td, .env-table th, .summary-table td, .summary-table th {{ border: 1px solid #ddd; padding: 6px 12px; }}
+                .env-table th {{ background: #f5f5f5; }}
+                .summary-bar {{ margin: 1em 0; }}
+                .summary-bar span {{ margin-right: 1.5em; font-weight: bold; }}
+                .passed {{ color: #388e3c; }}
+                .failed {{ color: #d32f2f; }}
+                .skipped {{ color: #fbc02d; }}
+                .summary-table th {{ background: #f5f5f5; }}
+                .summary-table td {{ text-align: center; }}
+                .summary-table .failed {{ background: #ffd6d6; }}
+                .summary-table .passed {{ background: #d6ffd6; }}
+                .summary-table .skipped {{ background: #fff9c4; }}
+                .summary-table .duration {{ font-family: monospace; }}
+                .summary-table .logs {{ color: #888; }}
+            </style>
+        </head>
+        <body>
+            <h1>CARLA Driving Simulator - Scenario Test Report</h1>
+            <div style='margin-bottom: 0.5em;'>Report generated on {now_str}</div>
+            <h2>Environment</h2>
+            <table class='env-table'>
+                <tr><th>Python</th><td>{python_version}</td></tr>
+                <tr><th>Platform</th><td>{platform_str}</td></tr>
+                <tr><th>Packages</th><td>pytest-html style (custom)</td></tr>
+                <tr><th>Plugins</th><td>n/a</td></tr>
+            </table>
+            <h2>Summary</h2>
+            <div class='summary-bar'>
+                <span class='failed'>{'1 Failed' if not success_val else '0 Failed'}</span>
+                <span class='passed'>{'1 Passed' if success_val else '0 Passed'}</span>
+                <span class='skipped'>0 Skipped</span>
+                <span>0 Errors</span>
+                <span>0 Reruns</span>
+            </div>
+            <div>{'1 test took ' + duration}</div>
+            <table class='summary-table' style='width: 100%; margin-top: 1em;'>
+                <tr>
+                    <th>Result</th>
+                    <th>Scenario Name</th>
+                    <th>Duration</th>
+                    <th>Logs</th>
+                </tr>
+                <tr>
+                    <td class='{success_str.lower()}' style='color: {result_color}; font-weight: bold;'>{success_str}</td>
+                    <td>{scenario}</td>
+                    <td class='duration'>{duration}</td>
+                    <td class='logs'>No logs available</td>
+                </tr>
+            </table>
+            <h2>Metrics</h2>
+            <ul>
+                <li>Frames: {self.metrics.get('frame_count', 0)}</li>
+                <li>FPS: {self.metrics.get('fps', 0.0):.2f}</li>
+                <li>Vehicle Speed: {self.metrics.get('vehicle_speed', 0.0):.2f} km/h</li>
+                <li>Distance Traveled: {self.metrics.get('distance_traveled', 0.0):.2f} m</li>
+                <li>Collisions: {self.metrics.get('collisions', 0)}</li>
+            </ul>
+        </body>
+        </html>
+        """
+        # Save to 'reports' directory at project root
+        reports_dir = Path(__file__).parent.parent.parent / 'reports'
+        reports_dir.mkdir(exist_ok=True)
+        report_path = reports_dir / f"simulation_report_{self.end_time.strftime('%Y%m%d_%H%M%S')}.html"
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        if self.logger:
+            self.logger.info(f"HTML report generated: {report_path}")
+
+    def generate_html_report(self, scenario_results, start_time, end_time):
+        """Generate a pytest-html style HTML report for multiple scenarios in the reports directory at the project root."""
+        import platform
+        total = len(scenario_results)
+        passed = sum(1 for s in scenario_results if s['result'].lower() == 'passed')
+        failed = sum(1 for s in scenario_results if s['result'].lower() == 'failed')
+        skipped = sum(1 for s in scenario_results if s['result'].lower() == 'skipped')
+        duration = str(end_time - start_time).split('.')[0]
+        now_str = end_time.strftime('%d-%b-%Y at %H:%M:%S')
+        python_version = platform.python_version()
+        platform_str = platform.platform()
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang='en'>
+        <head>
+            <meta charset='utf-8'>
+            <title>CARLA Driving Simulator - Scenario Test Report</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; background: #fff; color: #222; }}
+                h1 {{ font-size: 2em; margin-bottom: 0.2em; }}
+                .env-table, .summary-table {{ border-collapse: collapse; margin-bottom: 1.5em; }}
+                .env-table td, .env-table th, .summary-table td, .summary-table th {{ border: 1px solid #ddd; padding: 6px 12px; }}
+                .env-table th {{ background: #f5f5f5; }}
+                .summary-bar {{ margin: 1em 0; }}
+                .summary-bar span {{ margin-right: 1.5em; font-weight: bold; }}
+                .passed {{ color: #388e3c; }}
+                .failed {{ color: #d32f2f; }}
+                .skipped {{ color: #fbc02d; }}
+                .summary-table th {{ background: #f5f5f5; }}
+                .summary-table td {{ text-align: center; }}
+                .summary-table .failed {{ background: #ffd6d6; }}
+                .summary-table .passed {{ background: #d6ffd6; }}
+                .summary-table .skipped {{ background: #fff9c4; }}
+                .summary-table .duration {{ font-family: monospace; }}
+            </style>
+        </head>
+        <body>
+            <h1>CARLA Driving Simulator - Scenario Test Report</h1>
+            <div style='margin-bottom: 0.5em;'>Report generated on {now_str}</div>
+            <h2>Environment</h2>
+            <table class='env-table'>
+                <tr><th>Python</th><td>{python_version}</td></tr>
+                <tr><th>Platform</th><td>{platform_str}</td></tr>
+                <tr><th>Packages</th><td>pytest-html style (custom)</td></tr>
+                <tr><th>Plugins</th><td>n/a</td></tr>
+            </table>
+            <h2>Summary</h2>
+            <div class='summary-bar'>
+                <span class='failed'>{failed} Failed</span>
+                <span class='passed'>{passed} Passed</span>
+                <span class='skipped'>{skipped} Skipped</span>
+                <span>0 Errors</span>
+                <span>0 Reruns</span>
+            </div>
+            <div>{total} test(s) took {duration}</div>
+            <table class='summary-table' style='width: 100%; margin-top: 1em;'>
+                <tr>
+                    <th>Result</th>
+                    <th>Scenario Name</th>
+                    <th>Duration</th>
+                </tr>
+        """
+        for s in scenario_results:
+            result = s['result'].capitalize()
+            color_class = result.lower()
+            html_content += f"<tr>"
+            html_content += f"<td class='{color_class}' style='font-weight: bold;'>{result}</td>"
+            html_content += f"<td>{s['name']}</td>"
+            html_content += f"<td class='duration'>{s['duration']}</td>"
+            html_content += f"</tr>"
+        html_content += """
+            </table>
+        </body>
+        </html>
+        """
+        # Save to 'reports' directory at project root
+        reports_dir = Path(__file__).parent.parent.parent / 'reports'
+        reports_dir.mkdir(exist_ok=True)
+        report_path = reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        if self.logger:
+            self.logger.info(f"HTML report generated: {report_path}")
 
 class SimulationConfig:
     """Manages simulation configuration"""
