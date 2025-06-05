@@ -20,6 +20,7 @@ import {
   PlayArrow as PlayIcon,
   Stop as StopIcon,
   Pause as PauseIcon,
+  SkipNext as SkipNextIcon
 } from '@mui/icons-material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -30,7 +31,7 @@ const API_BASE_URL = 'http://localhost:8000/api';
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
   const [scenarios, setScenarios] = useState([]);
-  const [selectedScenario, setSelectedScenario] = useState('');
+  const [selectedScenarios, setSelectedScenarios] = useState([]);
   const [debug, setDebug] = useState(false);
   const [report, setReport] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -40,6 +41,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   const [isStopping, setIsStopping] = useState(false);
   const [hasReceivedFrame, setHasReceivedFrame] = useState(false);
   const [error, setError] = useState(null);
+  const [isSkipping, setIsSkipping] = useState(false);
   const wsRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -48,12 +50,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     axios.get(`${API_BASE_URL}/scenarios`)
       .then(response => {
         setScenarios(response.data.scenarios);
-        if (response.data.scenarios.length > 0) {
-          setSelectedScenario(response.data.scenarios[0]);
-          logger.info(`Loaded ${response.data.scenarios.length} scenarios, default selected: ${response.data.scenarios[0]}`);
-        } else {
-          logger.warn('No scenarios available');
-        }
+        logger.info(`Loaded ${response.data.scenarios.length} scenarios`);
       })
       .catch(error => {
         logger.error('Error fetching scenarios:', error);
@@ -133,10 +130,10 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       setStatus('Starting simulation...');
       setError(null); // Clear any previous errors
       
-      logger.info(`Starting simulation with scenario: ${selectedScenario}, debug: ${debug}, report: ${report}`);
+      logger.info(`Starting simulation with scenarios: ${selectedScenarios.join(', ')}, debug: ${debug}, report: ${report}`);
       
       const response = await axios.post(`${API_BASE_URL}/simulation/start`, {
-        scenario: selectedScenario,
+        scenarios: selectedScenarios,
         debug,
         report,
       });
@@ -219,7 +216,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
   // Helper function to determine if start button should be disabled
   const isStartDisabled = () => {
-    return isRunning || !selectedScenario || isStarting || isStopping;
+    return isRunning || !selectedScenarios.length || isStarting || isStopping;
   };
 
   // Helper function to determine if stop button should be disabled
@@ -232,21 +229,62 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     return !isRunning || isStopping || isStarting || isPaused;
   };
 
+  // Update the handleScenarioChange function
+  const handleScenarioChange = (event) => {
+    const value = event.target.value;
+    
+    // If selecting individual scenarios
+    if (!value.includes('all')) {
+      // If all individual scenarios are selected, switch to "all"
+      if (value.length === scenarios.length) {
+        setSelectedScenarios(['all']);
+      } else {
+        setSelectedScenarios(value);
+      }
+      return;
+    }
+    
+    // If "all" is selected
+    if (value.includes('all')) {
+      // If "all" is the only selection, keep it
+      if (value.length === 1) {
+        setSelectedScenarios(['all']);
+      } else {
+        // If other scenarios are selected with "all", remove "all" and keep individual selections
+        setSelectedScenarios(value.filter(v => v !== 'all'));
+      }
+    }
+  };
+
+  // Add skip scenario handler
+  const handleSkipScenario = async () => {
+    if (!isRunning || isSkipping) return;
+    
+    try {
+      setIsSkipping(true);
+      setStatus('Skipping current scenario...');
+      
+      const response = await axios.post(`${API_BASE_URL}/simulation/skip`);
+      setStatus(response.data.message);
+      logger.info(`Scenario skipped: ${response.data.message}`);
+    } catch (error) {
+      logger.error('Error skipping scenario:', error);
+      setStatus('Error skipping scenario');
+      setError('Failed to skip scenario, please try again!');
+    } finally {
+      setIsSkipping(false);
+    }
+  };
+
   return (
-    <>
-      {/* Dark mode toggle button in extreme top right corner */}
-      <Box sx={{ position: 'fixed', top: 8, right: 8, zIndex: 2001, display: 'flex', alignItems: 'center', m: 0, p: 1 }}>
-        <IconButton onClick={onThemeToggle} color="inherit" size="medium">
-          {isDarkMode ? <Brightness7Icon /> : <Brightness4Icon />}
-        </IconButton>
-      </Box>
+    <>      
       <Box sx={{
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
         width: '100%',
         overflow: 'hidden',
-        background: '#111',
+        background: '#000',
         minHeight: '84vh',
         margin: 0,
         padding: 0
@@ -255,24 +293,30 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         <Paper sx={{
           p: 1,
           borderRadius: 0,
-          mb: 0,
+          mb: 1,
           mt: 0,
           boxShadow: 3,
           background: '#222',
           width: '100%',
           flex: '0 0 auto',
-          position: 'relative'
+          position: 'relative',
+          borderRadius: '8px'
         }}>
           <Grid container spacing={1} alignItems="center" sx={{ margin: 0, padding: 0 }}>
             <Grid item xs={12} md={3}>
               <FormControl fullWidth size="small">
-                <InputLabel>Scenario</InputLabel>
+                <InputLabel>Scenarios</InputLabel>
                 <Select
-                  value={selectedScenario}
-                  label="Scenario"
-                  onChange={(e) => setSelectedScenario(e.target.value)}
+                  multiple
+                  value={selectedScenarios}
+                  label="Scenarios"
+                  onChange={handleScenarioChange}
                   disabled={isRunning}
                   size="small"
+                  renderValue={(selected) => {
+                    if (selected.includes('all')) return 'All Scenarios';
+                    return selected.join(', ');
+                  }}
                 >
                   <MenuItem value="all">All Scenarios</MenuItem>
                   {scenarios.map((scenario) => (
@@ -347,6 +391,22 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 </Button>
                 <Button
                   variant="contained"
+                  color="warning"
+                  startIcon={<SkipNextIcon />}
+                  onClick={handleSkipScenario}
+                  disabled={!isRunning || isSkipping || (selectedScenarios.length === 1 && !selectedScenarios.includes('all'))}
+                  size="small"
+                  sx={{ 
+                    '& .MuiButton-startIcon': { 
+                      marginRight: 0.5,
+                      marginLeft: 0
+                    }
+                  }}
+                >
+                  {isSkipping ? 'Skipping...' : 'Skip'}
+                </Button>
+                <Button
+                  variant="contained"
                   color="error"
                   startIcon={<StopIcon />}
                   onClick={handleStop}
@@ -373,6 +433,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             )}
           </Grid>
         </Paper>
+        
         {/* Simulation View */}
         <Box
           sx={{
@@ -388,7 +449,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             background: '#000',
             border: '1px solid',
             borderColor: 'divider',
-            position: 'relative'
+            position: 'relative',
+            borderRadius: '8px'
           }}
         >
           <canvas

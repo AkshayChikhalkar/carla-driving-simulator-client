@@ -54,6 +54,18 @@ class LogWriteRequest(BaseModel):
 class LogFileRequest(BaseModel):
     filename: str
 
+class SimulationState:
+    def __init__(self):
+        self.is_running = False
+        self.current_scenario = None
+        self.scenarios_to_run = []
+        self.current_scenario_index = 0
+        self.scenario_results = []
+        self.batch_start_time = None
+
+# Add state to runner
+runner.state = SimulationState()
+
 @app.post("/api/logs/directory")
 async def create_logs_directory():
     """Ensure logs directory exists"""
@@ -143,7 +155,7 @@ def create_display_manager(config):
 runner.create_display_manager = create_display_manager
 
 class SimulationRequest(BaseModel):
-    scenario: str
+    scenarios: List[str]
     debug: bool = False
     report: bool = False
 
@@ -196,6 +208,45 @@ async def update_config(config_update: ConfigUpdate):
         logger.error(f"Error updating configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/simulation/skip")
+async def skip_scenario():
+    """Skip the current scenario and move to the next one"""
+    try:
+        if not hasattr(runner, 'app') or not runner.app or not runner.app.state.is_running:
+            return {"success": False, "message": "No simulation running"}
+        
+        # Mark current scenario as skipped
+        current_scenario = runner.state.current_scenario
+        if current_scenario:
+            runner.state.scenario_results.append({
+                "name": current_scenario,
+                "result": "Skipped",
+                "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
+            })
+        
+        # Move to next scenario
+        runner.state.current_scenario_index += 1
+        if runner.state.current_scenario_index < len(runner.state.scenarios_to_run):
+            next_scenario = runner.state.scenarios_to_run[runner.state.current_scenario_index]
+            runner.state.current_scenario = next_scenario
+            runner.app._setup_scenario(next_scenario)
+            return {"success": True, "message": f"Skipped to scenario: {next_scenario}"}
+        else:
+            # All scenarios completed
+            runner.app.state.is_running = False
+            # Generate final report
+            if hasattr(runner.app, 'metrics'):
+                runner.app.metrics.generate_html_report_multi(
+                    runner.state.scenario_results,
+                    runner.state.batch_start_time,
+                    datetime.now()
+                )
+            return {"success": True, "message": "All scenarios completed"}
+            
+    except Exception as e:
+        logger.error(f"Error skipping scenario: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/simulation/start")
 async def start_simulation(request: SimulationRequest):
     """Start simulation with given parameters"""
@@ -205,7 +256,7 @@ async def start_simulation(request: SimulationRequest):
             logger.warn("Attempted to start simulation while already running")
             return {"success": False, "message": "Simulation is already running"}
         
-        logger.info(f"Starting simulation with scenario: {request.scenario}, debug: {request.debug}, report: {request.report}")
+        logger.info(f"Starting simulation with scenarios: {request.scenarios}, debug: {request.debug}, report: {request.report}")
         
         # Register scenarios first
         ScenarioRegistry.register_all()
@@ -216,7 +267,15 @@ async def start_simulation(request: SimulationRequest):
         try:
             # Create and store the app instance
             logger.info("Creating application instance...")
-            runner.app = runner.create_application(request.scenario)
+            # If "all" is selected, use all available scenarios
+            scenarios_to_run = ScenarioRegistry.get_available_scenarios() if "all" in request.scenarios else request.scenarios
+            runner.state.scenarios_to_run = scenarios_to_run
+            runner.state.current_scenario_index = 0
+            runner.state.current_scenario = scenarios_to_run[0]
+            runner.state.batch_start_time = datetime.now()
+            runner.state.scenario_results = []
+            
+            runner.app = runner.create_application(scenarios_to_run[0])
             
             # Set web mode in configuration
             runner.app._config.web_mode = True
@@ -250,7 +309,31 @@ async def start_simulation(request: SimulationRequest):
                 def run_simulation():
                     try:
                         logger.info("Simulation loop started")
-                        runner.app.run()
+                        # Run all selected scenarios
+                        for i, scenario in enumerate(scenarios_to_run):
+                            if i > 0:  # Skip first scenario as it's already set up
+                                runner.state.current_scenario = scenario
+                                runner.state.current_scenario_index = i
+                                runner.app._setup_scenario(scenario)
+                            
+                            # Run the scenario
+                            runner.app.run()
+                            
+                            # Record result
+                            if hasattr(runner.app, 'cleanup'):
+                                completed, success = runner.app.cleanup()
+                                result = "Passed" if success else "Failed"
+                                if not completed:
+                                    result = "Incomplete"
+                            else:
+                                result = "Completed"
+                                
+                            runner.state.scenario_results.append({
+                                "name": scenario,
+                                "result": result,
+                                "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
+                            })
+                            
                     except Exception as e:
                         logger.error(f"Error in simulation thread: {str(e)}")
                         if hasattr(runner.app, 'state'):
@@ -264,6 +347,13 @@ async def start_simulation(request: SimulationRequest):
                         # Update the frontend state
                         if hasattr(runner.app, 'state'):
                             runner.app.state.is_running = False
+                        # Generate final report
+                        if hasattr(runner.app, 'metrics'):
+                            runner.app.metrics.generate_html_report_multi(
+                                runner.state.scenario_results,
+                                runner.state.batch_start_time,
+                                datetime.now()
+                            )
                 
                 simulation_thread = threading.Thread(target=run_simulation)
                 simulation_thread.daemon = True
