@@ -149,21 +149,15 @@ def cleanup_resources():
     try:
         logger.info("Cleaning up resources...")
         
-        # Clean up resources
-        if hasattr(runner.app, 'cleanup'):
-            runner.app.cleanup()
-        
-        # Only disconnect from CARLA server if not in web mode
-        if hasattr(runner.app, 'connection') and runner.app.connection:
-            is_web_mode = getattr(runner.app._config, 'web_mode', False)
-            if not is_web_mode:
-                logger.debug("CLI mode: Disconnecting from CARLA server")
-                runner.app.connection.disconnect()
-            else:
-                logger.debug("Web mode: Maintaining CARLA connection")
-        
-        # Clear the app instance
-        runner.app = None
+        # Only clean up if we have an app instance
+        if hasattr(runner, 'app') and runner.app:
+            # Clean up resources through the application
+            if hasattr(runner.app, 'cleanup'):
+                runner.app.cleanup()
+            
+            # Clear the app instance
+            runner.app = None
+            
         logger.info("Cleanup completed successfully")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")

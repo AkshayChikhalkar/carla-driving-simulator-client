@@ -144,17 +144,12 @@ class SimulationRunner:
                 return True, "Scenario completed"
 
             finally:
-                # Only disconnect from CARLA server if not in web mode
-                is_web_mode = getattr(app._config, 'web_mode', False)
-                if not is_web_mode and hasattr(app, "connection") and app.connection:
-                    self.logger.debug("CLI mode: Disconnecting from CARLA server")
-                    app.connection.disconnect()
-
+                # Cleanup is handled by app.cleanup()
+                pass
 
         except Exception as e:
-            error_msg = f"Error running scenario {scenario}: {str(e)}"
-            self.logger.error(error_msg)
-            return False, error_msg
+            self.logger.error(f"Error running scenario: {str(e)}")
+            return False, f"Error: {str(e)}"
 
     def run_scenarios(self, scenarios: List[str]) -> None:
         """
