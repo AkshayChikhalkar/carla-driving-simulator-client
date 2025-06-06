@@ -65,13 +65,17 @@ class Logger {
 
       // Write header
       const header = `=== Web Simulation Log - ${today} ===\n`;
-      await fetch('/api/logs/write', {
+      const writeResponse = await fetch('/api/logs/write', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ content: header })
       });
+
+      if (!writeResponse.ok) {
+        throw new Error('Failed to write log header');
+      }
       
       console.log('File logging initialized successfully');
     } catch (error) {
@@ -102,13 +106,17 @@ class Logger {
       if (this.config.logToFile) {
         try {
           const logEntry = `${formattedMessage}\n`;
-          await fetch('/api/logs/write', {
+          const response = await fetch('/api/logs/write', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ content: logEntry })
           });
+
+          if (!response.ok) {
+            throw new Error(`Failed to write log: ${response.statusText}`);
+          }
         } catch (error) {
           console.error('Failed to write to log file:', error);
           this.config.logToFile = false;

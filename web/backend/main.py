@@ -83,8 +83,19 @@ async def create_log_file(request: LogFileRequest):
     """Create or open a log file"""
     global web_log_file
     try:
-        log_path = project_root / "logs" / request.filename
+        # Close existing file if open
+        if web_log_file:
+            web_log_file.close()
+            web_log_file = None
+
+        # Ensure logs directory exists
+        log_dir = project_root / "logs"
+        log_dir.mkdir(exist_ok=True)
+        
+        # Create or open the log file
+        log_path = log_dir / request.filename
         web_log_file = open(log_path, "a", encoding="utf-8")
+        logger.info(f"Log file opened: {request.filename}")
         return {"message": "Log file opened"}
     except Exception as e:
         logger.error(f"Error creating log file: {str(e)}")
@@ -95,12 +106,24 @@ async def write_log(request: LogWriteRequest):
     """Write to the current log file"""
     global web_log_file
     try:
-        if web_log_file:
-            web_log_file.write(request.content)
-            web_log_file.flush()
-            return {"message": "Log written"}
-        else:
-            raise HTTPException(status_code=400, detail="No log file open")
+        if not web_log_file:
+            # Try to reopen the most recent log file
+            log_dir = project_root / "logs"
+            if not log_dir.exists():
+                raise HTTPException(status_code=400, detail="Logs directory does not exist")
+            
+            # Find the most recent log file
+            log_files = sorted(log_dir.glob("*.log"), key=lambda x: x.stat().st_mtime, reverse=True)
+            if not log_files:
+                raise HTTPException(status_code=400, detail="No log files found")
+            
+            # Open the most recent log file
+            web_log_file = open(log_files[0], "a", encoding="utf-8")
+            logger.info(f"Reopened log file: {log_files[0].name}")
+        
+        web_log_file.write(request.content)
+        web_log_file.flush()
+        return {"message": "Log written"}
     except Exception as e:
         logger.error(f"Error writing to log file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
