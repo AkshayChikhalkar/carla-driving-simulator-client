@@ -18,9 +18,14 @@ from src.scenarios.scenario_registry import ScenarioRegistry
 from src.utils.config import LoggingConfig
 from src.visualization.display_manager import DisplayManager, VehicleState
 from src.utils.settings import DEBUG_MODE  # Import from settings module
+import threading
 
 class SimulationApplication:
     """Main application class that coordinates all simulation components"""
+    
+    # Class-level cleanup tracking
+    cleanup_lock = threading.Lock()
+    is_cleanup_complete = False
     
     def __init__(self, config_path: str, scenario: str = None):
         # Initialize configuration
@@ -116,28 +121,55 @@ class SimulationApplication:
 
     def _setup_scenario(self, scenario_type: str, scenario_config: Optional[Dict] = None) -> None:
         """Setup a new scenario"""
-        if not all([self.world_manager, self.vehicle_controller, self.logger]):
-            raise RuntimeError("Application not properly initialized")
+        try:
+            if DEBUG_MODE:
+                self.logger.debug(f"Setting up scenario: {scenario_type}")
             
-        # Get scenario configuration from main config
-        if scenario_config is None:
-            scenario_config = self._config.scenario_config.__dict__.get(scenario_type, {})
-            # Convert dataclass to dictionary if needed
-            if hasattr(scenario_config, '__dict__'):
-                scenario_config = scenario_config.__dict__
+            # Verify required components are initialized
+            if not all([self.world_manager, self.vehicle_controller, self.logger]):
+                raise RuntimeError("Application not properly initialized")
             
-        # Create scenario using registry
-        self.current_scenario = ScenarioRegistry.create_scenario(
-            scenario_type=scenario_type,
-            world_manager=self.world_manager,
-            vehicle_controller=self.vehicle_controller,
-            logger=self.logger,
-            config=scenario_config
-        )
-        
-        # Setup the scenario
-        self.current_scenario.setup()
-        self.logger.info(f"Started scenario: {scenario_type}")
+            # Get scenario configuration from main config
+            if scenario_config is None:
+                scenario_config = self._config.scenario_config.__dict__.get(scenario_type, {})
+                # Convert dataclass to dictionary if needed
+                if hasattr(scenario_config, '__dict__'):
+                    scenario_config = scenario_config.__dict__
+            
+            # Create scenario using registry
+            if DEBUG_MODE:
+                self.logger.debug("Creating scenario from registry...")
+            
+            new_scenario = ScenarioRegistry.create_scenario(
+                scenario_type=scenario_type,
+                world_manager=self.world_manager,
+                vehicle_controller=self.vehicle_controller,
+                logger=self.logger,
+                config=scenario_config
+            )
+            
+            if not new_scenario:
+                raise RuntimeError(f"Failed to create scenario: {scenario_type}")
+            
+            # Setup the scenario
+            if DEBUG_MODE:
+                self.logger.debug("Setting up new scenario...")
+            
+            new_scenario.setup()
+            
+            # Only set current_scenario after successful setup
+            self.current_scenario = new_scenario
+            
+            if DEBUG_MODE:
+                self.logger.debug(f"Scenario setup completed: {scenario_type}")
+            
+            self.logger.info(f"Started scenario: {scenario_type}")
+            
+        except Exception as e:
+            self.logger.error(f"Error setting up scenario: {str(e)}")
+            # Ensure current_scenario is None if setup fails
+            self.current_scenario = None
+            raise RuntimeError(f"Failed to setup scenario: {str(e)}")
 
     def run(self) -> None:
         """Run the simulation loop"""
@@ -280,13 +312,31 @@ class SimulationApplication:
             # Store scenario completion status before cleanup
             scenario_completed = False
             scenario_success = False
-            if self.current_scenario:
-                scenario_completed = self.current_scenario.is_completed()
-                scenario_success = self.current_scenario.is_successful()
-                if DEBUG_MODE:
-                    self.logger.debug("Cleaning up current scenario...")
-                self.current_scenario.cleanup()
-                self.current_scenario = None
+            
+            # Safely check and cleanup current scenario
+            if hasattr(self, 'current_scenario') and self.current_scenario is not None:
+                try:
+                    # Store scenario info before cleanup
+                    scenario_name = getattr(self.current_scenario, 'name', None)
+                    scenario_completed = self.current_scenario.is_completed()
+                    scenario_success = self.current_scenario.is_successful()
+                    
+                    if DEBUG_MODE:
+                        self.logger.debug(f"Cleaning up current scenario: {scenario_name}")
+                    
+                    # Cleanup the scenario
+                    self.current_scenario.cleanup()
+                    
+                    if DEBUG_MODE:
+                        self.logger.debug(f"Scenario cleanup completed: {scenario_name}")
+                        
+                except Exception as e:
+                    self.logger.error(f"Error during scenario cleanup: {str(e)}")
+                finally:
+                    # Clear the scenario reference
+                    self.current_scenario = None
+                    if DEBUG_MODE:
+                        self.logger.debug("Current scenario reference cleared")
             
             # Clean up sensors
             if self.sensor_manager:
@@ -308,10 +358,15 @@ class SimulationApplication:
                     self.logger.debug("Cleaning up world manager...")
                 self.world_manager.cleanup()
             
-            # Disconnect from server
-            if DEBUG_MODE:
-                self.logger.debug("Disconnecting from server...")
-            self.connection.disconnect()
+            # Check if we're in web mode
+            is_web_mode = getattr(self._config, 'web_mode', False)
+            if is_web_mode:
+                if DEBUG_MODE:
+                    self.logger.debug("Web mode: Maintaining CARLA connection for next scenario")
+            else:
+                if DEBUG_MODE:
+                    self.logger.debug("CLI mode: Disconnecting from CARLA server")
+                self.connection.disconnect()
             
             # Clear any remaining references
             self.vehicle_controller = None
@@ -321,11 +376,28 @@ class SimulationApplication:
             import gc
             gc.collect()
             
+            # Ensure cleanup is complete by waiting for any pending operations
+            if self.world_manager and self.world_manager.world:
+                try:
+                    self.world_manager.world.tick()
+                except Exception as e:
+                    if "connection failed" in str(e).lower():
+                        self.logger.error("Connection lost during cleanup - server may have crashed")
+                    else:
+                        self.logger.error(f"Error during final world tick: {str(e)}")
+            
+            # Set cleanup flag
+            with self.cleanup_lock:
+                self.is_cleanup_complete = True
+            
             # Return completion status
             return scenario_completed, scenario_success
             
         except Exception as e:
             self.logger.error(f"Error in cleanup: {str(e)}")
+            # Set cleanup flag even on error
+            with self.cleanup_lock:
+                self.is_cleanup_complete = True
             return False, False
 
     @property
