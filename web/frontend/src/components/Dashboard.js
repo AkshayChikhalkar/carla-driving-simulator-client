@@ -187,6 +187,12 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
           setStatus(response.data.message);
           logger.info(`Simulation stopped successfully: ${response.data.message}`);
+          
+          // Wait for 3 seconds before showing "Ready to Start"
+          setTimeout(() => {
+            setStatus('Ready to Start');
+            setIsPaused(false);
+          }, 3000);
         } catch (error) {
           logger.error('Error stopping simulation:', error);
           setStatus('Error stopping simulation');
@@ -195,7 +201,6 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           // Add a small delay before resetting the stopping state
           setTimeout(() => {
             setIsStopping(false);
-            setStatus('Ready to start');
           }, 500);
         }
       }, 500); // Match the transition duration
@@ -216,17 +221,17 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
   // Helper function to determine if start button should be disabled
   const isStartDisabled = () => {
-    return isRunning || !selectedScenarios.length || isStarting || isStopping;
+    return isRunning || !selectedScenarios.length || isStarting || isStopping || isSkipping;
   };
 
   // Helper function to determine if stop button should be disabled
   const isStopDisabled = () => {
-    return !isRunning || isStopping || isStarting;
+    return !isRunning || isStopping || isStarting || isSkipping;
   };
 
   // Helper function to determine if pause button should be disabled
   const isPauseDisabled = () => {
-    return !isRunning || isStopping || isStarting || isPaused;
+    return !isRunning || isStopping || isStarting || isPaused || isSkipping;
   };
 
   // Update the handleScenarioChange function
@@ -262,10 +267,30 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     
     try {
       setIsSkipping(true);
-      setStatus('Skipping current scenario...');
+      setStatus('Skipping scenario...');
       
       const response = await axios.post(`${API_BASE_URL}/simulation/skip`);
-      setStatus(response.data.message);
+      
+      // Update status based on response
+      if (response.data.success) {
+        // Use the message directly from the backend
+        setStatus(response.data.message);
+        
+        // If simulation is complete, update UI after a delay
+        if (response.data.message.includes("Simulation complete")) {
+          // Wait for 3 seconds before showing "Ready to Start"
+          setTimeout(() => {
+            setStatus('Ready to Start');
+            setIsRunning(false);
+            setIsPaused(false);
+            setHasReceivedFrame(false);
+          }, 3000);
+        }
+      } else {
+        setStatus('Error skipping scenario');
+        setError('Failed to skip scenario, please try again!');
+      }
+      
       logger.info(`Scenario skipped: ${response.data.message}`);
     } catch (error) {
       logger.error('Error skipping scenario:', error);
@@ -515,7 +540,9 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             >
               {error ? error : 
                isStarting && !hasReceivedFrame ? 'Hang on,\nLoading Simulation...' : 
-               isStopping ? 'Stopping Simulation...' : 
+               isStopping ? status : 
+               isSkipping ? status : 
+               status === 'Ready to Start' ? 'Ready to Start' :
                'Ready to Start'}
             </Typography>
             {error && (

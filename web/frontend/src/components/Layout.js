@@ -50,9 +50,9 @@ function Layout({ children }) {
 
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
     { text: 'Reports', icon: <DescriptionIcon />, path: '/reports' },
     { text: 'Logs', icon: <ListAltIcon />, path: '/logs' },
+    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
   ];
 
   const drawer = (

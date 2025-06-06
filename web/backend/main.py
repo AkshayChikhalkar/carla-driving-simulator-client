@@ -168,11 +168,16 @@ class ConfigUpdate(BaseModel):
 @app.get("/api/scenarios")
 async def get_scenarios():
     """Get list of available scenarios"""
-    logger.info("Fetching available scenarios")
-    ScenarioRegistry.register_all()
-    scenarios = ScenarioRegistry.get_available_scenarios()
-    logger.info(f"Found {len(scenarios)} scenarios")
-    return {"scenarios": scenarios}
+    try:
+        logger.info("Fetching available scenarios")
+        # Ensure scenarios are registered
+        ScenarioRegistry.register_all()
+        scenarios = ScenarioRegistry.get_available_scenarios()
+        logger.info(f"Found {len(scenarios)} scenarios: {scenarios}")
+        return {"scenarios": scenarios}
+    except Exception as e:
+        logger.error(f"Error fetching scenarios: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/config")
 async def get_config():
@@ -217,12 +222,12 @@ async def skip_scenario():
     try:
         # Check if simulation is running
         if not hasattr(runner, 'app') or not runner.app:
-            logger.warn("Attempted to skip scenario while no simulation is running")
+            logger.warning("Attempted to skip scenario while no simulation is running")
             return {"success": False, "message": "No simulation is running"}
         
         # Check if simulation is actually running
         if not runner.app.state.is_running:
-            logger.warn("Attempted to skip scenario while simulation is not running")
+            logger.warning("Attempted to skip scenario while simulation is not running")
             return {"success": False, "message": "Simulation is not running"}
         
         logger.info("Skipping current scenario")
@@ -230,10 +235,11 @@ async def skip_scenario():
         # Get current scenario index and total scenarios
         current_index = runner.state.current_scenario_index
         total_scenarios = len(runner.state.scenarios_to_run)
+        current_scenario = runner.state.current_scenario
         
         # Record skipped scenario result
         runner.state.scenario_results.append({
-            "name": runner.state.current_scenario,
+            "name": current_scenario,
             "result": "Skipped",
             "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
         })
@@ -259,7 +265,7 @@ async def skip_scenario():
             
             while not current_app.is_cleanup_complete:
                 if (datetime.now() - start_time).total_seconds() > max_wait_time:
-                    logger.warn("Cleanup wait timeout reached")
+                    logger.warning("Cleanup wait timeout reached")
                     break
                 await asyncio.sleep(wait_interval)
             
@@ -317,7 +323,9 @@ async def skip_scenario():
                 
                 return {
                     "success": True,
-                    "message": f"Skipped scenario {current_index + 1}/{total_scenarios}. Moving to next scenario: {next_scenario}"
+                    "message": f"Skipped {current_scenario} ({current_index + 1}/{total_scenarios}). Running: {next_scenario}",
+                    "current_scenario": current_scenario,
+                    "next_scenario": next_scenario
                 }
                 
             except Exception as e:
@@ -342,12 +350,12 @@ async def skip_scenario():
             
             while not runner.app.is_cleanup_complete:
                 if (datetime.now() - start_time).total_seconds() > max_wait_time:
-                    logger.warn("Cleanup wait timeout reached")
+                    logger.warning("Cleanup wait timeout reached")
                     break
                 await asyncio.sleep(wait_interval)
             
-            # Generate final report
-            if hasattr(runner.app, 'metrics'):
+            # Generate final report only if report flag is set
+            if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', False):
                 runner.app.metrics.generate_html_report(
                     runner.state.scenario_results,
                     runner.state.batch_start_time,
@@ -356,7 +364,8 @@ async def skip_scenario():
             
             return {
                 "success": True,
-                "message": "Last scenario skipped. Simulation complete."
+                "message": f"Skipped {current_scenario} ({current_index + 1}/{total_scenarios}). Simulation complete.",
+                "current_scenario": current_scenario
             }
             
     except Exception as e:
@@ -369,7 +378,7 @@ async def start_simulation(request: SimulationRequest):
     try:
         # Check if simulation is already running
         if hasattr(runner, 'app') and runner.app and runner.app.state.is_running:
-            logger.warn("Attempted to start simulation while already running")
+            logger.warning("Attempted to start simulation while already running")
             return {"success": False, "message": "Simulation is already running"}
         
         logger.info(f"Starting simulation with scenarios: {request.scenarios}, debug: {request.debug}, report: {request.report}")
