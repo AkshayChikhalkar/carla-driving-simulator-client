@@ -62,6 +62,7 @@ class SimulationState:
         self.current_scenario_index = 0
         self.scenario_results = []
         self.batch_start_time = None
+        self.current_scenario_completed = False
 
 # Add state to runner
 runner.state = SimulationState()
@@ -121,26 +122,28 @@ async def close_log_file():
 
 # Add cleanup handler
 def cleanup_resources():
-    logger.info("Cleaning up resources...")
-    if hasattr(runner, 'app') and runner.app:
-        try:
-            # Stop the simulation
-            if hasattr(runner.app, 'stop'):
-                runner.app.stop()
-            
-            # Clean up resources
-            if hasattr(runner.app, 'cleanup'):
-                runner.app.cleanup()
-            
-            # Disconnect from CARLA server
-            if hasattr(runner.app, 'connection') and runner.app.connection:
+    """Clean up resources when shutting down"""
+    try:
+        logger.info("Cleaning up resources...")
+        
+        # Clean up resources
+        if hasattr(runner.app, 'cleanup'):
+            runner.app.cleanup()
+        
+        # Only disconnect from CARLA server if not in web mode
+        if hasattr(runner.app, 'connection') and runner.app.connection:
+            is_web_mode = getattr(runner.app._config, 'web_mode', False)
+            if not is_web_mode:
+                logger.debug("CLI mode: Disconnecting from CARLA server")
                 runner.app.connection.disconnect()
-            
-            # Clear the app instance
-            runner.app = None
-            logger.info("Cleanup completed successfully")
-        except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}")
+            else:
+                logger.debug("Web mode: Maintaining CARLA connection")
+        
+        # Clear the app instance
+        runner.app = None
+        logger.info("Cleanup completed successfully")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
 
 # Register cleanup handlers
 atexit.register(cleanup_resources)
@@ -210,36 +213,139 @@ async def update_config(config_update: ConfigUpdate):
 
 @app.post("/api/simulation/skip")
 async def skip_scenario():
+    """Skip the current scenario and move to the next one"""
     try:
+        # Check if simulation is running
         if not hasattr(runner, 'app') or not runner.app:
-            raise HTTPException(status_code=400, detail="No simulation running")
-            
+            logger.warn("Attempted to skip scenario while no simulation is running")
+            return {"success": False, "message": "No simulation is running"}
+        
+        # Check if simulation is actually running
         if not runner.app.state.is_running:
-            raise HTTPException(status_code=400, detail="Simulation is not running")
+            logger.warn("Attempted to skip scenario while simulation is not running")
+            return {"success": False, "message": "Simulation is not running"}
+        
+        logger.info("Skipping current scenario")
+        
+        # Get current scenario index and total scenarios
+        current_index = runner.state.current_scenario_index
+        total_scenarios = len(runner.state.scenarios_to_run)
+        
+        # Record skipped scenario result
+        runner.state.scenario_results.append({
+            "name": runner.state.current_scenario,
+            "result": "Skipped",
+            "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
+        })
+        
+        # If there are more scenarios, prepare for next one
+        if current_index < total_scenarios - 1:
+            next_scenario = runner.state.scenarios_to_run[current_index + 1]
+            logger.info(f"Preparing to run next scenario: {next_scenario}")
             
-        # Get next scenario
-        if runner.state.current_scenario_index < len(runner.state.scenarios_to_run) - 1:
-            # Cleanup current scenario first
-            if hasattr(runner.app, 'cleanup'):
-                runner.app.cleanup()
+            # Store current app reference
+            current_app = runner.app
             
-            # Move to next scenario
-            runner.state.current_scenario_index += 1
-            next_scenario = runner.state.scenarios_to_run[runner.state.current_scenario_index]
-            runner.state.current_scenario = next_scenario
+            # Reset cleanup flag
+            current_app.is_cleanup_complete = False
             
-            # Setup next scenario
-            runner.app._setup_scenario(next_scenario)
+            # Stop current scenario by setting running flag to False
+            current_app.state.is_running = False
             
-            # Log scenario transition
-            logger.info(f"================================")
-            logger.info(f"Running scenario {runner.state.current_scenario_index + 1}/{len(runner.state.scenarios_to_run)}: {next_scenario}")
-            logger.info(f"================================")
+            # Wait for cleanup to complete
+            max_wait_time = 10  # Maximum wait time in seconds
+            wait_interval = 0.1  # Check every 100ms
+            start_time = datetime.now()
             
-            return {"success": True, "message": f"Skipped to scenario: {next_scenario}"}
+            while not current_app.is_cleanup_complete:
+                if (datetime.now() - start_time).total_seconds() > max_wait_time:
+                    logger.warn("Cleanup wait timeout reached")
+                    break
+                await asyncio.sleep(wait_interval)
+            
+            try:
+                # Create new application instance for next scenario
+                new_app = runner.create_application(next_scenario)
+                
+                # Set web mode in configuration
+                new_app._config.web_mode = True
+                
+                # Connect to CARLA server
+                logger.info("Connecting to CARLA server...")
+                if not new_app.connection.connect():
+                    logger.error("Failed to connect to CARLA server")
+                    return {"success": False, "message": "Failed to connect to CARLA server"}
+                
+                # Wait for connection to stabilize
+                await asyncio.sleep(1)
+                
+                # Setup components
+                logger.info("Setting up simulation components...")
+                components = runner.setup_components(new_app)
+                
+                # Setup application
+                logger.info("Setting up application...")
+                new_app.setup(
+                    world_manager=components['world_manager'],
+                    vehicle_controller=components['vehicle_controller'],
+                    sensor_manager=components['sensor_manager'],
+                    logger=runner.logger
+                )
+                
+                # Update runner state
+                runner.state.current_scenario = next_scenario
+                runner.state.current_scenario_index = current_index + 1
+                runner.app = new_app
+                
+                # Start simulation in background
+                logger.info("Starting simulation thread...")
+                import threading
+                def run_simulation():
+                    try:
+                        logger.info("Simulation loop started")
+                        new_app.run()
+                    except Exception as e:
+                        logger.error(f"Error in simulation thread: {str(e)}")
+                        if hasattr(new_app, 'state'):
+                            new_app.state.is_running = False
+                    finally:
+                        logger.info("Simulation loop ended")
+                
+                simulation_thread = threading.Thread(target=run_simulation)
+                simulation_thread.daemon = True
+                simulation_thread.start()
+                
+                return {
+                    "success": True,
+                    "message": f"Skipped scenario {current_index + 1}/{total_scenarios}. Moving to next scenario: {next_scenario}"
+                }
+                
+            except Exception as e:
+                logger.error(f"Error during simulation setup: {str(e)}")
+                cleanup_resources()
+                raise e
+                
         else:
-            # All scenarios completed
+            # This was the last scenario
+            logger.info("Last scenario skipped. Simulation complete.")
+            
+            # Reset cleanup flag
+            runner.app.is_cleanup_complete = False
+            
+            # Stop current scenario
             runner.app.state.is_running = False
+            
+            # Wait for cleanup to complete
+            max_wait_time = 10  # Maximum wait time in seconds
+            wait_interval = 0.1  # Check every 100ms
+            start_time = datetime.now()
+            
+            while not runner.app.is_cleanup_complete:
+                if (datetime.now() - start_time).total_seconds() > max_wait_time:
+                    logger.warn("Cleanup wait timeout reached")
+                    break
+                await asyncio.sleep(wait_interval)
+            
             # Generate final report
             if hasattr(runner.app, 'metrics'):
                 runner.app.metrics.generate_html_report(
@@ -247,7 +353,11 @@ async def skip_scenario():
                     runner.state.batch_start_time,
                     datetime.now()
                 )
-            return {"success": True, "message": "All scenarios completed"}
+            
+            return {
+                "success": True,
+                "message": "Last scenario skipped. Simulation complete."
+            }
             
     except Exception as e:
         logger.error(f"Error skipping scenario: {str(e)}")
