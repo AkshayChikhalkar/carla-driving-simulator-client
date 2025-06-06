@@ -293,9 +293,8 @@ class EmergencyBrakeScenario(BaseScenario):
         """Clean up scenario resources"""
         try:
             super().cleanup()
-            if self.obstacle:
-                self.world_manager.destroy_actor(self.obstacle)
-                self.obstacle = None
+            # Only clear state, actor destruction is handled by world_manager
+            self.obstacle = None
             self.waypoints.clear()
         except Exception as e:
             self.logger.error(f"Error in scenario cleanup: {str(e)}")

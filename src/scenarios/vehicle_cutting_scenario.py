@@ -221,9 +221,8 @@ class VehicleCuttingScenario(BaseScenario):
         """Clean up scenario resources"""
         try:
             super().cleanup()
-            if self.cutting_vehicle:
-                self.world_manager.destroy_actor(self.cutting_vehicle)
-                self.cutting_vehicle = None
+            # Only clear state, actor destruction is handled by world_manager
+            self.cutting_vehicle = None
             self.waypoints.clear()
         except Exception as e:
             self.logger.error(f"Error in scenario cleanup: {str(e)}")

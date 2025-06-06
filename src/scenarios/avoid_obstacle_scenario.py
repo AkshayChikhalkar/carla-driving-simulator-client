@@ -451,8 +451,7 @@ class AvoidObstacleScenario(BaseScenario):
         """Clean up scenario resources"""
         try:
             super().cleanup()
-            for obstacle in self.obstacles:
-                self.world_manager.destroy_actor(obstacle)
+            # Only clear state, actor destruction is handled by world_manager
             self.obstacles.clear()
             self.waypoints.clear()
         except Exception as e:

@@ -43,17 +43,17 @@ class SimulationState:
 class SimulationManager(ISimulationManager):
     """Manages the simulation lifecycle and coordinates between components"""
     
-    def __init__(self,
-                 world_manager: IWorldManager,
-                 vehicle_controller: IVehicleController,
-                 sensor_manager: ISensorManager,
-                 logger: ILogger):
-        self.world_manager = world_manager
-        self.vehicle_controller = vehicle_controller
-        self.sensor_manager = sensor_manager
+    def __init__(self, logger: ILogger):
         self.logger = logger
-        self._scenario: Optional[IScenario] = None
-        self._is_running = False
+        self.world_manager = None
+        self.sensor_manager = None
+        self._state = None
+        self.last_speed = 0.0
+        self.last_position = (0.0, 0.0, 0.0)
+        self.last_heading = 0.0
+        self.is_finished = False
+        self.start_time = None
+        self._scenario = None
 
     def connect(self) -> bool:
         """Connect to the CARLA server"""
@@ -90,72 +90,30 @@ class SimulationManager(ISimulationManager):
         if not self._scenario:
             raise RuntimeError("No scenario set")
             
-        self._is_running = True
+        self._state.is_running = True
         self.logger.info("Starting simulation loop")
         
         try:
-            while self._is_running:
+            while self._state.is_running:
                 # Update scenario
                 self._scenario.update()
                 
                 # Check if scenario is complete
                 if self._scenario.is_completed():
-                    self._is_running = False
+                    self._state.is_running = False
                     break
                     
         except Exception as e:
             self.logger.error(f"Error in simulation loop: {str(e)}")
             raise
         finally:
-            self._is_running = False
+            self._state.is_running = False
 
     def stop(self) -> None:
         """Stop the simulation"""
-        self._is_running = False
-
-    def cleanup(self) -> None:
-        """Clean up simulation resources"""
-        try:
-            if DEBUG_MODE:
-                self.logger.debug("Starting simulation cleanup...")
-            
-            # First stop any ongoing simulation
-            self.stop()
-            
-            # Clean up world and all actors
-            if self.world_manager:
-                if DEBUG_MODE:
-                    self.logger.debug("Cleaning up world manager...")
-                self.world_manager.cleanup()
-            
-            # Clean up sensors
-            if self.sensor_manager:
-                if DEBUG_MODE:
-                    self.logger.debug("Cleaning up sensor manager...")
-                self.sensor_manager.cleanup()
-            
-            # Reset simulation state
-            self._state = None
-            self.last_speed = 0.0
-            self.last_position = (0.0, 0.0, 0.0)
-            self.last_heading = 0.0
-            self.is_finished = False
-            self.start_time = None
-            
-            # Clear any remaining references
-            self._scenario = None
-            
-            # Force garbage collection
-            import gc
-            gc.collect()
-            
-            if DEBUG_MODE:
-                self.logger.debug("Simulation cleanup completed")
-            self.logger.info("Simulation cleanup completed")
-            
-        except Exception as e:
-            self.logger.error("Error during cleanup", exc_info=e)
-            raise
+        self.is_finished = True
+        if self._state:
+            self._state.is_running = False
 
     def check_events(self) -> tuple[SimulationEvent, str]:
         """Check for significant events based on current state"""

@@ -324,7 +324,7 @@ class SimulationApplication:
                     if DEBUG_MODE:
                         self.logger.debug(f"Cleaning up current scenario: {scenario_name}")
                     
-                    # Cleanup the scenario
+                    # Cleanup the scenario (only state cleanup, no actor destruction)
                     self.current_scenario.cleanup()
                     
                     if DEBUG_MODE:
@@ -338,7 +338,7 @@ class SimulationApplication:
                     if DEBUG_MODE:
                         self.logger.debug("Current scenario reference cleared")
             
-            # Clean up sensors
+            # Clean up sensors first
             if self.sensor_manager:
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up sensor manager...")
@@ -352,7 +352,7 @@ class SimulationApplication:
                 self.display_manager.cleanup()
                 self.display_manager = None
             
-            # Clean up world and all actors
+            # Clean up world and all actors last
             if self.world_manager:
                 if DEBUG_MODE:
                     self.logger.debug("Cleaning up world manager...")
