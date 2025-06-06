@@ -253,7 +253,7 @@ class SensorManager:
             
             # Then destroy each sensor
             for sensor_type, sensor in self.sensors.items():
-                if sensor:
+                if sensor.sensor is not None and sensor.sensor.is_alive:
                     try:
                         logger.debug(f"[SensorManager] Destroying sensor: {sensor_type}")
                         sensor.destroy()
