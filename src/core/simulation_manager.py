@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any
 from enum import Enum, auto
 import carla
+from src.control.controller import VehicleController
 from src.core.interfaces import (
     ISimulationManager,
     IScenario,
@@ -16,8 +17,12 @@ from src.core.interfaces import (
     ISensorManager,
     ILogger
 )
+from src.core.sensors import SensorManager
+from src.core.world_manager import WorldManager
+from src.utils.config import load_config
 from src.utils.settings import DEBUG_MODE
 from ..visualization.display_manager import VehicleState
+import math
 
 class SimulationEvent(Enum):
     """Possible simulation events"""
@@ -41,79 +46,136 @@ class SimulationState:
     collision_intensity: float = 0.0
 
 class SimulationManager(ISimulationManager):
-    """Manages the simulation lifecycle and coordinates between components"""
+    """Manages the simulation lifecycle"""
     
-    def __init__(self, logger: ILogger):
-        self.logger = logger
+    def __init__(self, config_path: str):
+        """Initialize simulation manager"""
+        self.config = load_config(config_path)
         self.world_manager = None
         self.sensor_manager = None
-        self._state = None
-        self.last_speed = 0.0
-        self.last_position = (0.0, 0.0, 0.0)
-        self.last_heading = 0.0
-        self.is_finished = False
-        self.start_time = None
-        self._scenario = None
-
+        self.vehicle = None
+        self.vehicle_bp = None
+        self.map_name = self.config.world_config.map_name
+        self.logger = Logger()
+        self._state = SimulationState()
+    
     def connect(self) -> bool:
-        """Connect to the CARLA server"""
+        """Connect to the simulation server"""
         try:
-            self.world_manager.get_world()
-            self.logger.info("Successfully connected to CARLA server")
+            self.world_manager = WorldManager(
+                self.config.server_config,
+                self.config.world_config,
+                self.config.vehicle_config
+            )
             return True
         except Exception as e:
-            self.logger.error(f"Failed to connect to CARLA server: {str(e)}")
+            self.logger.error("Error connecting to simulation server", exc_info=e)
             return False
-
-    def setup(self) -> None:
-        """Setup the simulation environment"""
+    
+    def setup(self) -> bool:
+        """Setup simulation components"""
         try:
+            # Initialize components
+            self.world_manager = WorldManager(self.client, self.config.world, self.config.vehicle)
+            self.vehicle_controller = VehicleController(self.world_manager, self.config.vehicle)
+            self.sensor_manager = SensorManager(self.world_manager, self.config.sensors)
+            
             # Setup sensors
             self.sensor_manager.setup_sensors()
             
-            # Get initial vehicle state
-            vehicle = self.vehicle_controller.get_vehicle()
-            if not vehicle:
-                raise RuntimeError("Vehicle not available")
-                
-            self.logger.info("Simulation environment setup completed")
+            return True
         except Exception as e:
-            self.logger.error(f"Failed to setup simulation: {str(e)}")
-            raise
-
-    def set_scenario(self, scenario: IScenario) -> None:
-        """Set the current scenario"""
-        self._scenario = scenario
-
+            self.logger.error("Error setting up simulation", exc_info=e)
+            return False
+    
     def run(self) -> None:
         """Run the simulation"""
-        if not self._scenario:
-            raise RuntimeError("No scenario set")
-            
-        self._state.is_running = True
-        self.logger.info("Starting simulation loop")
-        
         try:
-            while self._state.is_running:
-                # Update scenario
-                self._scenario.update()
+            if not self._state.is_running:
+                self._state.is_running = True
+                self.logger.info("Starting simulation")
                 
-                # Check if scenario is complete
-                if self._scenario.is_completed():
-                    self._state.is_running = False
-                    break
+                # Main simulation loop
+                while self._state.is_running:
+                    # Update vehicle state
+                    if self.vehicle:
+                        self._update_vehicle_state()
                     
+                    # Process sensor data
+                    if self.sensor_manager:
+                        self.sensor_manager.process_data()
+                    
+                    # Tick the world
+                    self.world_manager.world.tick()
+                    
+            else:
+                self.logger.warning("Simulation is already running")
+                
         except Exception as e:
-            self.logger.error(f"Error in simulation loop: {str(e)}")
-            raise
-        finally:
+            self.logger.error("Error in simulation loop", exc_info=e)
             self._state.is_running = False
-
+            raise
+    
     def stop(self) -> None:
         """Stop the simulation"""
-        self.is_finished = True
-        if self._state:
-            self._state.is_running = False
+        self._state.is_running = False
+        self.logger.info("Stopping simulation")
+    
+    def initialize(self) -> bool:
+        """Initialize the simulation"""
+        try:
+            # Connect to CARLA server
+            if not self.world_manager.connect():
+                self.logger.error("Failed to connect to CARLA server")
+                return False
+                
+            # Load map
+            self.world_manager.load_map(self.map_name)
+            self.logger.info(f"Loaded map: {self.map_name}")
+            
+            # Create vehicle
+            self.vehicle = self.world_manager.create_vehicle()
+            if not self.vehicle:
+                self.logger.error("Failed to create vehicle")
+                return False
+                
+            self.logger.info("Simulation initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error initializing simulation", exc_info=e)
+            return False
+    
+    def _update_vehicle_state(self) -> None:
+        """Update vehicle state"""
+        try:
+            if self.vehicle:
+                # Get vehicle transform
+                transform = self.vehicle.get_transform()
+                
+                # Get vehicle velocity
+                velocity = self.vehicle.get_velocity()
+                speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+                
+                # Update state
+                self._state.vehicle_state = VehicleState(
+                    speed=speed,
+                    position=(transform.location.x,
+                             transform.location.y,
+                             transform.location.z),
+                    rotation=(transform.rotation.pitch,
+                             transform.rotation.yaw,
+                             transform.rotation.roll),
+                    acceleration=0.0,  # TODO: Calculate acceleration
+                    angular_velocity=0.0,  # TODO: Calculate angular velocity
+                    collision_intensity=0.0,  # TODO: Get collision data
+                    distance_to_target=float('inf'),  # TODO: Calculate distance to target
+                    heading_to_target=0.0,  # TODO: Calculate heading to target
+                    heading_difference=0.0  # TODO: Calculate heading difference
+                )
+                
+        except Exception as e:
+            self.logger.error("Error updating vehicle state", exc_info=e)
 
     def check_events(self) -> tuple[SimulationEvent, str]:
         """Check for significant events based on current state"""
@@ -150,29 +212,9 @@ class SimulationManager(ISimulationManager):
         return (elapsed_time < self.config['simulation_time'] 
                 and not self.is_finished)
 
-    def initialize(self) -> bool:
-        """Initialize the simulation"""
-        try:
-            # Connect to CARLA server
-            if not self.world_manager.connect():
-                self.logger.error("Failed to connect to CARLA server")
-                return False
-                
-            # Load map
-            self.world_manager.load_map(self.map_name)
-            self.logger.info(f"Loaded map: {self.map_name}")
-            
-            # Spawn vehicle
-            if not self.spawn_vehicle():
-                self.logger.error("Failed to spawn vehicle")
-                return False
-                
-            self.logger.info("Simulation initialized successfully")
-            return True
-            
-        except Exception as e:
-            self.logger.error("Error initializing simulation", exc_info=e)
-            return False
+    def set_scenario(self, scenario: IScenario) -> None:
+        """Set the current scenario"""
+        self._scenario = scenario
 
     def spawn_vehicle(self) -> bool:
         """Spawn the ego vehicle"""
