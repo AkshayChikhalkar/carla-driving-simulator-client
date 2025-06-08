@@ -45,7 +45,7 @@ class SimulationRunner:
 
     def create_application(self, scenario: str) -> SimulationApplication:
         """Create a new simulation application instance"""
-        return SimulationApplication(self.config_file, scenario)
+        return SimulationApplication(self.config_file, scenario, self.logger)
 
     def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
         """Setup simulation components and return them"""
@@ -54,6 +54,7 @@ class SimulationRunner:
             client=app.connection.client,
             config=app.world_config,
             vehicle_config=app._config.vehicle,
+            logger=self.logger
         )
 
         # Create vehicle first
