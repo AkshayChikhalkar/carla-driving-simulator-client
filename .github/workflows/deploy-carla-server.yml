@@ -15,6 +15,44 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Install OpenVPN and OpenSSL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openvpn openssl
+
+      - name: Setup VPN connection
+        run: |
+          # Create VPN config directory
+          mkdir -p ~/.vpn
+          
+          # Write VPN config
+          cat << 'EOF' > ~/.vpn/config.ovpn
+          ${{ secrets.OVPN_CONFIG }}
+          EOF
+          
+          # Write PKCS#12 certificate
+          echo "${{ secrets.P12_CERT }}" | base64 -d > ~/.vpn/certificate.p12
+          
+          # Extract certificate and private key from PKCS#12
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }}
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }}
+          
+          # Update OpenVPN config to use extracted files
+          echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
+          echo "key ~/.vpn/private.key" >> ~/.vpn/config.ovpn
+          
+          # Connect to VPN
+          sudo openvpn --config ~/.vpn/config.ovpn --daemon
+          
+          # Wait for VPN connection
+          sleep 10
+          
+          # Verify VPN connection
+          if ! ping -c 1 ${{ secrets.SERVER_HOST }} > /dev/null 2>&1; then
+            echo "Failed to connect to VPN"
+            exit 1
+          fi
+
       - name: Deploy to server
         uses: appleboy/ssh-action@master
         with:
@@ -65,4 +103,10 @@ jobs:
               timeout=$((timeout-5))
             done
             echo "Timeout waiting for CARLA server"
-            exit 1 
+            exit 1
+
+      - name: Cleanup VPN
+        if: always()
+        run: |
+          sudo killall openvpn || true
+          rm -rf ~/.vpn 
