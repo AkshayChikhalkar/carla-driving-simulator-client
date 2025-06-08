@@ -64,27 +64,6 @@ class VehicleManager:
         self._spawn_point: Optional[carla.Transform] = None
         self._target_point: Optional[carla.Location] = None
     
-    def spawn_vehicle(self, spawn_point: Optional[carla.Transform] = None) -> None:
-        """Spawn vehicle at specified point or random point"""
-        if spawn_point is None:
-            spawn_point = self.world.get_map().get_spawn_points()[0]
-        
-        # Get vehicle blueprint
-        blueprint = self.world.get_blueprint_library().find(self.config['vehicle_model'])
-        
-        # Try to spawn the vehicle
-        self.vehicle = self.world.try_spawn_actor(blueprint, spawn_point)
-        if self.vehicle is None:
-            raise RuntimeError("Failed to spawn vehicle")
-        
-        self._spawn_point = spawn_point
-        
-        # Apply initial vehicle physics control
-        physics_control = self.vehicle.get_physics_control()
-        physics_control.mass = self.config.get('mass', physics_control.mass)
-        physics_control.drag_coefficient = self.config.get('drag_coefficient', physics_control.drag_coefficient)
-        self.vehicle.apply_physics_control(physics_control)
-    
     def set_target(self, location: carla.Location) -> None:
         """Set target location for the vehicle"""
         self._target_point = location
