@@ -35,9 +35,10 @@ class ServerConfig:
     timeout: float
     connection: Dict[str, Any]
 
-class ConnectionManager:
+class ConnectionManager():
     """Handles connection to CARLA server"""
-    def __init__(self, server_config: ServerConfig):
+    def __init__(self, server_config: ServerConfig, logger: ILogger):
+        self.logger = logger
         self.config = server_config
         self.client = None
 
@@ -47,32 +48,33 @@ class ConnectionManager:
         delay = 30
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})...")
+                self.logger.info(f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})...")
                 self.client = carla.Client(self.config.host, self.config.port)
                 self.client.set_timeout(self.config.timeout)
-                
+
                 # Test connection
                 world = self.client.get_world()
                 if not world:
-                    print("Failed to get CARLA world")
                     raise RuntimeError("Failed to get CARLA world")
-                print("Successfully connected to CARLA server")
+                self.logger.info("Successfully connected to CARLA server")
                 return True
             except Exception as e:
-                print(f"Failed to connect to CARLA server (attempt {attempt}): {str(e)}")
-                print("Make sure the CARLA server is running and accessible")
+                self.logger.warning(f"Failed to connect to CARLA server (attempt {attempt})")
+                self.logger.warning(
+                    "Make sure the CARLA server is running and accessible"
+                )
                 self.client = None
                 if attempt < max_retries:
-                    print(f"Retrying in {delay} seconds...")
+                    self.logger.warning(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                 else:
-                    print("All connection attempts failed.")
+                    self.logger.warning("All connection attempts failed.")
                     return False
 
     def disconnect(self) -> None:
         """Disconnect from CARLA server"""
         if self.client:
-            print("Disconnecting from CARLA server...")
+            self.logger.info("Disconnecting from CARLA server...")
             self.client = None
 
 class SimulationState:
