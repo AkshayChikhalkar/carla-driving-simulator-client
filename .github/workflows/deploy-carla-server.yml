@@ -11,6 +11,7 @@ jobs:
     env:
       CARLA_VERSION: "0.10.0"
       DOCKER_IMAGE: carlasim/carla:0.10.0
+      OPENSSL_CONF: /etc/ssl/openssl.cnf
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -33,9 +34,9 @@ jobs:
           # Write PKCS#12 certificate
           echo "${{ secrets.P12_CERT }}" | base64 -d > ~/.vpn/certificate.p12
           
-          # Extract certificate and private key from PKCS#12
-          openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }}
-          openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }}
+          # Extract certificate and private key from PKCS#12 with legacy support
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }} -legacy
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }} -legacy
           
           # Update OpenVPN config to use extracted files
           echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
