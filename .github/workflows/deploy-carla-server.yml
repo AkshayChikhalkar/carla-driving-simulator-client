@@ -45,9 +45,21 @@ jobs:
           openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }} -legacy
           openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }} -legacy
           
+          # Ensure proper certificate format
+          sed -i 's/^-----BEGIN CERTIFICATE-----/-----BEGIN CERTIFICATE-----/' ~/.vpn/certificate.crt
+          sed -i 's/^-----BEGIN PRIVATE KEY-----/-----BEGIN PRIVATE KEY-----/' ~/.vpn/private.key
+          
           # Update OpenVPN config to use extracted files
           echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
           echo "key ~/.vpn/private.key" >> ~/.vpn/config.ovpn
+          
+          # Debug: Show config file content (without sensitive data)
+          echo "=== OpenVPN Config ==="
+          grep -v "certificate\|key\|password" ~/.vpn/config.ovpn
+          
+          # Debug: Verify certificate files
+          echo "=== Certificate Files ==="
+          ls -l ~/.vpn/
           
           # Connect to VPN with reduced security for testing
           sudo openvpn --config ~/.vpn/config.ovpn --daemon --auth none
