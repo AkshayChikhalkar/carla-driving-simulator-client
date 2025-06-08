@@ -26,11 +26,14 @@ jobs:
           # Create VPN config directory
           mkdir -p ~/.vpn
           
-          # Write VPN config and remove cryptoapicert option
+          # Write VPN config and clean it up
           cat << 'EOF' > ~/.vpn/config.ovpn
           ${{ secrets.OVPN_CONFIG }}
           EOF
+          
+          # Remove problematic options
           sed -i '/cryptoapicert/d' ~/.vpn/config.ovpn
+          sed -i '/tls-auth/d' ~/.vpn/config.ovpn
           
           # Write PKCS#12 certificate
           echo "${{ secrets.P12_CERT }}" | base64 -d > ~/.vpn/certificate.p12
@@ -43,8 +46,8 @@ jobs:
           echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
           echo "key ~/.vpn/private.key" >> ~/.vpn/config.ovpn
           
-          # Connect to VPN
-          sudo openvpn --config ~/.vpn/config.ovpn --daemon
+          # Connect to VPN with reduced security for testing
+          sudo openvpn --config ~/.vpn/config.ovpn --daemon --auth none
           
           # Wait for VPN connection
           sleep 10
