@@ -121,9 +121,9 @@ async def write_log(request: LogWriteRequest):
             web_log_file = open(log_files[0], "a", encoding="utf-8")
             logger.info(f"Reopened log file: {log_files[0].name}")
         
-        web_log_file.write(request.content)
-        web_log_file.flush()
-        return {"message": "Log written"}
+            web_log_file.write(request.content)
+            web_log_file.flush()
+            return {"message": "Log written"}
     except Exception as e:
         logger.error(f"Error writing to log file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,9 +154,9 @@ def cleanup_resources():
             # Clean up resources through the application
             if hasattr(runner.app, 'cleanup'):
                 runner.app.cleanup()
-            
-            # Clear the app instance
-            runner.app = None
+        
+        # Clear the app instance
+        runner.app = None
             
         logger.info("Cleanup completed successfully")
     except Exception as e:
@@ -187,7 +187,7 @@ async def get_scenarios():
     """Get list of available scenarios"""
     try:
         logger.info("Fetching available scenarios")
-        # Ensure scenarios are registered
+            # Ensure scenarios are registered
         ScenarioRegistry.register_all()
         scenarios = ScenarioRegistry.get_available_scenarios()
         logger.info(f"Found {len(scenarios)} scenarios: {scenarios}")
@@ -247,12 +247,14 @@ async def skip_scenario():
             logger.warning("Attempted to skip scenario while simulation is not running")
             return {"success": False, "message": "Simulation is not running"}
         
-        logger.info("Skipping current scenario")
-        
         # Get current scenario index and total scenarios
         current_index = runner.state.current_scenario_index
         total_scenarios = len(runner.state.scenarios_to_run)
         current_scenario = runner.state.current_scenario
+        
+        logger.info("================================")
+        logger.info(f"Skipping scenario {current_index + 1}/{total_scenarios}: {current_scenario}")
+        logger.info("================================")
         
         # Record skipped scenario result
         runner.state.scenario_results.append({
@@ -264,7 +266,9 @@ async def skip_scenario():
         # If there are more scenarios, prepare for next one
         if current_index < total_scenarios - 1:
             next_scenario = runner.state.scenarios_to_run[current_index + 1]
-            logger.info(f"Preparing to run next scenario: {next_scenario}")
+            logger.info("================================")
+            logger.info(f"Starting scenario {current_index + 2}/{total_scenarios}: {next_scenario}")
+            logger.info("================================")
             
             # Store current app reference
             current_app = runner.app
@@ -352,7 +356,9 @@ async def skip_scenario():
                 
         else:
             # This was the last scenario
+            logger.info("================================")
             logger.info("Last scenario skipped. Simulation complete.")
+            logger.info("================================")
             
             # Reset cleanup flag
             runner.app.is_cleanup_complete = False
@@ -454,9 +460,9 @@ async def start_simulation(request: SimulationRequest):
                         # Run all selected scenarios
                         total_scenarios = len(scenarios_to_run)
                         for i, scenario in enumerate(scenarios_to_run):
-                            logger.info(f"================================")
-                            logger.info(f"Running scenario {i+1}/{total_scenarios}: {scenario}")
-                            logger.info(f"================================")
+                            logger.info("================================")
+                            logger.info(f"Starting scenario {i+1}/{total_scenarios}: {scenario}")
+                            logger.info("================================")
                             
                             if i > 0:  # Skip first scenario as it's already set up
                                 runner.state.current_scenario = scenario
@@ -531,7 +537,9 @@ async def start_simulation(request: SimulationRequest):
 async def stop_simulation():
     """Stop the current simulation"""
     try:
+        logger.info("================================")
         logger.info("Stopping simulation")
+        logger.info("================================")
         cleanup_resources()
         logger.info("Simulation stopped successfully")
         return {"success": True, "message": "Simulation stopped successfully"}
