@@ -1,0 +1,68 @@
+name: Deploy CARLA Simulator
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CARLA_VERSION: "0.10.0"
+      DOCKER_IMAGE: carlasim/carla:0.10.0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Stop existing containers
+            docker-compose down || true
+            
+            # Create docker-compose.yml if it doesn't exist
+            cat > docker-compose.yml << 'EOL'
+            version: '3.8'
+            services:
+              carla-server:
+                image: carlasim/carla:0.10.0
+                privileged: true
+                runtime: nvidia
+                environment:
+                  - NVIDIA_VISIBLE_DEVICES=all
+                  - NVIDIA_DRIVER_CAPABILITIES=all
+                  - CUDA_VISIBLE_DEVICES=0
+                  - NVIDIA_GPU_MEMORY_ALLOCATION=65536
+                  - NVIDIA_GPU_MEMORY_ALLOCATION_PERCENT=80
+                ports:
+                  - "2000-2002:2000-2002"
+                command: ./CarlaUE4.sh -opengl -RenderOffScreen -nosound -quality-level=low -benchmark -fps=30 -ResX=1920 -ResY=1080
+                volumes:
+                  - /tmp/.X11-unix:/tmp/.X11-unix
+                shm_size: 32g
+                ipc: host
+                ulimits:
+                  memlock: -1
+                  stack: 67108864
+            EOL
+            
+            # Start containers
+            docker-compose up -d
+            
+            # Wait for CARLA server to be ready
+            timeout=300
+            while [ $timeout -gt 0 ]; do
+              if curl -s http://localhost:2000/ > /dev/null; then
+                echo "CARLA server is ready!"
+                exit 0
+              fi
+              sleep 5
+              timeout=$((timeout-5))
+            done
+            echo "Timeout waiting for CARLA server"
+            exit 1 
