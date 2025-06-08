@@ -45,9 +45,23 @@ jobs:
           openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }} -legacy
           openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }} -legacy
           
-          # Ensure proper certificate format
-          sed -i 's/^-----BEGIN CERTIFICATE-----/-----BEGIN CERTIFICATE-----/' ~/.vpn/certificate.crt
-          sed -i 's/^-----BEGIN PRIVATE KEY-----/-----BEGIN PRIVATE KEY-----/' ~/.vpn/private.key
+          # Ensure proper certificate format with more robust sed commands
+          sed -i 's/^---BEGIN/-----BEGIN/g' ~/.vpn/certificate.crt
+          sed -i 's/^---END/-----END/g' ~/.vpn/certificate.crt
+          sed -i 's/^---BEGIN/-----BEGIN/g' ~/.vpn/private.key
+          sed -i 's/^---END/-----END/g' ~/.vpn/private.key
+          
+          # Additional formatting fixes
+          sed -i 's/^BEGIN/-----BEGIN/g' ~/.vpn/certificate.crt
+          sed -i 's/^END/-----END/g' ~/.vpn/certificate.crt
+          sed -i 's/^BEGIN/-----BEGIN/g' ~/.vpn/private.key
+          sed -i 's/^END/-----END/g' ~/.vpn/private.key
+          
+          # Verify certificate format
+          if ! grep -q "-----BEGIN" ~/.vpn/certificate.crt || ! grep -q "-----BEGIN" ~/.vpn/private.key; then
+            echo "Error: Certificate format verification failed"
+            exit 1
+          fi
           
           # Update OpenVPN config to use extracted files
           echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
@@ -60,6 +74,11 @@ jobs:
           # Debug: Verify certificate files
           echo "=== Certificate Files ==="
           ls -l ~/.vpn/
+          
+          # Debug: Show certificate format
+          echo "=== Certificate Format ==="
+          head -n 1 ~/.vpn/certificate.crt
+          head -n 1 ~/.vpn/private.key
           
           # Connect to VPN with reduced security for testing
           sudo openvpn --config ~/.vpn/config.ovpn --daemon --auth none
