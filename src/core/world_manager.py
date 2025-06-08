@@ -27,20 +27,23 @@ class TargetPoint:
 class WorldManager(IWorldManager):
     """Manages the CARLA world and its entities"""
     
-    def __init__(self, client: carla.Client, config: WorldConfig, vehicle_config: VehicleConfig):
+    def __init__(self, client: carla.Client, config: WorldConfig, vehicle_config: VehicleConfig, logger: Logger):
         """Initialize the world manager"""
         self.client = client
         self.config = config
         self.vehicle_config = vehicle_config
+        self.logger = logger
         self.world = None
         self.vehicle = None
         self.blueprint_library = None
         self.spawn_points = []
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
-        self.logger = logging.getLogger(__name__)
+        self._scenario_actors: List[carla.Actor] = []  # Track scenario-specific actors
         self.traffic_manager = None
         self.traffic_manager_port = 8001  # Default port for traffic manager
+        self.max_reconnect_attempts = 3
+        self.reconnect_delay = 2.0  # seconds
         
         # Get configuration values with fallbacks
         self.synchronous_mode = getattr(config, 'synchronous_mode', True)
@@ -52,24 +55,78 @@ class WorldManager(IWorldManager):
         self.vehicle_drag = getattr(vehicle_config, 'drag_coefficient', 0.3)
         self.vehicle_max_rpm = getattr(vehicle_config, 'max_rpm', 6000.0)
         self.vehicle_moi = getattr(vehicle_config, 'moi', 1.0)
-        self.vehicle_model = getattr(vehicle_config, 'model', 'vehicle.tesla.model3')
+        self.vehicle_model = getattr(vehicle_config, 'model', 'vehicle.fuso.mitsubishi')
         
         self._setup_world()
         
         # Wait for the world to be ready
         self.world.tick()
 
+    def _handle_server_error(self, error: Exception) -> bool:
+        """Handle server errors and attempt reconnection"""
+        error_msg = str(error).lower()
+        
+        # Check if it's a connection error
+        if any(msg in error_msg for msg in [
+            "connection refused",
+            "connection failed",
+            "actively refused",
+            "timeout",
+            "no connection could be made"
+        ]):
+            self.logger.error(f"CARLA server connection error: {str(error)}")
+            return self._attempt_reconnection()
+        
+        # For other errors, just log them
+        self.logger.error(f"CARLA server error: {str(error)}")
+        return False
+
+    def _attempt_reconnection(self) -> bool:
+        """Attempt to reconnect to the CARLA server"""
+        for attempt in range(self.max_reconnect_attempts):
+            try:
+                self.logger.info(f"Attempting to reconnect to CARLA server (attempt {attempt + 1}/{self.max_reconnect_attempts})...")
+                time.sleep(self.reconnect_delay)
+                
+                # Try to get the world
+                self.world = self.client.get_world()
+                if self.world is not None:
+                    self.logger.info("Successfully reconnected to CARLA server")
+                    return True
+                    
+            except Exception as e:
+                self.logger.error(f"Reconnection attempt {attempt + 1} failed: {str(e)}")
+                if attempt < self.max_reconnect_attempts - 1:
+                    time.sleep(self.reconnect_delay)
+        
+        self.logger.error("Failed to reconnect to CARLA server after multiple attempts")
+        return False
+
     def connect(self) -> bool:
         """Connect to CARLA server"""
         try:
-            self.client = carla.Client(self.host, self.port)
             self.client.set_timeout(2.0)
             self.world = self.client.get_world()
-            self.logger.info(f"Connected to CARLA server at {self.host}:{self.port}")
+            if self.world is None:
+                self.logger.error("Failed to get world from CARLA server")
+                return False
+                
+            self.logger.info(f"Connected to CARLA server at {self.client.get_server_host()}:{self.client.get_server_port()}")
             return True
         except Exception as e:
-            self.logger.error("Failed to connect to CARLA server", exc_info=e)
-            return False
+            return self._handle_server_error(e)
+
+    def tick(self) -> bool:
+        """Update the world state"""
+        try:
+            if self.world is None:
+                self.logger.error("World is None, attempting to reconnect...")
+                return self._attempt_reconnection()
+                
+            self.world.tick()
+            return True
+        except Exception as e:
+            return self._handle_server_error(e)
 
     def disconnect(self) -> None:
         """Disconnect from CARLA server"""
@@ -96,12 +153,8 @@ class WorldManager(IWorldManager):
         return self.world.get_map()
 
     def spawn_actor(self, blueprint: carla.ActorBlueprint, transform: carla.Transform) -> Optional[carla.Actor]:
-        """Spawn an actor in the world"""
-        try:
-            return self.world.spawn_actor(blueprint, transform)
-        except Exception as e:
-            print(f"Error spawning actor: {str(e)}")
-            return None
+        """Spawn an actor in the world using the centralized spawning logic"""
+        return self._spawn_with_retry(blueprint, transform)
 
     def destroy_actor(self, actor: carla.Actor) -> None:
         """Destroy an actor from the world"""
@@ -157,7 +210,7 @@ class WorldManager(IWorldManager):
                 # Try to spawn at current spawn point
                 actor = self.world.spawn_actor(blueprint, spawn_point)
                 if actor and actor.is_alive:
-                    self.logger.info(f"{actor.type_id} spawned successfully at {spawn_point.location}")
+                    self.logger.debug(f"{actor.type_id} spawned successfully at {spawn_point.location}")
                     return actor
                 elif actor:
                     actor.destroy()
@@ -186,7 +239,7 @@ class WorldManager(IWorldManager):
                     time.sleep(0.5)  # Wait before retry
                 continue
                 
-        self.logger.error(f"Failed to spawn {blueprint.id} after {max_attempts} attempts")
+        self.logger.info(f"Successfully spawned all actors")
         return None
 
     def create_vehicle(self) -> Optional[carla.Vehicle]:
@@ -307,7 +360,7 @@ class WorldManager(IWorldManager):
             transform = random.choice(self.world.get_map().get_spawn_points())
             bp = random.choice(self.world.get_blueprint_library().filter('vehicle.*'))
             
-            npc = self.spawn_actor(bp, transform)
+            npc = self._spawn_with_retry(bp, transform)
             if npc is not None:
                 npc.set_autopilot(True, self.traffic_manager_port)
                 self.traffic_manager.ignore_lights_percentage(npc, 0)
@@ -361,7 +414,7 @@ class WorldManager(IWorldManager):
                 waypoint.transform.location.z + 4 + i
             )
             target_transform = carla.Transform(target_loc)
-            target = self.spawn_actor(target_bp, target_transform)
+            target = self._spawn_with_retry(target_bp, target_transform)
             if target:
                 target_actors.append(target)
                 self.logger.debug(f"Spawned target marker at {target_loc}")
@@ -377,52 +430,57 @@ class WorldManager(IWorldManager):
         """Get a random spawn point from the map"""
         return random.choice(self.world.get_map().get_spawn_points())
     
+    def spawn_scenario_actor(self, blueprint_id: str, transform: carla.Transform, 
+                           actor_type: str = "vehicle", **kwargs) -> Optional[carla.Actor]:
+        """Spawn an actor for a scenario with proper tracking"""
+        try:
+            # Get blueprint
+            blueprint = self.blueprint_library.find(blueprint_id)
+            if not blueprint:
+                self.logger.error(f"Blueprint {blueprint_id} not found")
+                return None
+
+            # Apply any additional attributes
+            for key, value in kwargs.items():
+                if hasattr(blueprint, 'set_attribute'):
+                    blueprint.set_attribute(key, str(value))
+
+            # Spawn the actor
+            actor = self._spawn_with_retry(blueprint, transform)
+            if actor:
+                self._scenario_actors.append(actor)
+                self.logger.info(f"Spawned {actor_type} {blueprint_id} at {transform.location}")
+                return actor
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error spawning scenario actor {blueprint_id}: {str(e)}")
+            return None
+
     def cleanup(self) -> None:
-        """Clean up world resources"""
+        """Clean up resources"""
         try:
             # Destroy all actors
-            actors = self.world.get_actors()
-            
-            def safe_destroy_actor(actor, actor_type="actor"):
-                if not actor:
-                    return False
-                    
+            if self.vehicle and self.vehicle.is_alive:
                 try:
-                    if actor.is_alive:
+                    self.vehicle.destroy()
+                except Exception as e:
+                    self.logger.warning(f"Error destroying vehicle: {str(e)}")
+            
+            # Safely destroy traffic and scenario actors
+            for actor in self._traffic_actors + self._scenario_actors:
+                try:
+                    if actor and actor.is_alive:
                         actor.destroy()
-                        self.logger.info(f"Destroyed {actor.type_id}")
-                        return True
                 except Exception as e:
-                    self.logger.error(f"Error destroying {actor.type_id if actor else 'unknown'}: {str(e)}")
-                    return False
+                    self.logger.warning(f"Error destroying actor: {str(e)}")
             
-            # Only destroy vehicles and dynamic actors, not map actors
-            vehicle_actors = [actor for actor in actors if actor and 
-                            actor.type_id.startswith('vehicle.') and 
-                            not actor.type_id.startswith('traffic.')]
-            for actor in vehicle_actors:
-                safe_destroy_actor(actor, "vehicle")
+            self._traffic_actors.clear()
+            self._scenario_actors.clear()
             
-            # Wait for vehicles to be destroyed
-            time.sleep(1.0)
+            # Reset world reference
+            self.world = None
             
-            # Then destroy any remaining dynamic actors (excluding map actors)
-            other_actors = [actor for actor in actors if actor and 
-                          not actor.type_id.startswith(('sensor.', 'vehicle.', 'traffic.', 'static.'))]
-            for actor in other_actors:
-                safe_destroy_actor(actor, "actor")
-            
-            # Final wait and world tick
-            time.sleep(1.0)
-            if self.world:
-                try:
-                    self.world.tick()
-                except Exception as e:
-                    if "connection failed" in str(e).lower():
-                        self.logger.error("Connection lost during cleanup - server may have crashed")
-                    else:
-                        self.logger.error(f"Error during final world tick: {str(e)}")
-                        
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")
             raise
