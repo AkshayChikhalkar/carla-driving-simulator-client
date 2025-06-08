@@ -274,7 +274,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       // Update status based on response
       if (response.data.success) {
         // Use the message directly from the backend
-        setStatus(response.data.message);
+      setStatus(response.data.message);
         
         // If simulation is complete, update UI after a delay
         if (response.data.message.includes("Simulation complete")) {
