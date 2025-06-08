@@ -57,8 +57,8 @@ jobs:
           sed -i 's/^BEGIN/-----BEGIN/g' ~/.vpn/private.key
           sed -i 's/^END/-----END/g' ~/.vpn/private.key
           
-          # Verify certificate format
-          if ! grep -q "-----BEGIN" ~/.vpn/certificate.crt || ! grep -q "-----BEGIN" ~/.vpn/private.key; then
+          # Verify certificate format using a safer approach
+          if ! head -n 1 ~/.vpn/certificate.crt | grep -q "BEGIN" || ! head -n 1 ~/.vpn/private.key | grep -q "BEGIN"; then
             echo "Error: Certificate format verification failed"
             exit 1
           fi
