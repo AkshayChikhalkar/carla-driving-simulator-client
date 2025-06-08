@@ -101,7 +101,7 @@ class Logger:
             
             # Create logger instance
             self.logger = logging.getLogger(__name__)
-            self.logger.info("Logging system initialized")
+            #self.logger.info("Logging system initialized")
             
             # Setup CSV logging if enabled
             if self.log_to_file:
