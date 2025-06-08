@@ -21,12 +21,12 @@ class VehicleCuttingScenario(BaseScenario):
         self.cutting_distance = config.get('cutting_distance', 30.0)
         self.completion_distance = config.get('completion_distance', 110.0)
         self.collision_threshold = config.get('collision_threshold', 1.0)
-        self.max_simulation_time = config.get('max_simulation_time', 120.0)
+        self._max_duration = config.get('max_simulation_time', 120.0)  # Override base class max duration
         self.waypoint_tolerance = config.get('waypoint_tolerance', 5.0)
         self.min_waypoint_distance = config.get('min_waypoint_distance', 30.0)
         self.max_waypoint_distance = config.get('max_waypoint_distance', 50.0)
         self.num_waypoints = config.get('num_waypoints', 3)
-        self.cutting_vehicle_model = config.get('cutting_vehicle_model', "vehicle.tesla.model3")
+        self.cutting_vehicle_model = config.get('cutting_vehicle_model', "vehicle.fuso.mitsubishi")
         self.normal_speed = config.get('normal_speed', 30.0)
         self.cutting_speed = config.get('cutting_speed', 40.0)
         self.cutting_trigger_distance = config.get('cutting_trigger_distance', 20.0)
@@ -36,93 +36,89 @@ class VehicleCuttingScenario(BaseScenario):
         self.waypoints: List[carla.Location] = []
         self.current_waypoint = 0  # Initialize current waypoint index
         self._name = "Vehicle Cutting"
-        self.scenario_started = False
         self._current_loc = carla.Location()
-        self.start_time = 0.0
         self.current_speed = 0.0  # Current speed in km/h
         self.cutting_triggered = False  # Track if cutting has been triggered
         self.cutting_completed = False  # Track if cutting maneuver is completed
-        
+
     @property
     def name(self) -> str:
         """Get the user-friendly name of the scenario"""
         return self._name
 
+    def _generate_waypoints(self) -> bool:
+        """Generate waypoints for the scenario"""
+        try:
+            # Get current vehicle location and waypoint
+            current_loc = self.vehicle.get_location()
+            current_waypoint = self.world_manager.get_map().get_waypoint(current_loc)
+            
+            if not current_waypoint:
+                self.logger.error("Failed to get current waypoint")
+                return False
+                
+            # Generate waypoints
+            self.waypoints = []
+            next_waypoint = current_waypoint
+            
+            for _ in range(self.num_waypoints):
+                # Get next waypoint at a random distance
+                distance = random.uniform(self.min_waypoint_distance, self.max_waypoint_distance)
+                next_waypoints = next_waypoint.next(distance)
+                
+                if not next_waypoints:
+                    self.logger.error("Failed to generate next waypoint")
+                    return False
+                    
+                next_waypoint = next_waypoints[0]
+                self.waypoints.append(next_waypoint.transform.location)
+                
+            self.logger.info(f"Generated {len(self.waypoints)} waypoints")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error generating waypoints: {str(e)}")
+            return False
+
     def setup(self) -> None:
-        """Setup the vehicle cutting scenario"""
+        """Setup scenario"""
         try:
             super().setup()
-            self.start_time = time.time()
-            current_point = self.vehicle.get_location()
-            for _ in range(self.num_waypoints):
-                distance = random.uniform(self.min_waypoint_distance, self.max_waypoint_distance)
-                angle = random.uniform(0, 2 * math.pi)
-                next_x = current_point.x + distance * math.cos(angle)
-                next_y = current_point.y + distance * math.sin(angle)
-                waypoint = self.world_manager.get_map().get_waypoint(
-                    carla.Location(x=next_x, y=next_y, z=current_point.z),
-                    project_to_road=True
-                )
-                if waypoint:
-                    self.waypoints.append(waypoint.transform.location)
-                    current_point = waypoint.transform.location
-                    self.logger.debug(f"Added waypoint at {current_point}")
-            if not self.waypoints:
-                self.logger.error("Failed to generate valid waypoints")
-                self._set_completed(success=False)
+            
+            # Generate waypoints first
+            if not self._generate_waypoints():
+                self.logger.error("Failed to generate waypoints")
                 return
-            self.vehicle_controller.set_target(self.waypoints[0])
-            self.logger.info("Vehicle cutting scenario started")
-            self.scenario_started = False
-        except Exception as e:
-            self.logger.error(f"Error in scenario setup: {str(e)}")
-            self.cleanup()
-            raise
-
-    def spawn_cutting_vehicle(self):
-        """Spawn the cutting vehicle"""
-        try:
-            if self.cutting_vehicle:
-                return
-            world = self.world_manager.get_world()
-            blueprint_library = world.get_blueprint_library()
-            blueprint = blueprint_library.find(self.cutting_vehicle_model)
-            if not blueprint:
-                self.logger.error(f"Failed to find blueprint for {self.cutting_vehicle_model}")
-                return
-            vehicle_transform = self.vehicle.get_transform()
-            vehicle_rotation = vehicle_transform.rotation
-            spawn_distance = 15.0
-            spawn_x = self._current_loc.x + spawn_distance * math.cos(math.radians(vehicle_rotation.yaw + 90))
-            spawn_y = self._current_loc.y + spawn_distance * math.sin(math.radians(vehicle_rotation.yaw + 90))
-            spawn_waypoint = self.world_manager.get_map().get_waypoint(
-                carla.Location(x=spawn_x, y=spawn_y, z=self._current_loc.z),
-                project_to_road=True,
-                lane_type=carla.LaneType.Driving
+            
+            # Get world reference
+            world = self.world_manager.world
+            
+            # Spawn cutting vehicle
+            spawn_transform = self.vehicle.get_transform()
+            spawn_transform.location.x += 2.0
+            spawn_transform.location.y += 2.0
+            
+            # Use WorldManager to spawn the cutting vehicle
+            self.cutting_vehicle = self.world_manager.spawn_scenario_actor(
+                'vehicle.fuso.mitsubishi',
+                spawn_transform,
+                actor_type="cutting_vehicle"
             )
-            if not spawn_waypoint:
-                self.logger.error("Failed to get valid waypoint for cutting vehicle spawn")
-                return
-            spawn_transform = spawn_waypoint.transform
-            spawn_transform.location.z += 0.5
-            try:
-                self.cutting_vehicle = world.spawn_actor(
-                    blueprint,
-                    spawn_transform
-                )
-            except Exception as e:
-                spawn_transform.location.x += 2.0
-                spawn_transform.location.y += 2.0
-                self.cutting_vehicle = world.spawn_actor(
-                    blueprint,
-                    spawn_transform
-                )
+            
             if not self.cutting_vehicle:
                 self.logger.error("Failed to spawn cutting vehicle")
                 return
+                
             self.logger.info(f"Spawned cutting vehicle at location {spawn_transform.location}")
+            
+            # Initialize scenario state
+            self.current_waypoint = 0
+            self.cutting_triggered = False
+            self.cutting_completed = False
+            
         except Exception as e:
-            self.logger.error(f"Error spawning cutting vehicle: {str(e)}")
+            self.logger.error(f"Error in scenario setup: {str(e)}")
+            return
 
     def apply_speed_control(self, target_speed: float):
         """Apply smooth speed control"""
@@ -146,24 +142,26 @@ class VehicleCuttingScenario(BaseScenario):
         try:
             if self.is_completed():
                 return
-            if self.max_simulation_time > 0:
-                elapsed_time = time.time() - self.start_time
-                if elapsed_time > self.max_simulation_time:
-                    self.logger.error(f"Scenario timed out after {elapsed_time:.1f} seconds")
-                    self._set_completed(success=False)
-                    return
+                
+            # Call base class update for timeout check
+            super().update()
+            
+            # Get current vehicle state using cached reference
             self._current_loc = self.vehicle.get_location()
             vehicle_velocity = self.vehicle.get_velocity()
-            self.current_speed = vehicle_velocity.length() * 3.6
+            self.current_speed = vehicle_velocity.length() * 3.6  # Convert to km/h
+            
+            # Start scenario when vehicle begins moving
             if not self.scenario_started and self.current_speed > 5.0:
                 self.scenario_started = True
                 self.logger.info("Vehicle started moving, beginning vehicle cutting test")
-            if self.scenario_started:
+                
+            if self.scenario_started and self.waypoints:
                 if not self.cutting_triggered and self.current_waypoint > 0:
                     distance_to_next = self._current_loc.distance(self.waypoints[self.current_waypoint])
                     if distance_to_next < self.cutting_trigger_distance:
-                        self.spawn_cutting_vehicle()
                         self.cutting_triggered = True
+                        
                 if self.cutting_vehicle and not self.cutting_completed:
                     cutting_loc = self.cutting_vehicle.get_location()
                     distance_to_cutting = self._current_loc.distance(cutting_loc)
@@ -171,6 +169,7 @@ class VehicleCuttingScenario(BaseScenario):
                         self.logger.error("Collision with cutting vehicle detected")
                         self._set_completed(success=False)
                         return
+                        
                     if not self.cutting_completed:
                         current_waypoint = self.world_manager.get_map().get_waypoint(self._current_loc)
                         if current_waypoint:
@@ -201,21 +200,26 @@ class VehicleCuttingScenario(BaseScenario):
                                 if cutting_loc.distance(cut_waypoint.transform.location) < self.waypoint_tolerance:
                                     self.cutting_completed = True
                                     self.logger.info("Cutting vehicle completed its maneuver")
-                self.vehicle_controller.set_target(self.waypoints[self.current_waypoint])
-                self.apply_speed_control(self.normal_speed)
-            distance = self._current_loc.distance(self.waypoints[self.current_waypoint])
-            if distance < self.waypoint_tolerance:
-                self.current_waypoint += 1
-                if self.current_waypoint >= len(self.waypoints):
-                    self.logger.info("Successfully completed vehicle cutting test")
-                    self._set_completed(success=True)
-                else:
+                                    
+                # Update vehicle control
+                if self.current_waypoint < len(self.waypoints):
                     self.vehicle_controller.set_target(self.waypoints[self.current_waypoint])
-                    self.logger.info(f"Moving to waypoint {self.current_waypoint + 1}/{len(self.waypoints)}")
+                    self.apply_speed_control(self.normal_speed)
+                    
+                    # Check if reached current waypoint
+                    distance = self._current_loc.distance(self.waypoints[self.current_waypoint])
+                    if distance < self.waypoint_tolerance:
+                        self.current_waypoint += 1
+                        if self.current_waypoint >= len(self.waypoints):
+                            self.logger.info("Successfully completed vehicle cutting test")
+                            self._set_completed(success=True)
+                        else:
+                            self.logger.info(f"Moving to waypoint {self.current_waypoint + 1}/{len(self.waypoints)}")
+                            
         except Exception as e:
             self.logger.error(f"Error in scenario update: {str(e)}")
-            self.cleanup()
-            raise
+            self._set_completed(False)
+            return
 
     def cleanup(self) -> None:
         """Clean up scenario resources"""

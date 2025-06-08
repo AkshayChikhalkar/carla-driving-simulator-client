@@ -47,100 +47,43 @@ class EmergencyBrakeScenario(BaseScenario):
         return self._name
 
     def setup(self) -> None:
-        """Setup the emergency brake scenario"""
+        """Setup scenario"""
         try:
             super().setup()
             
-            # Record start time
-            self.start_time = time.time()
-            
-            # Get vehicle's current position
-            current_point = self.vehicle.get_location()
-            
-            # Generate waypoints
+            # Generate waypoints first
             self._generate_waypoints()
-            
             if not self.waypoints:
-                self.logger.error("Failed to generate valid waypoints")
-                self._set_completed(success=False)
+                self.logger.error("Failed to generate waypoints")
                 return
             
-            # Get the world and blueprint library
-            world = self.world_manager.get_world()
-            blueprint_library = world.get_blueprint_library()
-            
-            # Calculate obstacle position
-            obstacle_waypoint = self.world_manager.get_map().get_waypoint(
-                self.waypoints[0],
-                project_to_road=True
-            )
-            
-            if not obstacle_waypoint:
-                self.logger.error("Failed to get obstacle waypoint")
-                self._set_completed(success=False)
-                return
-            
-            # Calculate position for obstacle
-            direction = carla.Vector3D(
-                self.waypoints[0].x - current_point.x,
-                self.waypoints[0].y - current_point.y,
-                0
-            )
-            direction = direction.make_unit_vector()
-            
-            obstacle_x = current_point.x + direction.x * self.obstacle_distance
-            obstacle_y = current_point.y + direction.y * self.obstacle_distance
-            
-            # Get valid waypoint for obstacle
-            obstacle_waypoint = self.world_manager.get_map().get_waypoint(
-                carla.Location(x=obstacle_x, y=obstacle_y, z=current_point.z),
-                project_to_road=True
-            )
-            
-            if not obstacle_waypoint:
-                self.logger.error("Failed to get valid waypoint for obstacle")
-                self._set_completed(success=False)
-                return
-            
-            # Get blueprint for obstacle
-            blueprint = blueprint_library.find(self.obstacle_type)
-            if not blueprint:
-                self.logger.error(f"Failed to find blueprint for {self.obstacle_type}")
-                self._set_completed(success=False)
-                return
+            # Get world reference
+            world = self.world_manager.world
             
             # Spawn obstacle
-            try:
-                self.obstacle = world.spawn_actor(
-                    blueprint,
-                    carla.Transform(
-                        obstacle_waypoint.transform.location,
-                        obstacle_waypoint.transform.rotation
-                    )
-                )
-                
-                if not self.obstacle:
-                    self.logger.error("Failed to spawn obstacle")
-                    self._set_completed(success=False)
-                    return
-                    
-                self.logger.debug(f"Spawned obstacle at location {obstacle_waypoint.transform.location}")
-            except Exception as e:
-                self.logger.error(f"Error spawning obstacle: {str(e)}")
-                self._set_completed(success=False)
+            spawn_transform = self.vehicle.get_transform()
+            spawn_transform.location.x += 10.0  # Place obstacle 10 meters ahead
+            
+            # Use WorldManager to spawn the obstacle
+            self.obstacle = self.world_manager.spawn_scenario_actor(
+                'static.prop.trafficcone01',
+                spawn_transform,
+                actor_type="obstacle"
+            )
+            
+            if not self.obstacle:
+                self.logger.error("Failed to spawn obstacle")
                 return
                 
-            # Set first waypoint as target
-            self.vehicle_controller.set_target(self.waypoints[0])
-            self.logger.info("Emergency brake scenario started")
+            self.logger.info(f"Spawned obstacle at location {spawn_transform.location}")
             
-            # Give vehicle time to start moving
+            # Initialize scenario state
+            self.start_time = time.time()
             self.scenario_started = False
+            self.emergency_brake_active = False
             
         except Exception as e:
             self.logger.error(f"Error in scenario setup: {str(e)}")
-            self.cleanup()
-            raise
 
     def _generate_waypoints(self) -> None:
         """Generate waypoints for the route"""
@@ -230,14 +173,6 @@ class EmergencyBrakeScenario(BaseScenario):
             if self.is_completed():
                 return
                 
-            # Check if max simulation time has been exceeded (only if max_simulation_time > 0)
-            if self.max_simulation_time > 0:
-                elapsed_time = time.time() - self.start_time
-                if elapsed_time > self.max_simulation_time:
-                    self.logger.error(f"Scenario timed out after {elapsed_time:.1f} seconds")
-                    self._set_completed(success=False)
-                    return
-                
             # Get current vehicle state using cached reference
             self._current_loc = self.vehicle.get_location()
             vehicle_velocity = self.vehicle.get_velocity()
@@ -268,26 +203,23 @@ class EmergencyBrakeScenario(BaseScenario):
                     return
                 
                 # Continue to waypoint at normal speed
-                self.vehicle_controller.set_target(self.waypoints[self.current_waypoint])
-                self.apply_speed_control(self.normal_speed)
-            
-            # Check distance to current waypoint
-            distance = self._current_loc.distance(self.waypoints[self.current_waypoint])
-            
-            if distance < self.waypoint_tolerance:
-                self.current_waypoint += 1
-                if self.current_waypoint >= len(self.waypoints):
-                    self.logger.info("Successfully completed emergency brake test")
-                    self._set_completed(success=True)
-                else:
-                    # Set next waypoint as target
+                if self.current_waypoint < len(self.waypoints):
                     self.vehicle_controller.set_target(self.waypoints[self.current_waypoint])
-                    self.logger.info(f"Moving to waypoint {self.current_waypoint + 1}/{len(self.waypoints)}")
+                    self.apply_speed_control(self.normal_speed)
                     
+                    # Check distance to current waypoint
+                    distance = self._current_loc.distance(self.waypoints[self.current_waypoint])
+                    if distance < self.waypoint_tolerance:
+                        self.current_waypoint += 1
+                        if self.current_waypoint >= len(self.waypoints):
+                            self.logger.info("Successfully completed emergency brake test")
+                            self._set_completed(success=True)
+                        else:
+                            self.logger.info(f"Moving to waypoint {self.current_waypoint + 1}/{len(self.waypoints)}")
+            
         except Exception as e:
             self.logger.error(f"Error in scenario update: {str(e)}")
-            self.cleanup()
-            raise
+            self._set_completed(success=False)
 
     def cleanup(self) -> None:
         """Clean up scenario resources"""

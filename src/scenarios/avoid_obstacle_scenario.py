@@ -206,113 +206,52 @@ class AvoidObstacleScenario(BaseScenario):
             self.logger.error("Error generating waypoints", exc_info=e)
 
     def setup(self) -> None:
-        """Setup the obstacle avoidance scenario"""
+        """Setup scenario"""
         try:
             super().setup()
             
-            # Record start time
-            self.start_time = time.time()
-            
-            # Get vehicle's current position
-            current_point = self.vehicle.get_location()
-            
-            # Generate waypoints
+            # Generate waypoints first
             self._generate_waypoints()
-            
             if not self.waypoints:
-                self.logger.error("Failed to generate valid waypoints")
-                self._set_completed(success=False)
+                self.logger.error("Failed to generate waypoints")
                 return
             
-            # Get the world and blueprint library
-            world = self.world_manager.get_world()
-            blueprint_library = world.get_blueprint_library()
+            # Get world reference
+            world = self.world_manager.world
             
-            # Spawn obstacles between waypoints
-            for i in range(len(self.waypoints) - 1):
-                # Calculate midpoint between current and next waypoint
-                mid_x = (self.waypoints[i].x + self.waypoints[i + 1].x) / 2
-                mid_y = (self.waypoints[i].y + self.waypoints[i + 1].y) / 2
-                mid_z = self.waypoints[i].z
-                
-                # Get waypoint at midpoint
-                obstacle_waypoint = self.world_manager.get_map().get_waypoint(
-                    carla.Location(x=mid_x, y=mid_y, z=mid_z),
-                    project_to_road=True
-                )
-                
-                if not obstacle_waypoint:
-                    self.logger.error(f"Failed to get obstacle waypoint between waypoints {i} and {i+1}")
-                    continue
-                
-                # Calculate direction vector between waypoints
-                direction = carla.Vector3D(
-                    self.waypoints[i + 1].x - self.waypoints[i].x,
-                    self.waypoints[i + 1].y - self.waypoints[i].y,
-                    0
-                )
-                direction = direction.make_unit_vector()
-                
-                # Spawn obstacles along the path
-                for j in range(self.num_obstacles):
-                    # Calculate position along the path
-                    offset = (j + 1) * (self.min_obstacle_distance / 2)  # Reduced spacing
-                    obstacle_x = mid_x + direction.x * offset
-                    obstacle_y = mid_y + direction.y * offset
-                    
-                    # Get valid waypoint for obstacle
-                    obstacle_waypoint = self.world_manager.get_map().get_waypoint(
-                        carla.Location(x=obstacle_x, y=obstacle_y, z=mid_z),
-                        project_to_road=True
-                    )
-                    
-                    if not obstacle_waypoint:
-                        self.logger.warning(f"Failed to get valid waypoint for obstacle {j+1} between waypoints {i} and {i+1}")
-                        continue
-                    
-                    # Select random obstacle type
-                    obstacle_type = random.choice(self.obstacle_types)
-                    blueprint = blueprint_library.find(obstacle_type)
-                    
-                    if not blueprint:
-                        self.logger.error(f"Failed to find blueprint for {obstacle_type}")
-                        continue
-                    
-                    # Spawn obstacle
-                    try:
-                        obstacle = world.spawn_actor(
-                            blueprint,
-                            carla.Transform(
-                                obstacle_waypoint.transform.location,
-                                obstacle_waypoint.transform.rotation
-                            )
-                        )
-                        
-                        if obstacle:
-                            self.obstacles.append(obstacle)
-                            self.logger.debug(f"Spawned obstacle {j+1} between waypoints {i} and {i+1} at location {obstacle_waypoint.transform.location}")
-                        else:
-                            self.logger.error(f"Failed to spawn obstacle {j+1} between waypoints {i} and {i+1}")
-                    except Exception as e:
-                        self.logger.error(f"Error spawning obstacle: {str(e)}")
-                        continue
+            # Spawn obstacles
+            spawn_transform = self.vehicle.get_transform()
             
-            if not self.obstacles:
-                self.logger.error("Failed to spawn any obstacles")
-                self._set_completed(success=False)
+            # Spawn first obstacle
+            spawn_transform.location.x += 10.0
+            spawn_transform.location.y += 2.0
+            self.obstacle1 = self.world_manager.spawn_scenario_actor(
+                'static.prop.trafficcone01',
+                spawn_transform,
+                actor_type="obstacle1"
+            )
+            
+            if not self.obstacle1:
+                self.logger.error("Failed to spawn first obstacle")
                 return
                 
-            # Set first waypoint as target
-            self.vehicle_controller.set_target(self.waypoints[0])
-            self.logger.info("Avoid obstacle scenario started")
+            # Spawn second obstacle
+            spawn_transform.location.x += 5.0
+            spawn_transform.location.y -= 4.0
+            self.obstacle2 = self.world_manager.spawn_scenario_actor(
+                'static.prop.trafficcone01',
+                spawn_transform,
+                actor_type="obstacle2"
+            )
             
-            # Give vehicle time to start moving
-            self.scenario_started = False
+            if not self.obstacle2:
+                self.logger.error("Failed to spawn second obstacle")
+                return
+                
+            self.logger.info(f"Spawned obstacles at locations {spawn_transform.location}")
             
         except Exception as e:
             self.logger.error(f"Error in scenario setup: {str(e)}")
-            self.cleanup()
-            raise
 
     def apply_emergency_brake(self):
         """Apply emergency brake"""
