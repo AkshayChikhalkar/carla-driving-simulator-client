@@ -2,7 +2,7 @@ name: Deploy CARLA Simulator
 
 on:
   push:
-    branches: [ main ]
+    branches: [ gui ]
   workflow_dispatch:
 
 jobs:
