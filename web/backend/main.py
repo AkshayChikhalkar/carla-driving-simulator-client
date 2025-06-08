@@ -252,9 +252,7 @@ async def skip_scenario():
         total_scenarios = len(runner.state.scenarios_to_run)
         current_scenario = runner.state.current_scenario
         
-        logger.info("================================")
         logger.info(f"Skipping scenario {current_index + 1}/{total_scenarios}: {current_scenario}")
-        logger.info("================================")
         
         # Record skipped scenario result
         runner.state.scenario_results.append({

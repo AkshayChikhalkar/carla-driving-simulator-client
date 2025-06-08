@@ -14,7 +14,7 @@ class BaseScenario(IScenario):
         self.logger = logger
         self._is_completed = False
         self._is_successful = False
-        self._start_time = None
+        self._start_time = time.time()  # Initialize start time in constructor
         self._completion_time = None
         self._max_duration = 120.0  # Default max duration in seconds
         # Cache vehicle reference
@@ -22,6 +22,7 @@ class BaseScenario(IScenario):
         self._cleanup_called = False
         self._elapsed_time = 0.0
         self._scenario_started = False
+        self._name = self.__class__.__name__
 
     def setup(self) -> None:
         """Setup the scenario"""
@@ -31,13 +32,14 @@ class BaseScenario(IScenario):
         self._cleanup_called = False
         self._elapsed_time = 0.0
         self._scenario_started = False
-        self._start_time = time.time()
+        self._start_time = time.time()  # Reset start time in setup
         self._vehicle = self.vehicle_controller.get_vehicle()
-        self.logger.info(f"Starting scenario: {self.__class__.__name__}")
+        self.logger.info(f"Starting scenario: {self._name}")
 
     def update(self) -> None:
         """Base update method to be overridden by specific scenarios"""
         if self._start_time is None:
+            self._start_time = time.time()
             return
             
         # Calculate elapsed time
@@ -53,6 +55,10 @@ class BaseScenario(IScenario):
         """Base cleanup method to be overridden by specific scenarios"""
         if not self._cleanup_called:
             self._cleanup_called = True
+            # Ensure we have a valid elapsed time
+            if self._start_time is not None:
+                self._elapsed_time = time.time() - self._start_time
+            
             if self._is_completed:
                 self._completion_time = self._elapsed_time
                 status = "successfully" if self._is_successful else "unsuccessfully"
@@ -62,7 +68,7 @@ class BaseScenario(IScenario):
                 self.logger.info("================================")
             else:
                 self.logger.info("================================")
-                self.logger.info(f"Scenario stopped: {self.__class__.__name__}")
+                self.logger.info(f"Scenario stopped: {self._name}")
                 self.logger.info(f"Status: Incomplete")
                 self.logger.info(f"Duration: {self._elapsed_time:.1f} seconds")
                 self.logger.info("================================")
