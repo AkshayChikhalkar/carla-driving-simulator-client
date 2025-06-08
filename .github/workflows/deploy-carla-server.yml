@@ -31,9 +31,12 @@ jobs:
           ${{ secrets.OVPN_CONFIG }}
           EOF
           
-          # Remove problematic options
+          # Remove problematic options and certificate blocks
           sed -i '/cryptoapicert/d' ~/.vpn/config.ovpn
           sed -i '/tls-auth/d' ~/.vpn/config.ovpn
+          sed -i '/<cert>/,/<\/cert>/d' ~/.vpn/config.ovpn
+          sed -i '/<key>/,/<\/key>/d' ~/.vpn/config.ovpn
+          sed -i '/<ca>/,/<\/ca>/d' ~/.vpn/config.ovpn
           
           # Write PKCS#12 certificate
           echo "${{ secrets.P12_CERT }}" | base64 -d > ~/.vpn/certificate.p12
