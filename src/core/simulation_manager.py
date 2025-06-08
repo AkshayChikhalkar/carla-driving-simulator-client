@@ -20,7 +20,6 @@ from src.core.interfaces import (
 from src.core.sensors import SensorManager
 from src.core.world_manager import WorldManager
 from src.utils.config import load_config
-from src.utils.settings import DEBUG_MODE
 from ..visualization.display_manager import VehicleState
 import math
 

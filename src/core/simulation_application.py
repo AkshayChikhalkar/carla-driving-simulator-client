@@ -276,8 +276,8 @@ class SimulationApplication:
 
     def stop(self) -> None:
         """Stop the simulation"""
-        if self._running:
-            self._running = False
+        if self.state.is_running:
+            self.state.stop()
             self.logger.info("Simulation stopped")
             
             # Add consistent logging format for scenario stop
@@ -334,19 +334,34 @@ class SimulationApplication:
             # Clean up sensors first
             if self.sensor_manager:
                 self.logger.debug("Cleaning up sensor manager...")
-                self.sensor_manager.cleanup()
+                try:
+                    self.sensor_manager.cleanup()
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up sensor manager: {str(e)}")
 
             # Clean up display
             if self.display_manager:
                 self.logger.debug("Cleaning up display manager...")
-                self.display_manager.cleanup()
+                try:
+                    self.display_manager.cleanup()
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up display manager: {str(e)}")
 
-            self.logger.info("Cleanup completed successfully")
+            # Clean up vehicle controller
+            if self.vehicle_controller:
+                self.logger.debug("Cleaning up vehicle controller...")
+                try:
+                    self.vehicle_controller.cleanup()
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up vehicle controller: {str(e)}")
 
             # Clean up world and all actors last
             if self.world_manager:
                 self.logger.debug("Cleaning up world manager...")
-                self.world_manager.cleanup()
+                try:
+                    self.world_manager.cleanup()
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up world manager: {str(e)}")
 
             # Check if we're in web mode
             is_web_mode = getattr(self._config, 'web_mode', False)
@@ -356,27 +371,21 @@ class SimulationApplication:
                 self.logger.debug("CLI mode: Disconnecting from CARLA server")
                 self.connection.disconnect()
 
-            # Clear any remaining references
-            #self.vehicle_controller = None
-            #self.vehicle = None
+            # Clear component references
+            self.vehicle_controller = None
+            self.sensor_manager = None
+            self.display_manager = None
+            self.world_manager = None
 
             # Force garbage collection
             import gc
             gc.collect()
 
-            # Ensure cleanup is complete by waiting for any pending operations
-            if self.world_manager and self.world_manager.world:
-                try:
-                    self.world_manager.world.tick()
-                except Exception as e:
-                    if "connection failed" in str(e).lower():
-                        self.logger.error("Connection lost during cleanup - server may have crashed")
-                    else:
-                        self.logger.error(f"Error during final world tick: {str(e)}")
-
             # Set cleanup flag
             with self.cleanup_lock:
                 self.is_cleanup_complete = True
+
+            self.logger.info("Cleanup completed successfully")
 
             # Return completion status
             return scenario_completed, scenario_success

@@ -13,7 +13,6 @@ from datetime import datetime
 
 from ..utils.config import ControllerConfig, LoggingConfig
 from ..utils.logging import Logger
-from ..utils.settings import DEBUG_MODE  # Import from settings module
 import math
 
 @dataclass
@@ -168,10 +167,9 @@ class KeyboardController(ControllerStrategy):
         self._control.manual_gear_shift = False
         self._control.gear = 1
 
-        if self.logger and DEBUG_MODE:
-            self.logger.info("Keyboard controller initialization complete")
-            self.logger.info(f"Controller type: {config.type}")
-            self.logger.info(f"Initial mode: {'Manual' if self.is_manual_mode else 'Automatic'}")
+        self.logger.debug("Keyboard controller initialization complete")
+        self.logger.debug(f"Controller type: {config.type}")
+        self.logger.debug(f"Initial mode: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
     def process_input(self) -> bool:
         """Process keyboard input"""
@@ -187,16 +185,14 @@ class KeyboardController(ControllerStrategy):
             if event.type == pygame.KEYDOWN:
                 # Check quit
                 if event.key in self.keys['quit']:
-                    if self.logger and DEBUG_MODE:
-                        self.logger.info("Quitting simulation")
+                    self.logger.debug("Quitting simulation")
                     return True
 
                 # Toggle manual/automatic mode
                 if event.key in self.keys['manual_mode']:
                     self.is_manual_mode = not self.is_manual_mode
                     self._control.manual_gear_shift = self.is_manual_mode
-                    if self.logger and DEBUG_MODE:
-                        self.logger.info(f"Transmission: {'Manual' if self.is_manual_mode else 'Automatic'}")
+                    self.logger.debug(f"Transmission: {'Manual' if self.is_manual_mode else 'Automatic'}")
 
                 # Handle reverse toggle
                 if event.key in self.keys['reverse']:
@@ -207,8 +203,7 @@ class KeyboardController(ControllerStrategy):
                             self._control.gear = -1
                         else:
                             self._control.gear = 1
-                        if self.logger and DEBUG_MODE:
-                            self.logger.info(f"Reverse: {self._control.reverse}")
+                        self.logger.debug(f"Reverse: {self._control.reverse}")
 
                 # Handle gear changes in manual mode
                 if self._control.manual_gear_shift:
@@ -405,6 +400,7 @@ class AutopilotController(ControllerStrategy):
 
 class VehicleController:
     """Main vehicle controller class using the strategy pattern"""
+
     
     def __init__(self, config: ControllerConfig, headless: bool = False):
         """Initialize vehicle controller"""
@@ -413,9 +409,9 @@ class VehicleController:
         self._strategy = None
         self._vehicle = None
         self._target = None
-        self._logger = None
         self._world_manager = None
         self._client = None
+        self.logger = Logger()
 
     def set_strategy(self, strategy: ControllerStrategy) -> None:
         """Set the control strategy"""
@@ -432,7 +428,7 @@ class VehicleController:
 
         # Create appropriate controller based on config type
         if self.config.type == 'keyboard':
-            self._strategy = KeyboardController(self.config, self._logger)
+            self._strategy = KeyboardController(self.config, self.logger)
         elif self.config.type == 'gamepad':
             self._strategy = GamepadController(self.config)
         elif self.config.type == 'autopilot':
@@ -498,8 +494,7 @@ class VehicleController:
             self.vehicle.apply_control(self.control)
             
             # Log vehicle state in debug mode
-            if DEBUG_MODE:
-                self.logger.debug(f"Vehicle state: {self.get_vehicle_state()}")
+            self.logger.debug(f"Vehicle state: {self.get_vehicle_state()}")
                 
         except Exception as e:
             self.logger.error("Error updating controller", exc_info=e)
