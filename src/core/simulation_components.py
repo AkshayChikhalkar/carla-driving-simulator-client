@@ -120,7 +120,9 @@ class SimulationMetrics:
             'vehicle_speed': 0.0,
             'distance_traveled': 0.0,
             'collisions': 0,
-            'min_frame_time': 0.001  # Minimum frame time to avoid division by zero
+            'min_frame_time': 0.001,  # Minimum frame time to avoid division by zero
+            'start_time': time.time(),  # Add start time for elapsed time calculation
+            'elapsed_time': 0.0
         }
         self.scenario = None
         self.start_time = datetime.now()
@@ -137,6 +139,9 @@ class SimulationMetrics:
             self.metrics['fps'] = 1.0 / max(frame_time, self.metrics['min_frame_time'])
         self.metrics['last_frame_time'] = current_time
         self.metrics['frame_count'] += 1
+        
+        # Update elapsed time
+        self.metrics['elapsed_time'] = current_time - self.metrics['start_time']
 
         # Update vehicle metrics
         if 'velocity' in vehicle_state:
@@ -148,45 +153,55 @@ class SimulationMetrics:
         if not self.logger:
             return
             
-        # Create simulation data object
+        # Get vehicle state from the current frame
+        vehicle_state = {
+            'heading': 0.0,
+            'acceleration': 0.0,
+            'angular_velocity': 0.0,
+            'collision_intensity': 0.0,
+            'rotation': (0.0, 0.0, 0.0)
+        }
+        
+        # Get controls from the current frame
+        controls = {
+            'throttle': 0.0,
+            'brake': 0.0,
+            'steer': 0.0,
+            'gear': 1,
+            'hand_brake': False,
+            'reverse': False,
+            'manual_gear_shift': False
+        }
+        
+        # Get target info from the current frame
+        target_info = {
+            'distance': 0.0,
+            'heading': 0.0,
+            'heading_diff': 0.0
+        }
+        
+        # Create simulation data object with actual metrics
         data = SimulationData(
-            elapsed_time=self.metrics.get('elapsed_time', 0.0),
-            speed=self.metrics.get('vehicle_speed', 0.0),
+            elapsed_time=self.metrics['elapsed_time'],
+            speed=self.metrics['vehicle_speed'],
             position=(0.0, 0.0, 0.0),  # Default position
-            controls={
-                'throttle': 0.0,
-                'brake': 0.0,
-                'steer': 0.0,
-                'gear': 1,
-                'hand_brake': False,
-                'reverse': False,
-                'manual_gear_shift': False
-            },
-            target_info={
-                'distance': 0.0,
-                'heading': 0.0,
-                'heading_diff': 0.0
-            },
-            vehicle_state={
-                'heading': 0.0,
-                'acceleration': 0.0,
-                'angular_velocity': 0.0,
-                'collision_intensity': 0.0,
-                'rotation': (0.0, 0.0, 0.0)
-            },
+            controls=controls,
+            target_info=target_info,
+            vehicle_state=vehicle_state,
             weather={
                 'cloudiness': 0.0,
                 'precipitation': 0.0
             },
             traffic_count=0,
-            fps=self.metrics.get('fps', 0.0),
+            fps=self.metrics['fps'],
             event='metrics_update',
             event_details=''
         )
         
-        # Log to file only
+        # Log to file and flush immediately
         self.logger.log_data(data)
-
+        if hasattr(self.logger, 'csv_file') and self.logger.csv_file:
+            self.logger.csv_file.flush()
 
     def generate_html_report(self, scenario_results, start_time, end_time):
         """Generate a pytest-html style HTML report for multiple scenarios in the reports directory at the project root."""

@@ -504,8 +504,8 @@ class VehicleController:
         try:
             self.logger.info("Cleaning up controller")
             # Clean up the strategy if it exists
-            if self._strategy and hasattr(self._strategy, 'cleanup'):
-                self._strategy.cleanup()
+            # if self._strategy and hasattr(self._strategy, 'cleanup'):
+            #     self._strategy.cleanup()
             
             # Reset vehicle reference
             self._vehicle = None

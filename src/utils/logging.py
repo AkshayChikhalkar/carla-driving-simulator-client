@@ -57,6 +57,7 @@ class Logger:
         # Initialize CSV logging attributes
         self.csv_file = None
         self.csv_writer = None
+        self._row_count = 0
         
         self._setup_logging()
         self._initialized = True
@@ -113,6 +114,7 @@ class Logger:
                 self.csv_writer = csv.writer(self.csv_file)
                 if not file_exists:
                     self._write_csv_header()
+                    self.csv_file.flush()
             
         except Exception as e:
             print(f"Error setting up logging: {str(e)}")
@@ -236,6 +238,11 @@ class Logger:
         self.logger.info(f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         if self.csv_file:
             try:
+                # Flush any remaining data
+                self.csv_file.flush()
+                # Close the file
                 self.csv_file.close()
+                self.csv_file = None
+                self.csv_writer = None
             except Exception as e:
                 self.logger.error(f"Error closing CSV file: {str(e)}") 
