@@ -503,9 +503,14 @@ class VehicleController:
         """Clean up controller resources"""
         try:
             self.logger.info("Cleaning up controller")
-            # Reset control values
-            self.control = carla.VehicleControl()
-            self.vehicle.apply_control(self.control)
+            # Clean up the strategy if it exists
+            if self._strategy and hasattr(self._strategy, 'cleanup'):
+                self._strategy.cleanup()
+            
+            # Reset vehicle reference
+            self._vehicle = None
+            self._strategy = None
+            
         except Exception as e:
             self.logger.error("Error cleaning up controller", exc_info=e)
 

@@ -46,6 +46,11 @@ class SimulationApplication:
         self.sensor_manager: Optional[ISensorManager] = None
         self.current_scenario: Optional[IScenario] = None
         self.display_manager: Optional[DisplayManager] = None
+
+        # Add results cache
+        self._cleanup_results = None
+        self._cleanup_results_lock = threading.Lock()
+
         # Do not connect here; connect only in setup()
 
     def setup(self,
@@ -56,13 +61,39 @@ class SimulationApplication:
         """Setup the simulation application"""
         self.logger.info("[SimulationApplication] Setting up simulation components...")
 
+        # Initialize components
         self.world_manager = world_manager
         self.vehicle_controller = vehicle_controller
         self.sensor_manager = sensor_manager
-        # Update logger with the provided one
         self.logger = logger
 
-        self.logger.debug("[SimulationApplication] Basic components initialized")
+        # Verify components are properly initialized
+        if not self.world_manager:
+            raise RuntimeError("World manager not properly initialized")
+        if not self.vehicle_controller:
+            raise RuntimeError("Vehicle controller not properly initialized")
+        if not self.sensor_manager:
+            raise RuntimeError("Sensor manager not properly initialized")
+        if not self.logger:
+            raise RuntimeError("Logger not properly initialized")
+
+        # Verify world manager is ready
+        try:
+            world = self.world_manager.get_world()
+            if not world:
+                raise RuntimeError("Failed to get CARLA world")
+            self.logger.debug("[SimulationApplication] World manager initialized successfully")
+        except Exception as e:
+            raise RuntimeError(f"World manager initialization failed: {str(e)}")
+
+        # Verify vehicle controller is ready
+        try:
+            vehicle = self.vehicle_controller.get_vehicle()
+            if not vehicle:
+                raise RuntimeError("Failed to get vehicle")
+            self.logger.debug("[SimulationApplication] Vehicle controller initialized successfully")
+        except Exception as e:
+            raise RuntimeError(f"Vehicle controller initialization failed: {str(e)}")
 
         # Initialize metrics after logger is available
         self.metrics = SimulationMetrics(logger)
@@ -70,7 +101,6 @@ class SimulationApplication:
 
         # Initialize display manager
         self.logger.debug("[SimulationApplication] Initializing display manager...")
-        # Check if we're in web mode
         is_web_mode = getattr(self._config, 'web_mode', False)
         self.display_manager = DisplayManager(self._config.display_config, web_mode=is_web_mode)
         self.logger.debug("[SimulationApplication] Display manager initialized")
@@ -112,8 +142,12 @@ class SimulationApplication:
             self.logger.debug(f"Setting up scenario: {scenario_type}")
 
             # Verify required components are initialized
-            if not all([self.world_manager, self.vehicle_controller, self.logger]):
-                raise RuntimeError("Application not properly initialized")
+            if not self.world_manager:
+                raise RuntimeError("World manager not initialized")
+            if not self.vehicle_controller:
+                raise RuntimeError("Vehicle controller not initialized")
+            if not self.logger:
+                raise RuntimeError("Logger not initialized")
 
             # Get scenario configuration from main config
             if scenario_config is None:
@@ -148,10 +182,10 @@ class SimulationApplication:
             self.logger.info(f"Started scenario: {scenario_type}")
 
         except Exception as e:
-            self.logger.error(f"Error setting up scenario: {str(e)}")
+            self.logger.warning(f"Error setting up scenario: {str(e)}")
             # Ensure current_scenario is None if setup fails
             self.current_scenario = None
-            raise RuntimeError(f"Failed to setup scenario: {str(e)}")
+            #raise RuntimeError(f"Failed to setup scenario: {str(e)}")
 
     def run(self) -> None:
         """Run the simulation loop"""
@@ -295,6 +329,11 @@ class SimulationApplication:
     def cleanup(self) -> None:
         """Clean up simulation resources"""
         try:
+            # Check if we already have results
+            with self._cleanup_results_lock:
+                if self._cleanup_results is not None:
+                    return self._cleanup_results
+
             self.logger.debug("Starting cleanup process...")
 
             # First stop any ongoing simulation
@@ -313,11 +352,11 @@ class SimulationApplication:
                     scenario_completed = self.current_scenario.is_completed()
                     scenario_success = self.current_scenario.is_successful()
 
-                    self.logger.info("================================")
-                    self.logger.info(f"Cleaning up scenario: {scenario_name}")
-                    self.logger.info(f"Status: {'Completed' if scenario_completed else 'Incomplete'}")
-                    self.logger.info(f"Result: {'Success' if scenario_success else 'Failed'}")
-                    self.logger.info("================================")
+                    # self.logger.info("================================")
+                    # self.logger.info(f"Cleaning up scenario: {scenario_name}")
+                    # self.logger.info(f"Status: {'Completed' if scenario_completed else 'Incomplete'}")
+                    # self.logger.info(f"Result: {'Success' if scenario_success else 'Failed'}")
+                    # self.logger.info("================================")
 
                     # Cleanup the scenario (only state cleanup, no actor destruction)
                     self.current_scenario.cleanup()
@@ -347,21 +386,24 @@ class SimulationApplication:
                 except Exception as e:
                     self.logger.error(f"Error cleaning up display manager: {str(e)}")
 
-            # Clean up vehicle controller
+            # Clean up world and all actors last
+            if self.world_manager:
+                self.logger.debug("Cleaning up world manager...")
+                try:
+                    # First destroy all actors including the vehicle
+                    self.world_manager.cleanup()
+                    # Add a small delay to ensure actors are destroyed
+                    time.sleep(0.5)
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up world manager: {str(e)}")
+
+            # Clean up vehicle controller after world cleanup
             if self.vehicle_controller:
                 self.logger.debug("Cleaning up vehicle controller...")
                 try:
                     self.vehicle_controller.cleanup()
                 except Exception as e:
                     self.logger.error(f"Error cleaning up vehicle controller: {str(e)}")
-
-            # Clean up world and all actors last
-            if self.world_manager:
-                self.logger.debug("Cleaning up world manager...")
-                try:
-                    self.world_manager.cleanup()
-                except Exception as e:
-                    self.logger.error(f"Error cleaning up world manager: {str(e)}")
 
             # Check if we're in web mode
             is_web_mode = getattr(self._config, 'web_mode', False)
@@ -387,6 +429,10 @@ class SimulationApplication:
 
             self.logger.info("Cleanup completed successfully")
 
+            # Store results
+            with self._cleanup_results_lock:
+                self._cleanup_results = (scenario_completed, scenario_success)
+
             # Return completion status
             return scenario_completed, scenario_success
 
@@ -395,7 +441,17 @@ class SimulationApplication:
             # Set cleanup flag even on error
             with self.cleanup_lock:
                 self.is_cleanup_complete = True
+            # Store error results
+            with self._cleanup_results_lock:
+                self._cleanup_results = (False, False)
             return False, False
+
+    def get_cleanup_results(self) -> tuple[bool, bool]:
+        """Get the stored cleanup results without performing cleanup again"""
+        with self._cleanup_results_lock:
+            if self._cleanup_results is None:
+                return False, False
+            return self._cleanup_results
 
     @property
     def logging_config(self):
