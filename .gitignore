@@ -109,3 +109,6 @@ web/frontend/.netlify
 # OS specific
 .DS_Store
 Thumbs.db 
+certificate_base64.txt
+EduCert_bkr-6cg_3DES.p12
+th-owl.de_2.ovpn
