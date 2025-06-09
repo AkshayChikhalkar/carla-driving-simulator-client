@@ -75,7 +75,7 @@ class EmergencyBrakeScenario(BaseScenario):
                 self.logger.error("Failed to spawn obstacle")
                 return
                 
-            self.logger.info(f"Spawned obstacle at location {spawn_transform.location}")
+            self.logger.debug(f"Spawned obstacle at location {spawn_transform.location}")
             
             # Initialize scenario state
             self.start_time = time.time()

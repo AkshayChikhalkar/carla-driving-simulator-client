@@ -449,7 +449,7 @@ class WorldManager(IWorldManager):
             actor = self._spawn_with_retry(blueprint, transform)
             if actor:
                 self._scenario_actors.append(actor)
-                self.logger.info(f"Spawned {actor_type} {blueprint_id} at {transform.location}")
+                self.logger.debug(f"Spawned {actor_type} {blueprint_id} at {transform.location}")
                 return actor
             return None
 

@@ -109,7 +109,7 @@ class VehicleCuttingScenario(BaseScenario):
                 self.logger.error("Failed to spawn cutting vehicle")
                 return
                 
-            self.logger.info(f"Spawned cutting vehicle at location {spawn_transform.location}")
+            self.logger.debug(f"Spawned cutting vehicle at location {spawn_transform.location}")
             
             # Initialize scenario state
             self.current_waypoint = 0
