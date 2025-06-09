@@ -26,6 +26,14 @@ class BaseScenario(IScenario):
 
     def setup(self) -> None:
         """Setup the scenario"""
+        # Verify components are initialized
+        if not self.world_manager:
+            raise RuntimeError("World manager not initialized")
+        if not self.vehicle_controller:
+            raise RuntimeError("Vehicle controller not initialized")
+        if not self.logger:
+            raise RuntimeError("Logger not initialized")
+
         # Reset all state
         self._is_completed = False
         self._is_successful = False
@@ -33,7 +41,12 @@ class BaseScenario(IScenario):
         self._elapsed_time = 0.0
         self._scenario_started = False
         self._start_time = time.time()  # Reset start time in setup
+        
+        # Get vehicle reference
         self._vehicle = self.vehicle_controller.get_vehicle()
+        if not self._vehicle:
+            raise RuntimeError("Failed to get vehicle reference")
+            
         self.logger.info(f"Starting scenario: {self._name}")
 
     def update(self) -> None:

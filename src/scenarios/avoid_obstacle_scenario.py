@@ -225,33 +225,44 @@ class AvoidObstacleScenario(BaseScenario):
             # Spawn first obstacle
             spawn_transform.location.x += 10.0
             spawn_transform.location.y += 2.0
-            self.obstacle1 = self.world_manager.spawn_scenario_actor(
+            obstacle1 = self.world_manager.spawn_scenario_actor(
                 'static.prop.trafficcone01',
                 spawn_transform,
                 actor_type="obstacle1"
             )
             
-            if not self.obstacle1:
+            if not obstacle1:
                 self.logger.error("Failed to spawn first obstacle")
                 return
                 
             # Spawn second obstacle
             spawn_transform.location.x += 5.0
             spawn_transform.location.y -= 4.0
-            self.obstacle2 = self.world_manager.spawn_scenario_actor(
+            obstacle2 = self.world_manager.spawn_scenario_actor(
                 'static.prop.trafficcone01',
                 spawn_transform,
                 actor_type="obstacle2"
             )
             
-            if not self.obstacle2:
+            if not obstacle2:
                 self.logger.error("Failed to spawn second obstacle")
                 return
                 
-            self.logger.info(f"Spawned obstacles at locations {spawn_transform.location}")
+            # Add obstacles to list
+            self.obstacles = [obstacle1, obstacle2]
+            self.logger.debug(f"Spawned obstacles at locations {spawn_transform.location}")
+            
+            # Initialize scenario state
+            self.start_time = time.time()
+            self.scenario_started = False
+            self.emergency_brake_active = False
+            self.current_avoidance_target = None
+            self.logged_obstacles.clear()
+            self.current_speed = 0.0
             
         except Exception as e:
             self.logger.error(f"Error in scenario setup: {str(e)}")
+            raise
 
     def apply_emergency_brake(self):
         """Apply emergency brake"""

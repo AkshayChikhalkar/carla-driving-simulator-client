@@ -153,9 +153,17 @@ def cleanup_resources():
         
         # Only clean up if we have an app instance
         if hasattr(runner, 'app') and runner.app:
-            # Clean up resources through the application
-            if hasattr(runner.app, 'cleanup'):
-                runner.app.cleanup()
+            # Get cleanup results first
+            if hasattr(runner.app, 'get_cleanup_results'):
+                completed, success = runner.app.get_cleanup_results()
+                # Only perform cleanup if results are not cached
+                if completed is None:
+                    if hasattr(runner.app, 'cleanup'):
+                        runner.app.cleanup()
+            else:
+                # Fallback to direct cleanup if get_cleanup_results is not available
+                if hasattr(runner.app, 'cleanup'):
+                    runner.app.cleanup()
         
         # Clear the app instance
         runner.app = None
@@ -256,7 +264,10 @@ async def skip_scenario():
         
         logger.info(f"Skipping scenario {current_index + 1}/{total_scenarios}: {current_scenario}")
         
-        # Record skipped scenario result
+        # Get results from cleanup
+        completed, success = runner.app.get_cleanup_results()
+        
+        # Record scenario result
         runner.state.scenario_results.set_result(
             current_scenario,
             "Failed",
@@ -285,10 +296,22 @@ async def skip_scenario():
             wait_interval = 0.1  # Check every 100ms
             start_time = datetime.now()
             
-            while not current_app.is_cleanup_complete:
+            while True:
+                # Check if we have cleanup results
+                if hasattr(current_app, 'get_cleanup_results'):
+                    completed, _ = current_app.get_cleanup_results()
+                    if completed is not None:
+                        break
+                
+                # Fallback to checking cleanup flag
+                if current_app.is_cleanup_complete:
+                    break
+                    
+                # Check timeout
                 if (datetime.now() - start_time).total_seconds() > max_wait_time:
                     logger.warning("Cleanup wait timeout reached")
                     break
+                    
                 await asyncio.sleep(wait_interval)
             
             try:
@@ -320,6 +343,9 @@ async def skip_scenario():
                     logger=runner.logger
                 )
                 
+                # Wait a bit to ensure setup is complete
+                await asyncio.sleep(0.5)
+
                 # Update runner state
                 runner.state.current_scenario = next_scenario
                 runner.state.current_scenario_index = current_index + 1
@@ -373,10 +399,22 @@ async def skip_scenario():
             wait_interval = 0.1  # Check every 100ms
             start_time = datetime.now()
             
-            while not runner.app.is_cleanup_complete:
+            while True:
+                # Check if we have cleanup results
+                if hasattr(runner.app, 'get_cleanup_results'):
+                    completed, _ = runner.app.get_cleanup_results()
+                    if completed is not None:
+                        break
+                
+                # Fallback to checking cleanup flag
+                if runner.app.is_cleanup_complete:
+                    break
+                    
+                # Check timeout
                 if (datetime.now() - start_time).total_seconds() > max_wait_time:
                     logger.warning("Cleanup wait timeout reached")
                     break
+                    
                 await asyncio.sleep(wait_interval)
             
             # Generate final report only if report flag is set
@@ -440,104 +478,98 @@ async def start_simulation(request: SimulationRequest):
                 logger.error("Failed to connect to CARLA server")
                 return {"success": False, "message": "Failed to connect to CARLA server"}
             
-            try:
-                # Setup components
-                logger.info("Setting up simulation components...")
-                components = runner.setup_components(runner.app)
-                
-                # Setup application
-                logger.info("Setting up application...")
-                runner.app.setup(
-                    world_manager=components['world_manager'],
-                    vehicle_controller=components['vehicle_controller'],
-                    sensor_manager=components['sensor_manager'],
-                    logger=runner.logger
-                )
-                
-                # Start simulation in background
-                logger.info("Starting simulation thread...")
-                import threading
-                def run_simulation():
-                    try:
-                        logger.info("Simulation loop started")
-                        # Run all selected scenarios
-                        total_scenarios = len(scenarios_to_run)
-                        for i, scenario in enumerate(scenarios_to_run):
-                            logger.info("================================")
-                            logger.info(f"Starting scenario {i+1}/{total_scenarios}: {scenario}")
-                            logger.info("================================")
-                            
-                            if i > 0:  # Skip first scenario as it's already set up
-                                runner.state.current_scenario = scenario
-                                runner.state.current_scenario_index = i
-                                runner.app._setup_scenario(scenario)
-                            
-                            # Run the scenario
-                            try:
-                                runner.app.run()
-                                # Normal completion
-                                if hasattr(runner.app, 'cleanup'):
-                                    completed, success = runner.app.cleanup()
-                                    if completed:
-                                        result = "Passed" if success else "Failed"
-                                        status = "Completed"
-                                    else:
-                                        result = "Failed"
-                                        status = "Timeout" if hasattr(runner.app, 'timed_out') and runner.app.timed_out else "Error"
-                                else:
-                                    result = "Failed"
-                                    status = "Unknown"
-                            except Exception as e:
-                                logger.error(f"Exception in scenario '{scenario}': {str(e)}")
+            # Wait for connection to stabilize
+            await asyncio.sleep(1)
+            
+            # Setup components
+            logger.info("Setting up simulation components...")
+            components = runner.setup_components(runner.app)
+            
+            # Setup application
+            logger.info("Setting up application...")
+            runner.app.setup(
+                world_manager=components['world_manager'],
+                vehicle_controller=components['vehicle_controller'],
+                sensor_manager=components['sensor_manager'],
+                logger=runner.logger
+            )
+            
+            # Start simulation in background
+            logger.info("Starting simulation thread...")
+            import threading
+            
+            def run_simulation():
+                try:
+                    logger.info("Simulation loop started")
+                    # Run all selected scenarios
+                    total_scenarios = len(scenarios_to_run)
+                    for i, scenario in enumerate(scenarios_to_run):
+                        logger.info("================================")
+                        logger.info(f"Starting scenario {i+1}/{total_scenarios}: {scenario}")
+                        logger.info("================================")
+                        
+                        if i > 0:  # Skip first scenario as it's already set up
+                            runner.state.current_scenario = scenario
+                            runner.state.current_scenario_index = i
+                            runner.app._setup_scenario(scenario)
+                        
+                        # Run the scenario
+                        try:
+                            runner.app.run()
+                            # Get results from cleanup
+                            completed, success = runner.app.get_cleanup_results()
+                            if completed:
+                                result = "Passed" if success else "Failed"
+                                status = "Completed"
+                            else:
                                 result = "Failed"
-                                status = "Error"
-                            runner.state.scenario_results.set_result(
-                                scenario,
-                                result,
-                                status,
-                                str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
-                            )
-                            
-                            # Update scenario start time for next scenario
-                            runner.state.scenario_start_time = datetime.now()
-                            
-                    except Exception as e:
-                        logger.error(f"Error in simulation thread: {str(e)}")
-                        if hasattr(runner.app, 'state'):
-                            runner.app.state.is_running = False
-                        # Ensure cleanup happens on error
-                        cleanup_resources()
-                    finally:
-                        # Always ensure cleanup happens
-                        logger.info("Simulation loop ended, cleaning up...")
-                        cleanup_resources()
-                        # Update the frontend state
-                        if hasattr(runner.app, 'state'):
-                            runner.app.state.is_running = False
-                        # Generate final report
-                        if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', True):
-                            runner.app.metrics.generate_html_report(
-                                runner.state.scenario_results.all_results(),
-                                runner.state.batch_start_time,
-                                datetime.now()
-                            )
-                
-                simulation_thread = threading.Thread(target=run_simulation)
-                simulation_thread.daemon = True
-                simulation_thread.start()
-                
-                logger.info("Simulation started successfully")
-                return {
-                    "success": True,
-                    "message": "Simulation started successfully"
-                }
-            except Exception as e:
-                logger.error(f"Error during simulation setup: {str(e)}")
-                cleanup_resources()
-                raise e
-                
+                                status = "Timeout" if hasattr(runner.app, 'timed_out') and runner.app.timed_out else "Error"
+                        except Exception as e:
+                            logger.error(f"Exception in scenario '{scenario}': {str(e)}")
+                            result = "Failed"
+                            status = "Error"
+                        runner.state.scenario_results.set_result(
+                            scenario,
+                            result,
+                            status,
+                            str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
+                        )
+                        
+                        # Update scenario start time for next scenario
+                        runner.state.scenario_start_time = datetime.now()
+                        
+                except Exception as e:
+                    logger.error(f"Error in simulation thread: {str(e)}")
+                    if hasattr(runner.app, 'state'):
+                        runner.app.state.is_running = False
+                    # Ensure cleanup happens on error
+                    cleanup_resources()
+                finally:
+                    # Always ensure cleanup happens
+                    logger.info("Simulation loop ended, cleaning up...")
+                    cleanup_resources()
+                    # Update the frontend state
+                    if hasattr(runner.app, 'state'):
+                        runner.app.state.is_running = False
+                    # Generate final report
+                    if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', True):
+                        runner.app.metrics.generate_html_report(
+                            runner.state.scenario_results.all_results(),
+                            runner.state.batch_start_time,
+                            datetime.now()
+                        )
+            
+            simulation_thread = threading.Thread(target=run_simulation)
+            simulation_thread.daemon = True
+            simulation_thread.start()
+            
+            logger.info("Simulation started successfully")
+            return {
+                "success": True,
+                "message": "Simulation started successfully"
+            }
         except Exception as e:
-            logger.error(f"Error creating application: {str(e)}")
+            logger.error(f"Error during simulation setup: {str(e)}")
             cleanup_resources()
             raise e
             
@@ -563,6 +595,44 @@ async def stop_simulation():
                 "Stopped",
                 str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
             )
+            
+            # Reset cleanup flag
+            runner.app.is_cleanup_complete = False
+            
+            # Stop current scenario
+            runner.app.state.is_running = False
+            
+            # Wait for cleanup to complete
+            max_wait_time = 10  # Maximum wait time in seconds
+            wait_interval = 0.1  # Check every 100ms
+            start_time = datetime.now()
+            
+            while True:
+                # Check if we have cleanup results
+                if hasattr(runner.app, 'get_cleanup_results'):
+                    completed, _ = runner.app.get_cleanup_results()
+                    if completed is not None:
+                        break
+                
+                # Fallback to checking cleanup flag
+                if runner.app.is_cleanup_complete:
+                    break
+                    
+                # Check timeout
+                if (datetime.now() - start_time).total_seconds() > max_wait_time:
+                    logger.warning("Cleanup wait timeout reached")
+                    break
+                    
+                await asyncio.sleep(wait_interval)
+            
+            # Generate final report only if report flag is set
+            if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', True):
+                runner.app.metrics.generate_html_report(
+                    runner.state.scenario_results.all_results(),
+                    runner.state.batch_start_time,
+                    datetime.now()
+                )
+        
         cleanup_resources()
         logger.info("Simulation stopped successfully")
         return {"success": True, "message": "Simulation stopped successfully"}
