@@ -26,6 +26,7 @@ from src.utils.config import Config, load_config, save_config
 from src.visualization.display_manager import DisplayManager
 from src.utils.logging import Logger
 from src.utils.paths import get_project_root
+from src.core.scenario_results_manager import ScenarioResultsManager
 
 app = FastAPI()
 logger = Logger()
@@ -60,9 +61,10 @@ class SimulationState:
         self.current_scenario = None
         self.scenarios_to_run = []
         self.current_scenario_index = 0
-        self.scenario_results = []
+        self.scenario_results = ScenarioResultsManager()
         self.batch_start_time = None
         self.current_scenario_completed = False
+        self.scenario_start_time = None
 
 # Add state to runner
 runner.state = SimulationState()
@@ -255,11 +257,12 @@ async def skip_scenario():
         logger.info(f"Skipping scenario {current_index + 1}/{total_scenarios}: {current_scenario}")
         
         # Record skipped scenario result
-        runner.state.scenario_results.append({
-            "name": current_scenario,
-            "result": "Skipped",
-            "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
-        })
+        runner.state.scenario_results.set_result(
+            current_scenario,
+            "Failed",
+            "Skipped",
+            str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
+        )
         
         # If there are more scenarios, prepare for next one
         if current_index < total_scenarios - 1:
@@ -320,6 +323,7 @@ async def skip_scenario():
                 # Update runner state
                 runner.state.current_scenario = next_scenario
                 runner.state.current_scenario_index = current_index + 1
+                runner.state.scenario_start_time = datetime.now()
                 runner.app = new_app
                 
                 # Start simulation in background
@@ -376,9 +380,9 @@ async def skip_scenario():
                 await asyncio.sleep(wait_interval)
             
             # Generate final report only if report flag is set
-            if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', False):
+            if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', True):
                 runner.app.metrics.generate_html_report(
-                    runner.state.scenario_results,
+                    runner.state.scenario_results.all_results(),
                     runner.state.batch_start_time,
                     datetime.now()
                 )
@@ -419,7 +423,8 @@ async def start_simulation(request: SimulationRequest):
             runner.state.current_scenario_index = 0
             runner.state.current_scenario = scenarios_to_run[0]
             runner.state.batch_start_time = datetime.now()
-            runner.state.scenario_results = []
+            runner.state.scenario_results.clear_results()
+            runner.state.scenario_start_time = datetime.now()
             
             runner.app = runner.create_application(scenarios_to_run[0])
             
@@ -468,22 +473,33 @@ async def start_simulation(request: SimulationRequest):
                                 runner.app._setup_scenario(scenario)
                             
                             # Run the scenario
-                            runner.app.run()
+                            try:
+                                runner.app.run()
+                                # Normal completion
+                                if hasattr(runner.app, 'cleanup'):
+                                    completed, success = runner.app.cleanup()
+                                    if completed:
+                                        result = "Passed" if success else "Failed"
+                                        status = "Completed"
+                                    else:
+                                        result = "Failed"
+                                        status = "Timeout" if hasattr(runner.app, 'timed_out') and runner.app.timed_out else "Error"
+                                else:
+                                    result = "Failed"
+                                    status = "Unknown"
+                            except Exception as e:
+                                logger.error(f"Exception in scenario '{scenario}': {str(e)}")
+                                result = "Failed"
+                                status = "Error"
+                            runner.state.scenario_results.set_result(
+                                scenario,
+                                result,
+                                status,
+                                str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
+                            )
                             
-                            # Record result
-                            if hasattr(runner.app, 'cleanup'):
-                                completed, success = runner.app.cleanup()
-                                result = "Passed" if success else "Failed"
-                                if not completed:
-                                    result = "Incomplete"
-                            else:
-                                result = "Completed"
-                                
-                            runner.state.scenario_results.append({
-                                "name": scenario,
-                                "result": result,
-                                "duration": str(datetime.now() - runner.state.batch_start_time).split('.')[0]
-                            })
+                            # Update scenario start time for next scenario
+                            runner.state.scenario_start_time = datetime.now()
                             
                     except Exception as e:
                         logger.error(f"Error in simulation thread: {str(e)}")
@@ -499,9 +515,9 @@ async def start_simulation(request: SimulationRequest):
                         if hasattr(runner.app, 'state'):
                             runner.app.state.is_running = False
                         # Generate final report
-                        if hasattr(runner.app, 'metrics'):
+                        if hasattr(runner.app, 'metrics') and getattr(runner.app._config, 'report', True):
                             runner.app.metrics.generate_html_report(
-                                runner.state.scenario_results,
+                                runner.state.scenario_results.all_results(),
                                 runner.state.batch_start_time,
                                 datetime.now()
                             )
@@ -538,6 +554,15 @@ async def stop_simulation():
         logger.info("================================")
         logger.info("Stopping simulation")
         logger.info("================================")
+        # Record stopped scenario as 'Stopped' if running
+        if hasattr(runner, 'app') and runner.app and runner.app.state.is_running:
+            current_scenario = runner.state.current_scenario
+            runner.state.scenario_results.set_result(
+                current_scenario,
+                "Failed",
+                "Stopped",
+                str(datetime.now() - runner.state.scenario_start_time).split('.')[0]
+            )
         cleanup_resources()
         logger.info("Simulation stopped successfully")
         return {"success": True, "message": "Simulation stopped successfully"}

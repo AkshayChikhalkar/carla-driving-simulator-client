@@ -217,11 +217,21 @@ class SimulationMetrics:
                 .passed {{ color: #388e3c; }}
                 .failed {{ color: #d32f2f; }}
                 .skipped {{ color: #fbc02d; }}
+                .error {{ color: #d32f2f; }}
+                .timeout {{ color: #f57c00; }}
+                .stopped {{ color: #1976d2; }}
+                .completed {{ color: #388e3c; }}
+                .unknown {{ color: #757575; }}
                 .summary-table th {{ background: #f5f5f5; }}
                 .summary-table td {{ text-align: center; }}
                 .summary-table .failed {{ background: #ffd6d6; }}
                 .summary-table .passed {{ background: #d6ffd6; }}
                 .summary-table .skipped {{ background: #fff9c4; }}
+                .summary-table .error {{ background: #ffd6d6; }}
+                .summary-table .timeout {{ background: #ffe0b2; }}
+                .summary-table .stopped {{ background: #bbdefb; }}
+                .summary-table .completed {{ background: #d6ffd6; }}
+                .summary-table .unknown {{ background: #eeeeee; }}
                 .summary-table .duration {{ font-family: monospace; }}
             </style>
         </head>
@@ -247,15 +257,22 @@ class SimulationMetrics:
             <table class='summary-table' style='width: 100%; margin-top: 1em;'>
                 <tr>
                     <th>Result</th>
+                    <th>Status</th>
                     <th>Scenario Name</th>
                     <th>Duration</th>
                 </tr>
         """
         for s in scenario_results:
-            result = s['result'].capitalize()
-            color_class = result.lower()
+            # Use result and status fields directly
+            result = s.get('result', 'Unknown').capitalize()
+            status = s.get('status', 'Unknown').capitalize()
+            # Color class for result
+            result_class = result.lower()
+            # Color class for status
+            status_class = status.lower()
             html_content += f"<tr>"
-            html_content += f"<td class='{color_class}' style='font-weight: bold;'>{result}</td>"
+            html_content += f"<td class='{result_class}' style='font-weight: bold;'>{result}</td>"
+            html_content += f"<td class='{status_class}'>{status}</td>"
             html_content += f"<td>{s['name']}</td>"
             html_content += f"<td class='duration'>{s['duration']}</td>"
             html_content += f"</tr>"
@@ -272,6 +289,7 @@ class SimulationMetrics:
             f.write(html_content)
         if self.logger:
             self.logger.info(f"HTML report generated: {report_path}")
+            #self.logger.info(f"Report directory: {reports_dir.absolute()}")
 
 class SimulationConfig:
     """Manages simulation configuration"""
