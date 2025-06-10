@@ -18,6 +18,10 @@ from src.scenarios.scenario_registry import ScenarioRegistry
 from src.utils.config import LoggingConfig
 from src.visualization.display_manager import DisplayManager, VehicleState
 import threading
+from src.database.config import SessionLocal
+from src.database.models import Scenario, VehicleData, SensorData
+from datetime import datetime
+import uuid
 
 class SimulationApplication:
     """Main application class that coordinates all simulation components"""
@@ -26,7 +30,7 @@ class SimulationApplication:
     cleanup_lock = threading.Lock()
     is_cleanup_complete = False
 
-    def __init__(self, config_path: str, scenario: str = None, logger: ILogger = None):
+    def __init__(self, config_path: str, scenario: str = None, logger: ILogger = None, session_id=None):
         # Initialize configuration
         self._config = SimulationConfig(config_path, scenario)
         
@@ -50,6 +54,9 @@ class SimulationApplication:
         # Add results cache
         self._cleanup_results = None
         self._cleanup_results_lock = threading.Lock()
+
+        # Use provided or generate once per app
+        self.session_id = session_id or uuid.uuid4()
 
         # Do not connect here; connect only in setup()
 
@@ -192,12 +199,29 @@ class SimulationApplication:
         if not self.current_scenario:
             raise RuntimeError("No scenario set")
 
+        # --- DB: Create a new Scenario row for each scenario execution ---
+        db = SessionLocal()
+        new_scenario = Scenario(
+            session_id=self.session_id,
+            scenario_name=getattr(self.current_scenario, 'name', 'Unknown'),
+            start_time=datetime.utcnow(),
+            status="running",
+            scenario_metadata={}
+        )
+        db.add(new_scenario)
+        db.commit()
+        db.refresh(new_scenario)
+        scenario_id = new_scenario.scenario_id
+        db.close()
+        self.logger.set_scenario_id(scenario_id)
+        self.logger._session_id = self.session_id
+        # --- End DB scenario creation ---
+
         self.state.start()
         self.logger.info("Starting simulation loop")
 
         try:
             world = self.connection.client.get_world()
-
             while self.state.is_running and not self.current_scenario.is_completed():
                 loop_start = time.time()
 
@@ -224,6 +248,39 @@ class SimulationApplication:
                     'transform': vehicle.get_transform(),
                     'sensor_data': sensor_data
                 }
+
+                # --- DB: Write vehicle data ---
+                db = SessionLocal()
+                db.add(VehicleData(
+                    scenario_id=scenario_id,
+                    session_id=self.session_id,
+                    timestamp=datetime.utcnow(),
+                    position_x=vehicle_state['location'].x,
+                    position_y=vehicle_state['location'].y,
+                    position_z=vehicle_state['location'].z,
+                    velocity=vehicle_state['velocity'].length(),
+                    acceleration=vehicle_state['acceleration'].length(),
+                    steering_angle=vehicle_state['transform'].rotation.yaw,
+                    throttle=getattr(vehicle, 'throttle', 0.0),
+                    brake=getattr(vehicle, 'brake', 0.0)
+                ))
+                db.commit()
+                db.close()
+                # --- End DB vehicle data ---
+
+                # --- DB: Write sensor data ---
+                db = SessionLocal()
+                for sensor_type, sdata in (sensor_data.items() if isinstance(sensor_data, dict) else []):
+                    db.add(SensorData(
+                        scenario_id=scenario_id,
+                        session_id=self.session_id,
+                        timestamp=datetime.utcnow(),
+                        sensor_type=sensor_type,
+                        data=sdata
+                    ))
+                db.commit()
+                db.close()
+                # --- End DB sensor data ---
 
                 try:
                     # Update scenario
@@ -257,24 +314,20 @@ class SimulationApplication:
                             heading=vehicle_state['transform'].rotation.yaw,
                             distance_to_target=0.0,  # This should be updated by the scenario
                             controls={
-                                'throttle': control.throttle,
-                                'brake': control.brake,
-                                'steer': control.steer,
-                                'gear': control.gear,
-                                'hand_brake': control.hand_brake,
-                                'reverse': control.reverse,
-                                'manual_gear_shift': control.manual_gear_shift
+                                'throttle': getattr(vehicle, 'throttle', 0.0),
+                                'brake': getattr(vehicle, 'brake', 0.0),
+                                'steer': getattr(vehicle, 'steer', 0.0),
+                                'gear': getattr(vehicle, 'gear', 1),
+                                'hand_brake': getattr(vehicle, 'hand_brake', False),
+                                'reverse': getattr(vehicle, 'reverse', False),
+                                'manual_gear_shift': getattr(vehicle, 'manual_gear_shift', False)
                             },
                             speed_kmh=vehicle_state['velocity'].length() * 3.6,
                             scenario_name=self.current_scenario.name
                         )
-
-                        # Get target position from scenario if available
                         target_pos = getattr(self.current_scenario, 'target_position', None)
                         if target_pos is None:
                             target_pos = carla.Location()
-
-                        # Render display and check for quit signal
                         if not self.display_manager.render(display_state, target_pos):
                             self.logger.info("Display manager requested exit")
                             break
@@ -285,11 +338,9 @@ class SimulationApplication:
                     # Log metrics periodically
                     if self.metrics.metrics['frame_count'] % 30 == 0:
                         self.metrics.log_metrics()
-                        # self.logger.log_vehicle_state(vehicle_state)
                 except Exception as e:
                     self.logger.error("Exception in logging", exc_info=e)
 
-                # Tick the CARLA world (required for synchronous mode)
                 world.tick()
 
         except Exception as e:

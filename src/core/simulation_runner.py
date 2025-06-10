@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import uuid
 
 from src.core.simulation_application import SimulationApplication
 from src.core.world_manager import WorldManager
@@ -28,10 +29,11 @@ from src.utils.config import load_config
 class SimulationRunner:
     """Class to handle simulation execution and management"""
 
-    def __init__(self, config_file: str = None):
+    def __init__(self, config_file: str = None, session_id=None):
         self.config_file = config_file or get_config_path()
         self.config = load_config(self.config_file)
         self.logger = Logger()
+        self.session_id = session_id or uuid.uuid4()
 
     def setup_logger(self, debug: bool = False) -> None:
         """Setup logger with debug mode"""
@@ -43,9 +45,9 @@ class SimulationRunner:
         """Register all available scenarios"""
         ScenarioRegistry.register_all()
 
-    def create_application(self, scenario: str) -> SimulationApplication:
+    def create_application(self, scenario: str, session_id=None) -> SimulationApplication:
         """Create a new simulation application instance"""
-        return SimulationApplication(self.config_file, scenario, self.logger)
+        return SimulationApplication(self.config_file, scenario, self.logger, session_id=session_id or self.session_id)
 
     def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
         """Setup simulation components and return them"""

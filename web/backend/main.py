@@ -19,6 +19,7 @@ import threading
 from threading import Lock, Event
 import queue
 import time
+import uuid  # Added import for UUID generation
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -471,7 +472,12 @@ async def start_simulation(request: SimulationRequest):
             # Create and store the app instance
             logger.info("Creating application instance...")
             # If "all" is selected, use all available scenarios
-            scenarios_to_run = ScenarioRegistry.get_available_scenarios() if "all" in request.scenarios else request.scenarios
+            scenarios_to_run = ScenarioRegistry.get_available_scenarios() if "all" in request.scenarios else request.scenarios            
+            
+            # Generate a new session_id for this simulation run (as UUID object)
+            session_id = uuid.uuid4()            
+            # Set the session_id in the logger
+            logger.set_session_id(session_id)
             
             # Update state atomically
             runner.state.set_state({
@@ -480,11 +486,12 @@ async def start_simulation(request: SimulationRequest):
                 'current_scenario': scenarios_to_run[0],
                 'batch_start_time': datetime.now(),
                 'scenario_start_time': datetime.now(),
-                'is_running': True
+                'is_running': True,
+                'session_id': session_id  # Store session_id in runner state
             })
             runner.state['scenario_results'].clear_results()
             
-            runner.app = runner.create_application(scenarios_to_run[0])
+            runner.app = runner.create_application(scenarios_to_run[0], session_id=session_id)
             
             # Set web mode in configuration
             runner.app._config.web_mode = True
@@ -523,7 +530,8 @@ async def start_simulation(request: SimulationRequest):
             logger.info("Simulation started successfully")
             return {
                 "success": True,
-                "message": "Simulation started successfully"
+                "message": "Simulation started successfully",
+                "session_id": str(session_id)  # Return session_id as string to client
             }
         except Exception as e:
             logger.error(f"Error during simulation setup: {str(e)}")
@@ -545,6 +553,7 @@ async def stop_simulation():
         logger.info("Stopping simulation")
         logger.info("================================")
         
+
         if runner.state['is_running']:
             current_scenario = runner.state['current_scenario']
             record_scenario_result(
