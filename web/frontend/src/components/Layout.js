@@ -18,6 +18,7 @@ import {
   Settings as SettingsIcon,
   Description as DescriptionIcon,
   ListAlt as ListAltIcon,
+  Analytics as AnalyticsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -52,6 +53,7 @@ function Layout({ children }) {
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
     { text: 'Reports', icon: <DescriptionIcon />, path: '/reports' },
     { text: 'Logs', icon: <ListAltIcon />, path: '/logs' },
+    { text: 'Analytics', icon: <AnalyticsIcon />, path: '/analytics' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
   ];
 

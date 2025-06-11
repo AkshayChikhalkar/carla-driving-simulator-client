@@ -8,6 +8,7 @@ import Layout from './components/Layout';
 import logger from './utils/logger';
 import Reports from './components/Reports';
 import Logs from './components/Logs';
+import Analytics from './components/Analytics';
 
 const theme = createTheme({
   palette: {
@@ -53,6 +54,7 @@ function App() {
             <Route path="/reports/:filename" element={<Reports />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/logs/:filename" element={<Logs />} />
+            <Route path="/analytics" element={<Analytics />} />
           </Routes>
         </Layout>
       </Router>
