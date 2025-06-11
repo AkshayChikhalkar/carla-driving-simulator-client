@@ -21,7 +21,6 @@ import threading
 from src.database.config import SessionLocal
 from src.database.models import Scenario, VehicleData, SensorData
 from datetime import datetime
-import uuid
 
 class SimulationApplication:
     """Main application class that coordinates all simulation components"""
@@ -30,7 +29,8 @@ class SimulationApplication:
     cleanup_lock = threading.Lock()
     is_cleanup_complete = False
 
-    def __init__(self, config_path: str, scenario: str = None, logger: ILogger = None, session_id=None):
+    def __init__(
+        self, config_path: str, scenario: str, session_id, logger: ILogger):
         # Initialize configuration
         self._config = SimulationConfig(config_path, scenario)
         
@@ -55,8 +55,10 @@ class SimulationApplication:
         self._cleanup_results = None
         self._cleanup_results_lock = threading.Lock()
 
-        # Use provided or generate once per app
-        self.session_id = session_id or uuid.uuid4()
+        # Require session_id to be provided
+        if session_id is None:
+            raise ValueError("session_id must be provided by SimulationRunner.")
+        self.session_id = session_id
 
         # Do not connect here; connect only in setup()
 
@@ -214,7 +216,6 @@ class SimulationApplication:
         scenario_id = new_scenario.scenario_id
         db.close()
         self.logger.set_scenario_id(scenario_id)
-        self.logger._session_id = self.session_id
         # --- End DB scenario creation ---
 
         self.state.start()

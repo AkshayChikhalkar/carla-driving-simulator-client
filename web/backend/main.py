@@ -246,7 +246,7 @@ def transition_to_next_scenario(runner, next_scenario):
     """Thread-safe scenario transition"""
     try:
         # Create new application instance
-        new_app = runner.create_application(next_scenario)
+        new_app = runner.create_application(next_scenario, session_id=runner.state['session_id'])
         new_app._config.web_mode = True
         
         # Connect to CARLA server
@@ -476,8 +476,6 @@ async def start_simulation(request: SimulationRequest):
             
             # Generate a new session_id for this simulation run (as UUID object)
             session_id = uuid.uuid4()            
-            # Set the session_id in the logger
-            logger.set_session_id(session_id)
             
             # Update state atomically
             runner.state.set_state({
@@ -487,7 +485,7 @@ async def start_simulation(request: SimulationRequest):
                 'batch_start_time': datetime.now(),
                 'scenario_start_time': datetime.now(),
                 'is_running': True,
-                'session_id': session_id  # Store session_id in runner state
+                'session_id': session_id
             })
             runner.state['scenario_results'].clear_results()
             
@@ -506,8 +504,6 @@ async def start_simulation(request: SimulationRequest):
                 runner.state['is_running'] = False
                 return {"success": False, "message": "Failed to connect to CARLA server"}
             
-            # Wait for connection to stabilize
-            #await asyncio.sleep(1)
             
             # Setup components using utility function with retry logic
             try:
