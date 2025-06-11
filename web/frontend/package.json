@@ -18,7 +18,8 @@
     "web-vitals": "^3.5.2",
     "postcss": "^8.4.31",
     "webpack-dev-server": "^4.15.1",
-    "@craco/craco": "^7.1.0"
+    "@craco/craco": "^7.1.0",
+    "which": "^3.0.1"
   },
   "scripts": {
     "start": "craco start",
