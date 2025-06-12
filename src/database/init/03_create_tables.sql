@@ -1,7 +1,14 @@
 -- Connect to the carla_simulator database and set the schema
 SET search_path TO carla_simulator;
 
-CREATE TABLE IF NOT EXISTS scenarios (
+-- Drop existing tables if they exist (in correct order due to dependencies)
+DROP TABLE IF EXISTS simulation_metrics CASCADE;
+DROP TABLE IF EXISTS sensor_data CASCADE;
+DROP TABLE IF EXISTS vehicle_data CASCADE;
+DROP TABLE IF EXISTS scenarios CASCADE;
+
+-- Create tables in correct order
+CREATE TABLE scenarios (
     scenario_id SERIAL PRIMARY KEY,
     session_id UUID NOT NULL,
     scenario_name VARCHAR NOT NULL,
@@ -11,7 +18,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
     scenario_metadata JSONB
 );
 
-CREATE TABLE IF NOT EXISTS vehicle_data (
+CREATE TABLE vehicle_data (
     id SERIAL PRIMARY KEY,
     scenario_id INTEGER REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
     session_id UUID NOT NULL,
@@ -26,7 +33,7 @@ CREATE TABLE IF NOT EXISTS vehicle_data (
     brake FLOAT
 );
 
-CREATE TABLE IF NOT EXISTS sensor_data (
+CREATE TABLE sensor_data (
     id SERIAL PRIMARY KEY,
     scenario_id INTEGER REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
     session_id UUID NOT NULL,
@@ -35,7 +42,7 @@ CREATE TABLE IF NOT EXISTS sensor_data (
     data JSONB
 );
 
-CREATE TABLE IF NOT EXISTS simulation_metrics (
+CREATE TABLE simulation_metrics (
     id SERIAL PRIMARY KEY,
     scenario_id INTEGER REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
     session_id UUID NOT NULL,
@@ -68,4 +75,8 @@ CREATE TABLE IF NOT EXISTS simulation_metrics (
     rotation_x FLOAT,
     rotation_y FLOAT,
     rotation_z FLOAT
-); 
+);
+
+-- Grant permissions to carla_user
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA carla_simulator TO carla_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA carla_simulator TO carla_user; 
