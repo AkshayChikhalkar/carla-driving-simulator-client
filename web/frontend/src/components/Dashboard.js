@@ -234,6 +234,11 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     return !isRunning || isStopping || isStarting || isPaused || isSkipping;
   };
 
+  // Helper function to determine if skip button should be disabled
+  const isSkipDisabled = () => {
+    return !isRunning || isSkipping || isStopping || isStarting || (selectedScenarios.length === 1 && !selectedScenarios.includes('all'));
+  };
+
   // Update the handleScenarioChange function
   const handleScenarioChange = (event) => {
     const value = event.target.value;
@@ -419,7 +424,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   color="warning"
                   startIcon={<SkipNextIcon />}
                   onClick={handleSkipScenario}
-                  disabled={!isRunning || isSkipping || (selectedScenarios.length === 1 && !selectedScenarios.includes('all'))}
+                  disabled={isSkipDisabled()}
                   size="small"
                   sx={{ 
                     '& .MuiButton-startIcon': { 
@@ -508,7 +513,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               alignItems: 'center',
               justifyContent: 'center',
               background: '#000',
-              opacity: (!isRunning || !hasReceivedFrame || isStopping) ? 1 : 0,
+              opacity: (!isRunning || !hasReceivedFrame || isStopping || isSkipping) ? 1 : 0,
               transition: 'opacity 0.5s ease-in-out',
               zIndex: 1
             }}
@@ -524,7 +529,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 background: '#000',
                 margin: 0,
                 padding: 0,
-                opacity: isStopping ? 1 : (!isRunning || !hasReceivedFrame ? 1 : 0),
+                opacity: isStopping || isSkipping ? 1 : (!isRunning || !hasReceivedFrame ? 1 : 0),
                 transition: 'opacity 0.5s ease-in-out'
               }}
             />
