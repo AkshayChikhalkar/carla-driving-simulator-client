@@ -3,7 +3,13 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
+from typing import Optional, Dict, Any, List
 from .config import Base
+from .db_manager import DatabaseManager
+
+# Create a logger instance
+from src.utils.logging import Logger
+logger = Logger()
 
 class Scenario(Base):
     """Model for storing scenario executions (was Simulation)"""
@@ -21,6 +27,58 @@ class Scenario(Base):
     vehicle_data = relationship("VehicleData", back_populates="scenario")
     sensor_data = relationship("SensorData", back_populates="scenario")
     metrics = relationship("SimulationMetrics", back_populates="scenario")
+
+    @classmethod
+    def create(cls, db: DatabaseManager, **kwargs) -> Optional['Scenario']:
+        """Create a new scenario"""
+        try:
+            query = """
+                INSERT INTO scenarios (session_id, scenario_name, start_time, end_time, status, scenario_metadata)
+                VALUES (%(session_id)s, %(scenario_name)s, %(start_time)s, %(end_time)s, %(status)s, %(scenario_metadata)s)
+                RETURNING *
+            """
+            result = db.execute_query(query, kwargs)
+            return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Error creating scenario: {e}")
+            return None
+
+    @classmethod
+    def get_by_id(cls, db: DatabaseManager, scenario_id: int) -> Optional['Scenario']:
+        """Get scenario by ID"""
+        try:
+            query = "SELECT * FROM scenarios WHERE scenario_id = %(scenario_id)s"
+            result = db.execute_query(query, {'scenario_id': scenario_id})
+            return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Error getting scenario: {e}")
+            return None
+
+    def update(self, db: DatabaseManager, **kwargs) -> bool:
+        """Update scenario"""
+        try:
+            update_fields = []
+            params = {'scenario_id': self.scenario_id}
+            
+            for key, value in kwargs.items():
+                if hasattr(self, key):
+                    update_fields.append(f"{key} = %({key})s")
+                    params[key] = value
+
+            if not update_fields:
+                return False
+
+            query = f"""
+                UPDATE scenarios 
+                SET {', '.join(update_fields)}
+                WHERE scenario_id = %(scenario_id)s
+                RETURNING *
+            """
+            result = db.execute_query(query, params)
+            return bool(result)
+        except Exception as e:
+            logger.error(f"Error updating scenario: {e}")
+            return False
 
 class VehicleData(Base):
     """Model for storing vehicle telemetry data"""
