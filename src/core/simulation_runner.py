@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import pytest
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -28,10 +29,11 @@ from src.utils.config import load_config
 class SimulationRunner:
     """Class to handle simulation execution and management"""
 
-    def __init__(self, config_file: str=None):
+    def __init__(self, config_file: str=None, session_id: uuid.UUID=None):
         self.config_file = config_file or get_config_path()
         self.config = load_config(self.config_file)
         self.logger = Logger()
+        self.session_id = session_id or uuid.uuid4()
 
 
     def setup_logger(self, debug: bool = False) -> None:
@@ -115,7 +117,7 @@ class SimulationRunner:
         """
         try:
             # Create application instance for current scenario
-            app = self.create_application(scenario)
+            app = self.create_application(scenario, session_id=self.session_id)
 
             # Connect to CARLA server
             if not app.connection.connect():

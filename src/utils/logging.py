@@ -7,33 +7,17 @@ import logging
 import traceback
 import csv
 from datetime import datetime
-from dataclasses import dataclass
 from typing import Optional, Any, Dict, TextIO
 from pathlib import Path
+
+from src.core.simulation_components import SimulationMetrics
 from .settings import DEBUG_MODE
 from .default_config import SIMULATION_CONFIG
 from .paths import get_project_root
+from .types import SimulationData
 from src.database.config import SessionLocal
-from src.database.models import SimulationMetrics
 import uuid  # ensure this is at the top if not already
 
-# Add at the top of the file
-CURRENT_SESSION_ID = None
-
-@dataclass
-class SimulationData:
-    """Data structure for simulation metrics"""
-    elapsed_time: float
-    speed: float
-    position: tuple[float, float, float]
-    controls: Dict[str, float]
-    target_info: Dict[str, float]
-    vehicle_state: Dict[str, Any]
-    weather: Dict[str, float]
-    traffic_count: int
-    fps: float
-    event: str
-    event_details: str
 
 class Logger:
     """Manages logging configuration and setup"""
@@ -197,53 +181,50 @@ class Logger:
         # Accept both string and UUID, but always store as UUID
         if isinstance(session_id, str):
             session_id = uuid.UUID(session_id)
-        CURRENT_SESSION_ID = session_id
+        self._session_id = session_id
         self.logger.info(f"Session ID set to: {session_id}")
 
     def log_data(self, data: SimulationData) -> None:
-        scenario_id = getattr(self, '_scenario_id', None)
-        session_id = CURRENT_SESSION_ID
-        if scenario_id is not None and session_id is not None:
-            try:
-                db = SessionLocal()
-                db.add(
-                    SimulationMetrics(
-                        scenario_id=scenario_id,
-                        session_id=CURRENT_SESSION_ID,  # Pass as UUID object
-                        elapsed_time=data.elapsed_time,
-                        speed=data.speed * 3.6,  # Store as km/h for consistency
-                        position_x=data.position[0],
-                        position_y=data.position[1],
-                        position_z=data.position[2],
-                        throttle=data.controls["throttle"],
-                        brake=data.controls["brake"],
-                        steer=data.controls["steer"],
-                        target_distance=data.target_info["distance"],
-                        target_heading=data.target_info["heading"],
-                        vehicle_heading=data.vehicle_state["heading"],
-                        heading_diff=data.target_info["heading_diff"],
-                        acceleration=data.vehicle_state["acceleration"],
-                        angular_velocity=data.vehicle_state["angular_velocity"],
-                        gear=data.controls["gear"],
-                        hand_brake=data.controls["hand_brake"],
-                        reverse=data.controls["reverse"],
-                        manual_gear_shift=data.controls["manual_gear_shift"],
-                        collision_intensity=data.vehicle_state["collision_intensity"],
-                        cloudiness=data.weather["cloudiness"],
-                        precipitation=data.weather["precipitation"],
-                        traffic_count=data.traffic_count,
-                        fps=data.fps,
-                        event=data.event,
-                        event_details=data.event_details,
-                        rotation_x=data.vehicle_state["rotation"][0],
-                        rotation_y=data.vehicle_state["rotation"][1],
-                        rotation_z=data.vehicle_state["rotation"][2],
-                    )
+        try:
+            db = SessionLocal()
+            db.add(
+                SimulationMetrics(
+                    scenario_id=getattr(self, '_scenario_id', None),
+                    session_id=getattr(self, '_session_id', None),  # Pass as UUID object
+                    elapsed_time=data.elapsed_time,
+                    speed=data.speed * 3.6,  # Store as km/h for consistency
+                    position_x=data.position[0],
+                    position_y=data.position[1],
+                    position_z=data.position[2],
+                    throttle=data.controls["throttle"],
+                    brake=data.controls["brake"],
+                    steer=data.controls["steer"],
+                    target_distance=data.target_info["distance"],
+                    target_heading=data.target_info["heading"],
+                    vehicle_heading=data.vehicle_state["heading"],
+                    heading_diff=data.target_info["heading_diff"],
+                    acceleration=data.vehicle_state["acceleration"],
+                    angular_velocity=data.vehicle_state["angular_velocity"],
+                    gear=data.controls["gear"],
+                    hand_brake=data.controls["hand_brake"],
+                    reverse=data.controls["reverse"],
+                    manual_gear_shift=data.controls["manual_gear_shift"],
+                    collision_intensity=data.vehicle_state["collision_intensity"],
+                    cloudiness=data.weather["cloudiness"],
+                    precipitation=data.weather["precipitation"],
+                    traffic_count=data.traffic_count,
+                    fps=data.fps,
+                    event=data.event,
+                    event_details=data.event_details,
+                    rotation_x=data.vehicle_state["rotation"][0],
+                    rotation_y=data.vehicle_state["rotation"][1],
+                    rotation_z=data.vehicle_state["rotation"][2],
                 )
-                db.commit()
-                db.close()
-            except Exception as e:
-                self.logger.error(f"Error writing to DB: {str(e)}")
+            )
+            db.commit()
+            db.close()
+        except Exception as e:
+            self.logger.error(f"Error writing to DB: {str(e)}")
 
     def log_event(self, elapsed_time: float, event: str, details: str) -> None:
         """Log significant events to operations log"""

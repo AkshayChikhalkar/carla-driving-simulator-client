@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from ..core.sensors import SensorObserver, CameraData, SensorData
 from ..utils.config import DisplayConfig
 from ..utils.default_config import DISPLAY_CONFIG
+from ..utils.logging import Logger
 import time
 import os
 import sys
@@ -153,7 +154,7 @@ class CameraView(SensorObserver):
         self.config = config
         self.surface: Optional[pygame.Surface] = None
         self.last_frame = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = Logger()
     
     def on_sensor_data(self, data: SensorData) -> None:
         """Handle new camera data"""
@@ -220,19 +221,19 @@ class CameraView(SensorObserver):
         self.surface = None
         self.last_frame = None
 
-def get_window_count():
-    """Get count of existing CARLA Simulator windows"""
-    try:
-        import win32gui
-        windows = []
-        def enum_windows_callback(hwnd, windows):
-            if "CARLA Simulator" in win32gui.GetWindowText(hwnd):
-                windows.append(hwnd)
-            return True
-        win32gui.EnumWindows(enum_windows_callback, windows)
-        return len(windows)
-    except ImportError:
-        return 0
+# def get_window_count():
+#     """Get count of existing CARLA Simulator windows"""
+#     try:
+#         import win32gui
+#         windows = []
+#         def enum_windows_callback(hwnd, windows):
+#             if "CARLA Simulator" in win32gui.GetWindowText(hwnd):
+#                 windows.append(hwnd)
+#             return True
+#         win32gui.EnumWindows(enum_windows_callback, windows)
+#         return len(windows)
+#     except ImportError:
+#         return 0
 
 class DisplayManager:
     """Facade for all visualization components"""

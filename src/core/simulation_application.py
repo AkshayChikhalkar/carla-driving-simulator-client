@@ -216,6 +216,7 @@ class SimulationApplication:
         scenario_id = new_scenario.scenario_id
         db.close()
         self.logger.set_scenario_id(scenario_id)
+        self.logger.set_session_id(self.session_id)
         # --- End DB scenario creation ---
 
         self.state.start()

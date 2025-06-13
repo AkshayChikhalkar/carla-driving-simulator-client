@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from src.core.simulation_runner import SimulationRunner
 from src.scenarios.scenario_registry import ScenarioRegistry
+from src.utils.logging import Logger
 
 # Configure logging
 logging.basicConfig(
