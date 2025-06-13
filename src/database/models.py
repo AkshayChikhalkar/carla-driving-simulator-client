@@ -1,3 +1,7 @@
+"""
+Database models for the CARLA Driving Simulator.
+"""
+
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -6,10 +10,12 @@ import uuid
 from typing import Optional, Dict, Any, List
 from .config import Base
 from .db_manager import DatabaseManager
+from src.models.metrics import SimulationMetricsData
 
-# Create a logger instance
-from src.utils.logging import Logger
-logger = Logger()
+def log_error(message: str, error: Exception) -> None:
+    """Centralized error logging function"""
+    from src.utils.logging import Logger
+    Logger().error(f"{message}: {error}")
 
 class Scenario(Base):
     """Model for storing scenario executions (was Simulation)"""
@@ -40,7 +46,7 @@ class Scenario(Base):
             result = db.execute_query(query, kwargs)
             return result[0] if result else None
         except Exception as e:
-            logger.error(f"Error creating scenario: {e}")
+            log_error("Error creating scenario", e)
             return None
 
     @classmethod
@@ -51,7 +57,7 @@ class Scenario(Base):
             result = db.execute_query(query, {'scenario_id': scenario_id})
             return result[0] if result else None
         except Exception as e:
-            logger.error(f"Error getting scenario: {e}")
+            log_error("Error getting scenario", e)
             return None
 
     def update(self, db: DatabaseManager, **kwargs) -> bool:
@@ -77,7 +83,7 @@ class Scenario(Base):
             result = db.execute_query(query, params)
             return bool(result)
         except Exception as e:
-            logger.error(f"Error updating scenario: {e}")
+            log_error("Error updating scenario", e)
             return False
 
 class VehicleData(Base):
@@ -152,4 +158,41 @@ class SimulationMetrics(Base):
     rotation_z = Column(Float)
 
     # Relationship
-    scenario = relationship("Scenario", back_populates="metrics") 
+    scenario = relationship("Scenario", back_populates="metrics")
+
+    @classmethod
+    def from_metrics_data(cls, data: SimulationMetricsData) -> 'SimulationMetrics':
+        """Create a database model instance from metrics data"""
+        return cls(
+            scenario_id=data.scenario_id,
+            session_id=data.session_id,
+            timestamp=data.timestamp,
+            elapsed_time=data.elapsed_time,
+            speed=data.speed,
+            position_x=data.position_x,
+            position_y=data.position_y,
+            position_z=data.position_z,
+            throttle=data.throttle,
+            brake=data.brake,
+            steer=data.steer,
+            target_distance=data.target_distance,
+            target_heading=data.target_heading,
+            vehicle_heading=data.vehicle_heading,
+            heading_diff=data.heading_diff,
+            acceleration=data.acceleration,
+            angular_velocity=data.angular_velocity,
+            gear=data.gear,
+            hand_brake=data.hand_brake,
+            reverse=data.reverse,
+            manual_gear_shift=data.manual_gear_shift,
+            collision_intensity=data.collision_intensity,
+            cloudiness=data.cloudiness,
+            precipitation=data.precipitation,
+            traffic_count=data.traffic_count,
+            fps=data.fps,
+            event=data.event,
+            event_details=data.event_details,
+            rotation_x=data.rotation_x,
+            rotation_y=data.rotation_y,
+            rotation_z=data.rotation_z
+        ) 

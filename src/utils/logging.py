@@ -10,12 +10,13 @@ from datetime import datetime
 from typing import Optional, Any, Dict, TextIO
 from pathlib import Path
 
-from src.core.simulation_components import SimulationMetrics
+from src.models.metrics import SimulationMetricsData
 from .settings import DEBUG_MODE
 from .default_config import SIMULATION_CONFIG
 from .paths import get_project_root
 from .types import SimulationData
 from src.database.config import SessionLocal
+from src.database.models import SimulationMetrics
 import uuid  # ensure this is at the top if not already
 
 
@@ -41,7 +42,7 @@ class Logger:
             '%(asctime)s - %(levelname)s - %(message)s')
         self.log_date_format = getattr(SIMULATION_CONFIG, 'log_date_format', 
             '%Y-%m-%d %H:%M:%S')
-        self.log_to_file = False  # Disable CSV logging
+        self.log_to_file = True  # Disable CSV logging
         self.log_to_console = getattr(SIMULATION_CONFIG, 'log_to_console', True)
         
         # Initialize CSV logging attributes
@@ -187,40 +188,13 @@ class Logger:
     def log_data(self, data: SimulationData) -> None:
         try:
             db = SessionLocal()
-            db.add(
-                SimulationMetrics(
-                    scenario_id=getattr(self, '_scenario_id', None),
-                    session_id=getattr(self, '_session_id', None),  # Pass as UUID object
-                    elapsed_time=data.elapsed_time,
-                    speed=data.speed * 3.6,  # Store as km/h for consistency
-                    position_x=data.position[0],
-                    position_y=data.position[1],
-                    position_z=data.position[2],
-                    throttle=data.controls["throttle"],
-                    brake=data.controls["brake"],
-                    steer=data.controls["steer"],
-                    target_distance=data.target_info["distance"],
-                    target_heading=data.target_info["heading"],
-                    vehicle_heading=data.vehicle_state["heading"],
-                    heading_diff=data.target_info["heading_diff"],
-                    acceleration=data.vehicle_state["acceleration"],
-                    angular_velocity=data.vehicle_state["angular_velocity"],
-                    gear=data.controls["gear"],
-                    hand_brake=data.controls["hand_brake"],
-                    reverse=data.controls["reverse"],
-                    manual_gear_shift=data.controls["manual_gear_shift"],
-                    collision_intensity=data.vehicle_state["collision_intensity"],
-                    cloudiness=data.weather["cloudiness"],
-                    precipitation=data.weather["precipitation"],
-                    traffic_count=data.traffic_count,
-                    fps=data.fps,
-                    event=data.event,
-                    event_details=data.event_details,
-                    rotation_x=data.vehicle_state["rotation"][0],
-                    rotation_y=data.vehicle_state["rotation"][1],
-                    rotation_z=data.vehicle_state["rotation"][2],
-                )
+            metrics_data = SimulationMetricsData.from_simulation_data(
+                data,
+                scenario_id=getattr(self, '_scenario_id', None),
+                session_id=getattr(self, '_session_id', None)
             )
+            db_metrics = SimulationMetrics.from_metrics_data(metrics_data)
+            db.add(db_metrics)
             db.commit()
             db.close()
         except Exception as e:
