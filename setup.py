@@ -10,16 +10,17 @@ import re
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
+
 # Get version from environment variable or fallback to VERSION file
 def get_version():
     # First try to get version from environment variable
-    version = os.environ.get('PACKAGE_VERSION')
+    version = os.environ.get("PACKAGE_VERSION")
     if version:
         return version
 
     # If not in environment, try VERSION file
     try:
-        with open('VERSION', 'r') as f:
+        with open("VERSION", "r") as f:
             version = f.read().strip()
             if version:
                 return version
@@ -29,21 +30,29 @@ def get_version():
     # If VERSION file doesn't exist or is empty, try git tag
     try:
         import subprocess
-        version = subprocess.check_output(['git', 'describe', '--tags', '--always']).decode().strip()
+
+        version = (
+            subprocess.check_output(["git", "describe", "--tags", "--always"])
+            .decode()
+            .strip()
+        )
         # Remove any leading 'v' and any additional git info after the version number
-        version = re.sub(r'^v', '', version)
-        version = re.sub(r'-.*$', '', version)
+        version = re.sub(r"^v", "", version)
+        version = re.sub(r"-.*$", "", version)
         return version
     except:
         return "1.0.0"  # Default version if nothing else is available
 
+
 # Get version
 version = get_version()
+
 
 # Read requirements from requirements.txt
 def read_requirements(filename):
     with open(filename) as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
 
 # Base requirements
 install_requires = [
@@ -59,15 +68,15 @@ install_requires = [
 
 # Development requirements
 extras_require = {
-    'dev': [
-        'pytest>=6.0.0',
-        'pytest-cov>=2.10.0',
-        'pytest-html>=3.2.0',
-        'black>=21.5b2',
-        'flake8>=3.9.0',
-        'mypy>=0.812',
-        'sphinx>=4.0.0',
-        'sphinx-rtd-theme>=0.5.0',
+    "dev": [
+        "pytest>=6.0.0",
+        "pytest-cov>=2.10.0",
+        "pytest-html>=3.2.0",
+        "black>=21.5b2",
+        "flake8>=3.9.0",
+        "mypy>=0.812",
+        "sphinx>=4.0.0",
+        "sphinx-rtd-theme>=0.5.0",
     ]
 }
 
@@ -118,4 +127,4 @@ setup(
     ],
     keywords="carla, autonomous-driving, simulation, pygame, visualization, scenario-testing, vehicle-control, driving-simulator, computer-vision, machine-learning, robotics, testing-framework, web-api, real-time-simulation",
     zip_safe=False,
-) 
+)

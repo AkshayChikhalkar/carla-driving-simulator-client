@@ -4,10 +4,10 @@ class ScenarioResultsManager:
 
     def set_result(self, scenario_name, result, status, duration):
         self._scenario_results[scenario_name] = {
-            'name': scenario_name,
-            'result': result,
-            'status': status,
-            'duration': duration
+            "name": scenario_name,
+            "result": result,
+            "status": status,
+            "duration": duration,
         }
 
     def all_results(self):
@@ -17,4 +17,4 @@ class ScenarioResultsManager:
         self._scenario_results.clear()
 
     def get_result(self, scenario_name):
-        return self._scenario_results.get(scenario_name) 
+        return self._scenario_results.get(scenario_name)

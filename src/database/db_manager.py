@@ -9,6 +9,7 @@ from .config import DATABASE_URL, SCHEMA_NAME
 
 logger = logging.getLogger(__name__)
 
+
 class DatabaseManager:
     def __init__(self, max_retries: int = 3, retry_delay: float = 1.0):
         self.max_retries = max_retries
@@ -22,12 +23,11 @@ class DatabaseManager:
             try:
                 if not self._connection or self._connection.closed:
                     self._connection = psycopg2.connect(
-                        DATABASE_URL,
-                        cursor_factory=RealDictCursor
+                        DATABASE_URL, cursor_factory=RealDictCursor
                     )
                     # Set schema
                     with self._connection.cursor() as cur:
-                        cur.execute(f'SET search_path TO {SCHEMA_NAME}')
+                        cur.execute(f"SET search_path TO {SCHEMA_NAME}")
                 yield self._connection
                 return
             except Exception as e:
@@ -37,7 +37,9 @@ class DatabaseManager:
                 else:
                     raise
 
-    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def execute_query(
+        self, query: str, params: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Execute a query with retry logic"""
         for attempt in range(self.max_retries):
             try:
@@ -77,19 +79,30 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     # Check if schema exists
-                    cur.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name = %s", (SCHEMA_NAME,))
+                    cur.execute(
+                        "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+                        (SCHEMA_NAME,),
+                    )
                     if not cur.fetchone():
                         logger.error(f"Schema {SCHEMA_NAME} does not exist")
                         return False
 
                     # Check if required tables exist
-                    required_tables = ['scenarios', 'vehicle_data', 'sensor_data', 'simulation_metrics']
+                    required_tables = [
+                        "scenarios",
+                        "vehicle_data",
+                        "sensor_data",
+                        "simulation_metrics",
+                    ]
                     for table in required_tables:
-                        cur.execute("""
+                        cur.execute(
+                            """
                             SELECT 1 
                             FROM information_schema.tables 
                             WHERE table_schema = %s AND table_name = %s
-                        """, (SCHEMA_NAME, table))
+                        """,
+                            (SCHEMA_NAME, table),
+                        )
                         if not cur.fetchone():
                             logger.error(f"Table {table} does not exist")
                             return False
@@ -103,4 +116,4 @@ class DatabaseManager:
         """Close the database connection"""
         if self._connection and not self._connection.closed:
             self._connection.close()
-            self._connection = None 
+            self._connection = None

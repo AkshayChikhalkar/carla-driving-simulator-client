@@ -1,6 +1,7 @@
 """
 Data models for simulation metrics.
 """
+
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 from datetime import datetime
@@ -8,9 +9,11 @@ from uuid import UUID
 
 from src.utils.types import SimulationData
 
+
 @dataclass
 class SimulationMetricsData:
     """Data structure for simulation metrics that can be logged"""
+
     scenario_id: int = None
     session_id: UUID = None
     timestamp: datetime = None
@@ -44,7 +47,9 @@ class SimulationMetricsData:
     rotation_z: float = 0.0
 
     @classmethod
-    def from_simulation_data(cls, data: 'SimulationData', scenario_id: int = None, session_id: UUID = None) -> 'SimulationMetricsData':
+    def from_simulation_data(
+        cls, data: "SimulationData", scenario_id: int = None, session_id: UUID = None
+    ) -> "SimulationMetricsData":
         """Create metrics data from simulation data"""
         return cls(
             scenario_id=scenario_id,
@@ -77,5 +82,5 @@ class SimulationMetricsData:
             event_details=data.event_details,
             rotation_x=data.vehicle_state["rotation"][0],
             rotation_y=data.vehicle_state["rotation"][1],
-            rotation_z=data.vehicle_state["rotation"][2]
-        ) 
+            rotation_z=data.vehicle_state["rotation"][2],
+        )

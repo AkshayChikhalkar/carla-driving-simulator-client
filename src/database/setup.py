@@ -10,22 +10,23 @@ from sqlalchemy import create_engine
 import re
 
 # Database configuration
-DB_NAME = 'carla_simulator'
-DB_USER = 'postgres'
-DB_PASSWORD = 'postgres'
-DB_HOST = 'localhost'
-DB_PORT = '5432'
+DB_NAME = "carla_simulator"
+DB_USER = "postgres"
+DB_PASSWORD = "postgres"
+DB_HOST = "localhost"
+DB_PORT = "5432"
+
 
 def check_postgres_installation():
     """Check if PostgreSQL is installed and running"""
     try:
         # Try to connect to PostgreSQL server
         conn = psycopg2.connect(
-            dbname='postgres',
+            dbname="postgres",
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
-            port=DB_PORT
+            port=DB_PORT,
         )
         conn.close()
         print("PostgreSQL server is running.")
@@ -39,16 +40,17 @@ def check_postgres_installation():
         print(f"Unexpected error: {e}")
         return False
 
+
 def create_user_if_not_exists():
     """Create database user if it doesn't exist"""
     try:
         # Connect to PostgreSQL server
         conn = psycopg2.connect(
-            dbname='postgres',
+            dbname="postgres",
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
-            port=DB_PORT
+            port=DB_PORT,
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
@@ -67,21 +69,22 @@ def create_user_if_not_exists():
         print(f"Error creating user: {e}")
         raise
     finally:
-        if 'cursor' in locals():
+        if "cursor" in locals():
             cursor.close()
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def create_database_if_not_exists():
     """Create database if it doesn't exist"""
     try:
         # Connect to PostgreSQL server
         conn = psycopg2.connect(
-            dbname='postgres',
+            dbname="postgres",
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
-            port=DB_PORT
+            port=DB_PORT,
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
@@ -90,7 +93,7 @@ def create_database_if_not_exists():
         cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
         if not cursor.fetchone():
             print(f"Creating database '{DB_NAME}'...")
-            cursor.execute(f'CREATE DATABASE {DB_NAME}')
+            cursor.execute(f"CREATE DATABASE {DB_NAME}")
             print(f"Database '{DB_NAME}' created successfully!")
         else:
             print(f"Database '{DB_NAME}' already exists.")
@@ -99,10 +102,11 @@ def create_database_if_not_exists():
         print(f"Error creating database: {e}")
         raise
     finally:
-        if 'cursor' in locals():
+        if "cursor" in locals():
             cursor.close()
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def create_schema_if_not_exists():
     """Create schema if it doesn't exist"""
@@ -113,16 +117,19 @@ def create_schema_if_not_exists():
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
-            port=DB_PORT
+            port=DB_PORT,
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
 
         # Check if schema exists
-        cursor.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name = %s", (SCHEMA_NAME,))
+        cursor.execute(
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+            (SCHEMA_NAME,),
+        )
         if not cursor.fetchone():
             print(f"Creating schema '{SCHEMA_NAME}'...")
-            cursor.execute(f'CREATE SCHEMA {SCHEMA_NAME}')
+            cursor.execute(f"CREATE SCHEMA {SCHEMA_NAME}")
             print(f"Schema '{SCHEMA_NAME}' created successfully!")
         else:
             print(f"Schema '{SCHEMA_NAME}' already exists.")
@@ -131,10 +138,11 @@ def create_schema_if_not_exists():
         print(f"Error creating schema: {e}")
         raise
     finally:
-        if 'cursor' in locals():
+        if "cursor" in locals():
             cursor.close()
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def setup_database():
     """Main function to set up the database"""
@@ -155,14 +163,13 @@ def setup_database():
         # Create tables
         print("Creating database tables...")
         engine = create_engine(
-            DATABASE_URL,
-            connect_args={'options': f'-csearch_path={SCHEMA_NAME}'}
+            DATABASE_URL, connect_args={"options": f"-csearch_path={SCHEMA_NAME}"}
         )
-        
+
         # Set schema for all tables
         for table in Base.metadata.tables.values():
             table.schema = SCHEMA_NAME
-            
+
         Base.metadata.create_all(bind=engine)
         print("Database tables created successfully!")
 
@@ -177,5 +184,6 @@ def setup_database():
         print(f"Error during database setup: {e}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
-    setup_database() 
+    setup_database()

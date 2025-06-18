@@ -13,14 +13,17 @@ from .interfaces import IVehicleController
 from ..utils.config import VehicleConfig
 from ..utils.default_config import SIMULATION_CONFIG
 
+
 @dataclass
 class ControlState:
     """Current control state of the vehicle"""
+
     throttle: float = 0.0
     brake: float = 0.0
     steer: float = 0.0
     hand_brake: bool = False
     reverse: bool = False
+
 
 class VehicleController(IVehicleController):
     """Controls vehicle movement and behavior"""
@@ -33,11 +36,11 @@ class VehicleController(IVehicleController):
         self.logger = Logger()
 
         # Get configuration values with fallbacks
-        self.max_speed = getattr(config, 'max_speed', 30.0)  # m/s
-        self.max_steer_angle = getattr(config, 'max_steer_angle', 70.0)  # degrees
-        self.max_throttle = getattr(config, 'max_throttle', 1.0)
-        self.max_brake = getattr(config, 'max_brake', 1.0)
-        self.steer_sensitivity = getattr(config, 'steer_sensitivity', 1.0)
+        self.max_speed = getattr(config, "max_speed", 30.0)  # m/s
+        self.max_steer_angle = getattr(config, "max_steer_angle", 70.0)  # degrees
+        self.max_throttle = getattr(config, "max_throttle", 1.0)
+        self.max_brake = getattr(config, "max_brake", 1.0)
+        self.steer_sensitivity = getattr(config, "steer_sensitivity", 1.0)
 
         # Initialize control
         self._reset_control()
@@ -77,7 +80,9 @@ class VehicleController(IVehicleController):
         # Convert to degrees and apply sensitivity
         steer_angle = value * self.max_steer_angle * self.steer_sensitivity
         # Normalize to -1.0 to 1.0 range
-        self.control_state.steer = max(-1.0, min(steer_angle / self.max_steer_angle, 1.0))
+        self.control_state.steer = max(
+            -1.0, min(steer_angle / self.max_steer_angle, 1.0)
+        )
         self._apply_control()
 
     def set_hand_brake(self, value: bool) -> None:
@@ -93,11 +98,11 @@ class VehicleController(IVehicleController):
     def get_control_state(self) -> Dict[str, Any]:
         """Get current control state"""
         return {
-            'throttle': self.control_state.throttle,
-            'brake': self.control_state.brake,
-            'steer': self.control_state.steer,
-            'hand_brake': self.control_state.hand_brake,
-            'reverse': self.control_state.reverse
+            "throttle": self.control_state.throttle,
+            "brake": self.control_state.brake,
+            "steer": self.control_state.steer,
+            "hand_brake": self.control_state.hand_brake,
+            "reverse": self.control_state.reverse,
         }
 
     def get_vehicle_state(self) -> Dict[str, Any]:
@@ -109,11 +114,11 @@ class VehicleController(IVehicleController):
         speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
 
         return {
-            'speed': speed,
-            'location': self.vehicle.get_location(),
-            'rotation': self.vehicle.get_transform().rotation,
-            'acceleration': self.vehicle.get_acceleration(),
-            'angular_velocity': self.vehicle.get_angular_velocity()
+            "speed": speed,
+            "location": self.vehicle.get_location(),
+            "rotation": self.vehicle.get_transform().rotation,
+            "acceleration": self.vehicle.get_acceleration(),
+            "angular_velocity": self.vehicle.get_angular_velocity(),
         }
 
     def cleanup(self) -> None:
@@ -122,4 +127,4 @@ class VehicleController(IVehicleController):
             self._reset_control()
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")
-            raise 
+            raise

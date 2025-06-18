@@ -5,14 +5,14 @@ from src.core.simulation_components import (
     ConnectionManager,
     SimulationState,
     SimulationMetrics,
-    SimulationConfig
+    SimulationConfig,
 )
 from src.core.interfaces import (
     IWorldManager,
     IVehicleController,
     ISensorManager,
     ILogger,
-    IScenario
+    IScenario,
 )
 from src.scenarios.scenario_registry import ScenarioRegistry
 from src.utils.config import LoggingConfig
@@ -22,6 +22,7 @@ from src.database.config import SessionLocal
 from src.database.models import Scenario, VehicleData, SensorData
 from datetime import datetime
 
+
 class SimulationApplication:
     """Main application class that coordinates all simulation components"""
 
@@ -29,14 +30,13 @@ class SimulationApplication:
     cleanup_lock = threading.Lock()
     is_cleanup_complete = False
 
-    def __init__(
-        self, config_path: str, scenario: str, session_id, logger: ILogger):
+    def __init__(self, config_path: str, scenario: str, session_id, logger: ILogger):
         # Initialize configuration
         self._config = SimulationConfig(config_path, scenario)
-        
+
         # Initialize logger first
         self.logger = logger
-        
+
         # Initialize connection manager with server config
         self.connection = ConnectionManager(self._config.server_config, self.logger)
 
@@ -62,11 +62,13 @@ class SimulationApplication:
 
         # Do not connect here; connect only in setup()
 
-    def setup(self,
-             world_manager: IWorldManager,
-             vehicle_controller: IVehicleController,
-             sensor_manager: ISensorManager,
-             logger: ILogger) -> None:
+    def setup(
+        self,
+        world_manager: IWorldManager,
+        vehicle_controller: IVehicleController,
+        sensor_manager: ISensorManager,
+        logger: ILogger,
+    ) -> None:
         """Setup the simulation application"""
         self.logger.info("[SimulationApplication] Setting up simulation components...")
 
@@ -91,7 +93,9 @@ class SimulationApplication:
             world = self.world_manager.get_world()
             if not world:
                 raise RuntimeError("Failed to get CARLA world")
-            self.logger.debug("[SimulationApplication] World manager initialized successfully")
+            self.logger.debug(
+                "[SimulationApplication] World manager initialized successfully"
+            )
         except Exception as e:
             raise RuntimeError(f"World manager initialization failed: {str(e)}")
 
@@ -100,7 +104,9 @@ class SimulationApplication:
             vehicle = self.vehicle_controller.get_vehicle()
             if not vehicle:
                 raise RuntimeError("Failed to get vehicle")
-            self.logger.debug("[SimulationApplication] Vehicle controller initialized successfully")
+            self.logger.debug(
+                "[SimulationApplication] Vehicle controller initialized successfully"
+            )
         except Exception as e:
             raise RuntimeError(f"Vehicle controller initialization failed: {str(e)}")
 
@@ -110,17 +116,23 @@ class SimulationApplication:
 
         # Initialize display manager
         self.logger.debug("[SimulationApplication] Initializing display manager...")
-        is_web_mode = getattr(self._config, 'web_mode', False)
-        self.display_manager = DisplayManager(self._config.display_config, web_mode=is_web_mode)
+        is_web_mode = getattr(self._config, "web_mode", False)
+        self.display_manager = DisplayManager(
+            self._config.display_config, web_mode=is_web_mode
+        )
         self.logger.debug("[SimulationApplication] Display manager initialized")
 
         # Attach camera view to sensor manager
         self.logger.debug("[SimulationApplication] Setting up camera...")
-        camera_sensor = self.sensor_manager.get_sensor('camera')
+        camera_sensor = self.sensor_manager.get_sensor("camera")
         if camera_sensor:
-            self.logger.debug("[SimulationApplication] Camera sensor found, attaching view...")
+            self.logger.debug(
+                "[SimulationApplication] Camera sensor found, attaching view..."
+            )
             camera_sensor.attach(self.display_manager.camera_view)
-            self.logger.debug("[SimulationApplication] Camera view attached to sensor manager")
+            self.logger.debug(
+                "[SimulationApplication] Camera view attached to sensor manager"
+            )
         else:
             self.logger.debug("[SimulationApplication] ERROR: Camera sensor not found!")
 
@@ -131,21 +143,29 @@ class SimulationApplication:
 
         try:
             # Test connection by getting world
-            self.logger.debug("[SimulationApplication] Attempting to get CARLA world...")
+            self.logger.debug(
+                "[SimulationApplication] Attempting to get CARLA world..."
+            )
             world = self.connection.client.get_world()
             if not world:
                 raise RuntimeError("Failed to get CARLA world")
-            self.logger.debug("[SimulationApplication] Successfully connected to CARLA world")
+            self.logger.debug(
+                "[SimulationApplication] Successfully connected to CARLA world"
+            )
         except Exception as e:
-            self.logger.debug(f"[SimulationApplication] ERROR: Failed to connect to CARLA server: {str(e)}")
+            self.logger.debug(
+                f"[SimulationApplication] ERROR: Failed to connect to CARLA server: {str(e)}"
+            )
             raise RuntimeError(f"Failed to connect to CARLA server: {str(e)}")
 
         # Create initial scenario
         self.logger.debug("[SimulationApplication] Setting up initial scenario...")
-        self._setup_scenario(self._config.get('scenario', 'follow_route'))
+        self._setup_scenario(self._config.get("scenario", "follow_route"))
         self.logger.debug("[SimulationApplication] Setup completed successfully")
 
-    def _setup_scenario(self, scenario_type: str, scenario_config: Optional[Dict] = None) -> None:
+    def _setup_scenario(
+        self, scenario_type: str, scenario_config: Optional[Dict] = None
+    ) -> None:
         """Setup a new scenario"""
         try:
             self.logger.debug(f"Setting up scenario: {scenario_type}")
@@ -160,9 +180,11 @@ class SimulationApplication:
 
             # Get scenario configuration from main config
             if scenario_config is None:
-                scenario_config = self._config.scenario_config.__dict__.get(scenario_type, {})
+                scenario_config = self._config.scenario_config.__dict__.get(
+                    scenario_type, {}
+                )
                 # Convert dataclass to dictionary if needed
-                if hasattr(scenario_config, '__dict__'):
+                if hasattr(scenario_config, "__dict__"):
                     scenario_config = scenario_config.__dict__
 
             # Create scenario using registry
@@ -173,7 +195,7 @@ class SimulationApplication:
                 world_manager=self.world_manager,
                 vehicle_controller=self.vehicle_controller,
                 logger=self.logger,
-                config=scenario_config
+                config=scenario_config,
             )
 
             if not new_scenario:
@@ -194,7 +216,7 @@ class SimulationApplication:
             self.logger.warning(f"Error setting up scenario: {str(e)}")
             # Ensure current_scenario is None if setup fails
             self.current_scenario = None
-            #raise RuntimeError(f"Failed to setup scenario: {str(e)}")
+            # raise RuntimeError(f"Failed to setup scenario: {str(e)}")
 
     def run(self) -> None:
         """Run the simulation loop"""
@@ -205,10 +227,10 @@ class SimulationApplication:
         db = SessionLocal()
         new_scenario = Scenario(
             session_id=self.session_id,
-            scenario_name=getattr(self.current_scenario, 'name', 'Unknown'),
+            scenario_name=getattr(self.current_scenario, "name", "Unknown"),
             start_time=datetime.utcnow(),
             status="running",
-            scenario_metadata={}
+            scenario_metadata={},
         )
         db.add(new_scenario)
         db.commit()
@@ -244,42 +266,48 @@ class SimulationApplication:
                     continue
 
                 vehicle_state = {
-                    'location': vehicle.get_location(),
-                    'velocity': vehicle.get_velocity(),
-                    'acceleration': vehicle.get_acceleration(),
-                    'transform': vehicle.get_transform(),
-                    'sensor_data': sensor_data
+                    "location": vehicle.get_location(),
+                    "velocity": vehicle.get_velocity(),
+                    "acceleration": vehicle.get_acceleration(),
+                    "transform": vehicle.get_transform(),
+                    "sensor_data": sensor_data,
                 }
 
                 # --- DB: Write vehicle data ---
                 db = SessionLocal()
-                db.add(VehicleData(
-                    scenario_id=scenario_id,
-                    session_id=self.session_id,
-                    timestamp=datetime.utcnow(),
-                    position_x=vehicle_state['location'].x,
-                    position_y=vehicle_state['location'].y,
-                    position_z=vehicle_state['location'].z,
-                    velocity=vehicle_state['velocity'].length(),
-                    acceleration=vehicle_state['acceleration'].length(),
-                    steering_angle=vehicle_state['transform'].rotation.yaw,
-                    throttle=getattr(vehicle, 'throttle', 0.0),
-                    brake=getattr(vehicle, 'brake', 0.0)
-                ))
+                db.add(
+                    VehicleData(
+                        scenario_id=scenario_id,
+                        session_id=self.session_id,
+                        timestamp=datetime.utcnow(),
+                        position_x=vehicle_state["location"].x,
+                        position_y=vehicle_state["location"].y,
+                        position_z=vehicle_state["location"].z,
+                        velocity=vehicle_state["velocity"].length(),
+                        acceleration=vehicle_state["acceleration"].length(),
+                        steering_angle=vehicle_state["transform"].rotation.yaw,
+                        throttle=getattr(vehicle, "throttle", 0.0),
+                        brake=getattr(vehicle, "brake", 0.0),
+                    )
+                )
                 db.commit()
                 db.close()
                 # --- End DB vehicle data ---
 
                 # --- DB: Write sensor data ---
                 db = SessionLocal()
-                for sensor_type, sdata in (sensor_data.items() if isinstance(sensor_data, dict) else []):
-                    db.add(SensorData(
-                        scenario_id=scenario_id,
-                        session_id=self.session_id,
-                        timestamp=datetime.utcnow(),
-                        sensor_type=sensor_type,
-                        data=sdata
-                    ))
+                for sensor_type, sdata in (
+                    sensor_data.items() if isinstance(sensor_data, dict) else []
+                ):
+                    db.add(
+                        SensorData(
+                            scenario_id=scenario_id,
+                            session_id=self.session_id,
+                            timestamp=datetime.utcnow(),
+                            sensor_type=sensor_type,
+                            data=sdata,
+                        )
+                    )
                 db.commit()
                 db.close()
                 # --- End DB sensor data ---
@@ -307,27 +335,31 @@ class SimulationApplication:
                     # Render display
                     if self.display_manager:
                         display_state = VehicleState(
-                            speed=vehicle_state['velocity'].length(),
+                            speed=vehicle_state["velocity"].length(),
                             position=(
-                                vehicle_state['location'].x,
-                                vehicle_state['location'].y,
-                                vehicle_state['location'].z
+                                vehicle_state["location"].x,
+                                vehicle_state["location"].y,
+                                vehicle_state["location"].z,
                             ),
-                            heading=vehicle_state['transform'].rotation.yaw,
+                            heading=vehicle_state["transform"].rotation.yaw,
                             distance_to_target=0.0,  # This should be updated by the scenario
                             controls={
-                                'throttle': getattr(vehicle, 'throttle', 0.0),
-                                'brake': getattr(vehicle, 'brake', 0.0),
-                                'steer': getattr(vehicle, 'steer', 0.0),
-                                'gear': getattr(vehicle, 'gear', 1),
-                                'hand_brake': getattr(vehicle, 'hand_brake', False),
-                                'reverse': getattr(vehicle, 'reverse', False),
-                                'manual_gear_shift': getattr(vehicle, 'manual_gear_shift', False)
+                                "throttle": getattr(vehicle, "throttle", 0.0),
+                                "brake": getattr(vehicle, "brake", 0.0),
+                                "steer": getattr(vehicle, "steer", 0.0),
+                                "gear": getattr(vehicle, "gear", 1),
+                                "hand_brake": getattr(vehicle, "hand_brake", False),
+                                "reverse": getattr(vehicle, "reverse", False),
+                                "manual_gear_shift": getattr(
+                                    vehicle, "manual_gear_shift", False
+                                ),
                             },
-                            speed_kmh=vehicle_state['velocity'].length() * 3.6,
-                            scenario_name=self.current_scenario.name
+                            speed_kmh=vehicle_state["velocity"].length() * 3.6,
+                            scenario_name=self.current_scenario.name,
                         )
-                        target_pos = getattr(self.current_scenario, 'target_position', None)
+                        target_pos = getattr(
+                            self.current_scenario, "target_position", None
+                        )
                         if target_pos is None:
                             target_pos = carla.Location()
                         if not self.display_manager.render(display_state, target_pos):
@@ -338,7 +370,7 @@ class SimulationApplication:
 
                 try:
                     # Log metrics periodically
-                    if self.metrics.metrics['frame_count'] % 30 == 0:
+                    if self.metrics.metrics["frame_count"] % 30 == 0:
                         self.metrics.log_metrics()
                 except Exception as e:
                     self.logger.error("Exception in logging", exc_info=e)
@@ -366,17 +398,21 @@ class SimulationApplication:
         if self.state.is_running:
             self.state.stop()
             self.logger.info("Simulation stopped")
-            
+
             # Add consistent logging format for scenario stop
             if self.current_scenario:
-                scenario_name = getattr(self.current_scenario, 'name', None)
+                scenario_name = getattr(self.current_scenario, "name", None)
                 scenario_completed = self.current_scenario.is_completed()
                 scenario_success = self.current_scenario.is_successful()
-                
+
                 self.logger.info("================================")
                 self.logger.info(f"Stopping scenario: {scenario_name}")
-                self.logger.info(f"Status: {'Completed' if scenario_completed else 'Incomplete'}")
-                self.logger.info(f"Result: {'Success' if scenario_success else 'Failed'}")
+                self.logger.info(
+                    f"Status: {'Completed' if scenario_completed else 'Incomplete'}"
+                )
+                self.logger.info(
+                    f"Result: {'Success' if scenario_success else 'Failed'}"
+                )
                 self.logger.info("================================")
 
     def cleanup(self) -> None:
@@ -398,10 +434,10 @@ class SimulationApplication:
             scenario_success = False
 
             # Safely check and cleanup current scenario
-            if hasattr(self, 'current_scenario') and self.current_scenario is not None:
+            if hasattr(self, "current_scenario") and self.current_scenario is not None:
                 try:
                     # Store scenario info before cleanup
-                    scenario_name = getattr(self.current_scenario, 'name', None)
+                    scenario_name = getattr(self.current_scenario, "name", None)
                     scenario_completed = self.current_scenario.is_completed()
                     scenario_success = self.current_scenario.is_successful()
 
@@ -459,9 +495,11 @@ class SimulationApplication:
                     self.logger.error(f"Error cleaning up vehicle controller: {str(e)}")
 
             # Check if we're in web mode
-            is_web_mode = getattr(self._config, 'web_mode', False)
+            is_web_mode = getattr(self._config, "web_mode", False)
             if is_web_mode:
-                self.logger.debug("Web mode: Maintaining CARLA connection for next scenario")
+                self.logger.debug(
+                    "Web mode: Maintaining CARLA connection for next scenario"
+                )
             else:
                 self.logger.debug("CLI mode: Disconnecting from CARLA server")
                 self.connection.disconnect()
@@ -474,6 +512,7 @@ class SimulationApplication:
 
             # Force garbage collection
             import gc
+
             gc.collect()
 
             # Set cleanup flag
@@ -529,4 +568,4 @@ class SimulationApplication:
     @property
     def config(self):
         """Get the main configuration"""
-        return self._config 
+        return self._config

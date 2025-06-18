@@ -6,7 +6,12 @@ import yaml
 import os
 import time
 from dataclasses import dataclass
-from src.core.interfaces import IWorldManager, IVehicleController, ISensorManager, ILogger
+from src.core.interfaces import (
+    IWorldManager,
+    IVehicleController,
+    ISensorManager,
+    ILogger,
+)
 from src.utils.config import (
     CameraConfig,
     CollisionConfig,
@@ -21,22 +26,26 @@ from src.utils.config import (
     ScenarioConfig,
     VehicleConfig,
     Config,
-    KeyboardConfig
+    KeyboardConfig,
 )
 from src.utils.logging import SimulationData
 from datetime import datetime
 from pathlib import Path
 
+
 @dataclass
 class ServerConfig:
     """Server configuration parameters"""
+
     host: str
     port: int
     timeout: float
     connection: Dict[str, Any]
 
-class ConnectionManager():
+
+class ConnectionManager:
     """Handles connection to CARLA server"""
+
     def __init__(self, server_config: ServerConfig, logger: ILogger):
         self.logger = logger
         self.config = server_config
@@ -48,7 +57,9 @@ class ConnectionManager():
         delay = 30
         for attempt in range(1, max_retries + 1):
             try:
-                self.logger.info(f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})...")
+                self.logger.info(
+                    f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})..."
+                )
                 self.client = carla.Client(self.config.host, self.config.port)
                 self.client.set_timeout(self.config.timeout)
 
@@ -59,7 +70,9 @@ class ConnectionManager():
                 self.logger.info("Successfully connected to CARLA server")
                 return True
             except Exception as e:
-                self.logger.warning(f"Failed to connect to CARLA server (attempt {attempt})")
+                self.logger.warning(
+                    f"Failed to connect to CARLA server (attempt {attempt})"
+                )
                 self.logger.warning(
                     "Make sure the CARLA server is running and accessible"
                 )
@@ -77,8 +90,10 @@ class ConnectionManager():
             self.logger.info("Disconnecting from CARLA server...")
             self.client = None
 
+
 class SimulationState:
     """Manages simulation state"""
+
     def __init__(self):
         self.is_running = False
         self.is_paused = False
@@ -109,20 +124,22 @@ class SimulationState:
         if self.is_running and not self.is_paused:
             self.elapsed_time = time.time() - self.start_time
 
+
 class SimulationMetrics:
     """Tracks simulation metrics"""
+
     def __init__(self, logger: ILogger):
         self.logger = logger
         self.metrics = {
-            'fps': 0.0,
-            'frame_count': 0,
-            'last_frame_time': time.time(),  # Initialize with current time
-            'vehicle_speed': 0.0,
-            'distance_traveled': 0.0,
-            'collisions': 0,
-            'min_frame_time': 0.001,  # Minimum frame time to avoid division by zero
-            'start_time': time.time(),  # Add start time for elapsed time calculation
-            'elapsed_time': 0.0
+            "fps": 0.0,
+            "frame_count": 0,
+            "last_frame_time": time.time(),  # Initialize with current time
+            "vehicle_speed": 0.0,
+            "distance_traveled": 0.0,
+            "collisions": 0,
+            "min_frame_time": 0.001,  # Minimum frame time to avoid division by zero
+            "start_time": time.time(),  # Add start time for elapsed time calculation
+            "elapsed_time": 0.0,
         }
         self.scenario = None
         self.start_time = datetime.now()
@@ -132,89 +149,83 @@ class SimulationMetrics:
     def update(self, vehicle_state: Dict[str, Any]) -> None:
         """Update metrics with current state"""
         current_time = time.time()
-        frame_time = current_time - self.metrics['last_frame_time']
-        
+        frame_time = current_time - self.metrics["last_frame_time"]
+
         # Update FPS with minimum frame time to avoid division by zero
         if frame_time > 0:
-            self.metrics['fps'] = 1.0 / max(frame_time, self.metrics['min_frame_time'])
-        self.metrics['last_frame_time'] = current_time
-        self.metrics['frame_count'] += 1
-        
+            self.metrics["fps"] = 1.0 / max(frame_time, self.metrics["min_frame_time"])
+        self.metrics["last_frame_time"] = current_time
+        self.metrics["frame_count"] += 1
+
         # Update elapsed time
-        self.metrics['elapsed_time'] = current_time - self.metrics['start_time']
+        self.metrics["elapsed_time"] = current_time - self.metrics["start_time"]
 
         # Update vehicle metrics
-        if 'velocity' in vehicle_state:
-            speed = vehicle_state['velocity'].length() * 3.6  # Convert to km/h
-            self.metrics['vehicle_speed'] = speed
+        if "velocity" in vehicle_state:
+            speed = vehicle_state["velocity"].length() * 3.6  # Convert to km/h
+            self.metrics["vehicle_speed"] = speed
 
     def log_metrics(self) -> None:
         """Log current metrics to file"""
         if not self.logger:
             return
-            
+
         # Get vehicle state from the current frame
         vehicle_state = {
-            'heading': 0.0,
-            'acceleration': 0.0,
-            'angular_velocity': 0.0,
-            'collision_intensity': 0.0,
-            'rotation': (0.0, 0.0, 0.0)
+            "heading": 0.0,
+            "acceleration": 0.0,
+            "angular_velocity": 0.0,
+            "collision_intensity": 0.0,
+            "rotation": (0.0, 0.0, 0.0),
         }
-        
+
         # Get controls from the current frame
         controls = {
-            'throttle': 0.0,
-            'brake': 0.0,
-            'steer': 0.0,
-            'gear': 1,
-            'hand_brake': False,
-            'reverse': False,
-            'manual_gear_shift': False
+            "throttle": 0.0,
+            "brake": 0.0,
+            "steer": 0.0,
+            "gear": 1,
+            "hand_brake": False,
+            "reverse": False,
+            "manual_gear_shift": False,
         }
-        
+
         # Get target info from the current frame
-        target_info = {
-            'distance': 0.0,
-            'heading': 0.0,
-            'heading_diff': 0.0
-        }
-        
+        target_info = {"distance": 0.0, "heading": 0.0, "heading_diff": 0.0}
+
         # Create simulation data object with actual metrics
         data = SimulationData(
-            elapsed_time=self.metrics['elapsed_time'],
-            speed=self.metrics['vehicle_speed'],
+            elapsed_time=self.metrics["elapsed_time"],
+            speed=self.metrics["vehicle_speed"],
             position=(0.0, 0.0, 0.0),  # Default position
             controls=controls,
             target_info=target_info,
             vehicle_state=vehicle_state,
-            weather={
-                'cloudiness': 0.0,
-                'precipitation': 0.0
-            },
+            weather={"cloudiness": 0.0, "precipitation": 0.0},
             traffic_count=0,
-            fps=self.metrics['fps'],
-            event='metrics_update',
-            event_details=''
+            fps=self.metrics["fps"],
+            event="metrics_update",
+            event_details="",
         )
-        
+
         # Log to file and flush immediately
         self.logger.log_data(data)
-        if hasattr(self.logger, 'csv_file') and self.logger.csv_file:
+        if hasattr(self.logger, "csv_file") and self.logger.csv_file:
             self.logger.csv_file.flush()
 
     def generate_html_report(self, scenario_results, start_time, end_time):
         """Generate a pytest-html style HTML report for multiple scenarios in the reports directory at the project root."""
         import platform
+
         total = len(scenario_results)
-        passed = sum(1 for s in scenario_results if s['result'].lower() == 'passed')
-        failed = sum(1 for s in scenario_results if s['result'].lower() == 'failed')
-        skipped = sum(1 for s in scenario_results if s['result'].lower() == 'skipped')
-        duration = str(end_time - start_time).split('.')[0]
-        now_str = end_time.strftime('%d-%b-%Y at %H:%M:%S')
+        passed = sum(1 for s in scenario_results if s["result"].lower() == "passed")
+        failed = sum(1 for s in scenario_results if s["result"].lower() == "failed")
+        skipped = sum(1 for s in scenario_results if s["result"].lower() == "skipped")
+        duration = str(end_time - start_time).split(".")[0]
+        now_str = end_time.strftime("%d-%b-%Y at %H:%M:%S")
         python_version = platform.python_version()
         platform_str = platform.platform()
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html lang='en'>
@@ -279,14 +290,16 @@ class SimulationMetrics:
         """
         for s in scenario_results:
             # Use result and status fields directly
-            result = s.get('result', 'Unknown').capitalize()
-            status = s.get('status', 'Unknown').capitalize()
+            result = s.get("result", "Unknown").capitalize()
+            status = s.get("status", "Unknown").capitalize()
             # Color class for result
             result_class = result.lower()
             # Color class for status
             status_class = status.lower()
             html_content += f"<tr>"
-            html_content += f"<td class='{result_class}' style='font-weight: bold;'>{result}</td>"
+            html_content += (
+                f"<td class='{result_class}' style='font-weight: bold;'>{result}</td>"
+            )
             html_content += f"<td class='{status_class}'>{status}</td>"
             html_content += f"<td>{s['name']}</td>"
             html_content += f"<td class='duration'>{s['duration']}</td>"
@@ -297,21 +310,25 @@ class SimulationMetrics:
         </html>
         """
         # Save to 'reports' directory at project root
-        reports_dir = Path(__file__).parent.parent.parent / 'reports'
+        reports_dir = Path(__file__).parent.parent.parent / "reports"
         reports_dir.mkdir(exist_ok=True)
-        report_path = reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
-        with open(report_path, 'w', encoding='utf-8') as f:
+        report_path = (
+            reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
+        )
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
         if self.logger:
             self.logger.info(f"HTML report generated: {report_path}")
-            #self.logger.info(f"Report directory: {reports_dir.absolute()}")
+            # self.logger.info(f"Report directory: {reports_dir.absolute()}")
+
 
 class SimulationConfig:
     """Manages simulation configuration"""
+
     def __init__(self, config_path: str, scenario: str = None):
         self.config = self._load_config(config_path, scenario)
         self.validate_config()
-        
+
         # Create the main config object
         self._main_config = Config(
             server=self._create_server_config(),
@@ -322,9 +339,9 @@ class SimulationConfig:
             sensors=self._create_sensor_config(),
             controller=self._create_controller_config(),
             vehicle=self._create_vehicle_config(),
-            scenarios=self._create_scenario_config()
+            scenarios=self._create_scenario_config(),
         )
-        
+
         # Expose config components for backward compatibility
         self.server_config = self._main_config.server
         self.world_config = self._main_config.world
@@ -340,13 +357,16 @@ class SimulationConfig:
         """Load configuration from YAML file."""
         try:
             if not os.path.isabs(config_path):
-                config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), config_path)
-            with open(config_path, 'r') as f:
+                config_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    config_path,
+                )
+            with open(config_path, "r") as f:
                 config = yaml.safe_load(f) or {}
 
             # Use scenario from argument
             if scenario:
-                config['scenario'] = scenario
+                config["scenario"] = scenario
 
             return config
         except Exception as e:
@@ -354,184 +374,180 @@ class SimulationConfig:
 
     def _create_server_config(self) -> ServerConfig:
         """Create ServerConfig object from configuration"""
-        server = self.config.get('server')
+        server = self.config.get("server")
         if not server:
             raise ValueError("Missing required 'server' configuration section")
-            
+
         return ServerConfig(
-            host=server['host'],
-            port=server['port'],
-            timeout=server['timeout'],
-            connection=server.get('connection', {})
+            host=server["host"],
+            port=server["port"],
+            timeout=server["timeout"],
+            connection=server.get("connection", {}),
         )
 
     def _create_world_config(self) -> WorldConfig:
         """Create WorldConfig object from configuration"""
-        world = self.config.get('world')
+        world = self.config.get("world")
         if not world:
             raise ValueError("Missing required 'world' configuration section")
-            
+
         return WorldConfig(
-            map=world['map'],
-            weather=world.get('weather', {}),
-            physics=world.get('physics', {}),
-            traffic=world.get('traffic', {}),
-            fixed_delta_seconds=world['fixed_delta_seconds'],
-            target_distance=world['target_distance'],
-            num_vehicles=world['num_vehicles'],
-            enable_collision=world['enable_collision'],
-            synchronous_mode=world['synchronous_mode']
+            map=world["map"],
+            weather=world.get("weather", {}),
+            physics=world.get("physics", {}),
+            traffic=world.get("traffic", {}),
+            fixed_delta_seconds=world["fixed_delta_seconds"],
+            target_distance=world["target_distance"],
+            num_vehicles=world["num_vehicles"],
+            enable_collision=world["enable_collision"],
+            synchronous_mode=world["synchronous_mode"],
         )
 
     def _create_simulation_config(self) -> SimConfig:
         """Create SimulationConfig object from configuration"""
-        simulation = self.config.get('simulation')
+        simulation = self.config.get("simulation")
         if not simulation:
             raise ValueError("Missing required 'simulation' configuration section")
-            
+
         return SimConfig(
-            max_speed=simulation['max_speed'],
-            simulation_time=simulation['simulation_time'],
-            update_rate=simulation['update_rate'],
-            speed_change_threshold=simulation['speed_change_threshold'],
-            position_change_threshold=simulation['position_change_threshold'],
-            heading_change_threshold=simulation['heading_change_threshold'],
-            target_tolerance=simulation['target_tolerance'],
-            max_collision_force=simulation['max_collision_force']
+            max_speed=simulation["max_speed"],
+            simulation_time=simulation["simulation_time"],
+            update_rate=simulation["update_rate"],
+            speed_change_threshold=simulation["speed_change_threshold"],
+            position_change_threshold=simulation["position_change_threshold"],
+            heading_change_threshold=simulation["heading_change_threshold"],
+            target_tolerance=simulation["target_tolerance"],
+            max_collision_force=simulation["max_collision_force"],
         )
 
     def _create_logging_config(self) -> LoggingConfig:
         """Create LoggingConfig object from configuration"""
-        logging = self.config.get('logging')
+        logging = self.config.get("logging")
         if not logging:
             raise ValueError("Missing required 'logging' configuration section")
-            
+
         return LoggingConfig(
-            simulation_file=logging['simulation_file'],
-            operations_file=logging['operations_file'],
-            log_level=logging['log_level'],
-            format=logging.get('format', {}),
-            enabled=logging['enabled'],
-            directory=logging['directory']
+            simulation_file=logging["simulation_file"],
+            operations_file=logging["operations_file"],
+            log_level=logging["log_level"],
+            format=logging.get("format", {}),
+            enabled=logging["enabled"],
+            directory=logging["directory"],
         )
 
     def _create_display_config(self) -> DisplayConfig:
         """Create DisplayConfig object from configuration"""
-        display = self.config.get('display')
+        display = self.config.get("display")
         if not display:
             raise ValueError("Missing required 'display' configuration section")
-            
+
         return DisplayConfig(
-            width=display['width'],
-            height=display['height'],
-            fps=display['fps'],
-            hud=display.get('hud', {}),
-            minimap=display.get('minimap', {}),
-            camera=display.get('camera', {}),
-            hud_enabled=display['hud_enabled'],
-            minimap_enabled=display['minimap_enabled']
+            width=display["width"],
+            height=display["height"],
+            fps=display["fps"],
+            hud=display.get("hud", {}),
+            minimap=display.get("minimap", {}),
+            camera=display.get("camera", {}),
+            hud_enabled=display["hud_enabled"],
+            minimap_enabled=display["minimap_enabled"],
         )
 
     def _create_sensor_config(self) -> SensorConfig:
         """Create SensorConfig object from configuration"""
-        sensors = self.config.get('sensors')
+        sensors = self.config.get("sensors")
         if not sensors:
             raise ValueError("Missing required 'sensors' configuration section")
-            
+
         # Create individual sensor configs
         camera_config = CameraConfig(
-            enabled=sensors.get('camera', {}).get('enabled', True),
-            width=sensors.get('camera', {}).get('width', 1280),
-            height=sensors.get('camera', {}).get('height', 720),
-            fov=sensors.get('camera', {}).get('fov', 90),
-            x=sensors.get('camera', {}).get('x', -2.5),
-            y=sensors.get('camera', {}).get('y', 0.0),
-            z=sensors.get('camera', {}).get('z', 2.0)
+            enabled=sensors.get("camera", {}).get("enabled", True),
+            width=sensors.get("camera", {}).get("width", 1280),
+            height=sensors.get("camera", {}).get("height", 720),
+            fov=sensors.get("camera", {}).get("fov", 90),
+            x=sensors.get("camera", {}).get("x", -2.5),
+            y=sensors.get("camera", {}).get("y", 0.0),
+            z=sensors.get("camera", {}).get("z", 2.0),
         )
-        
+
         collision_config = CollisionConfig(
-            enabled=sensors.get('collision', {}).get('enabled', True)
+            enabled=sensors.get("collision", {}).get("enabled", True)
         )
-        
-        gnss_config = GNSSConfig(
-            enabled=sensors.get('gnss', {}).get('enabled', True)
-        )
-        
+
+        gnss_config = GNSSConfig(enabled=sensors.get("gnss", {}).get("enabled", True))
+
         return SensorConfig(
-            camera=camera_config,
-            collision=collision_config,
-            gnss=gnss_config
+            camera=camera_config, collision=collision_config, gnss=gnss_config
         )
 
     def _create_controller_config(self) -> ControllerConfig:
         """Create ControllerConfig object from configuration"""
-        controller = self.config.get('controller')
+        controller = self.config.get("controller")
         if not controller:
             raise ValueError("Missing required 'controller' configuration section")
-            
-        keyboard = controller.get('keyboard')
+
+        keyboard = controller.get("keyboard")
         if not keyboard:
             raise ValueError("Missing required 'keyboard' configuration section")
-        
+
         # Create keyboard config using values from config file
         keyboard_config = KeyboardConfig(
-            forward=keyboard['forward'],
-            backward=keyboard['backward'],
-            left=keyboard['left'],
-            right=keyboard['right'],
-            brake=keyboard['brake'],
-            hand_brake=keyboard['hand_brake'],
-            reverse=keyboard['reverse'],
-            quit=keyboard['quit']
+            forward=keyboard["forward"],
+            backward=keyboard["backward"],
+            left=keyboard["left"],
+            right=keyboard["right"],
+            brake=keyboard["brake"],
+            hand_brake=keyboard["hand_brake"],
+            reverse=keyboard["reverse"],
+            quit=keyboard["quit"],
         )
-        
+
         return ControllerConfig(
-            type=controller['type'],
-            steer_speed=controller['steer_speed'],
-            throttle_speed=controller['throttle_speed'],
-            brake_speed=controller['brake_speed'],
-            keyboard=keyboard_config
+            type=controller["type"],
+            steer_speed=controller["steer_speed"],
+            throttle_speed=controller["throttle_speed"],
+            brake_speed=controller["brake_speed"],
+            keyboard=keyboard_config,
         )
 
     def _create_scenario_config(self) -> ScenarioConfig:
         """Create ScenarioConfig object from configuration"""
-        scenarios = self.config.get('scenarios')
+        scenarios = self.config.get("scenarios")
         if not scenarios:
             raise ValueError("Missing required 'scenarios' configuration section")
-            
+
         return ScenarioConfig(
-            follow_route=scenarios.get('follow_route', {}),
-            avoid_obstacle=scenarios.get('avoid_obstacle', {}),
-            emergency_brake=scenarios.get('emergency_brake', {}),
-            vehicle_cutting=scenarios.get('vehicle_cutting', {})
+            follow_route=scenarios.get("follow_route", {}),
+            avoid_obstacle=scenarios.get("avoid_obstacle", {}),
+            emergency_brake=scenarios.get("emergency_brake", {}),
+            vehicle_cutting=scenarios.get("vehicle_cutting", {}),
         )
 
     def _create_vehicle_config(self) -> VehicleConfig:
         """Create VehicleConfig object from configuration"""
-        vehicle = self.config.get('vehicle')
+        vehicle = self.config.get("vehicle")
         if not vehicle:
             raise ValueError("Missing required 'vehicle' configuration section")
-            
+
         return VehicleConfig(
-            model=vehicle['model'],
-            mass=vehicle['mass'],
-            drag_coefficient=vehicle['drag_coefficient'],
-            max_rpm=vehicle['max_rpm'],
-            moi=vehicle['moi'],
-            center_of_mass=vehicle['center_of_mass']
+            model=vehicle["model"],
+            mass=vehicle["mass"],
+            drag_coefficient=vehicle["drag_coefficient"],
+            max_rpm=vehicle["max_rpm"],
+            moi=vehicle["moi"],
+            center_of_mass=vehicle["center_of_mass"],
         )
 
     def validate_config(self) -> None:
         """Validate configuration values"""
-        if 'server' not in self.config:
+        if "server" not in self.config:
             raise ValueError("Missing required 'server' configuration section")
-        
-        server = self.config['server']
-        required_keys = ['host', 'port', 'timeout']
+
+        server = self.config["server"]
+        required_keys = ["host", "port", "timeout"]
         for key in required_keys:
             if key not in server:
                 raise ValueError(f"Missing required server config key: {key}")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value"""
-        return self.config.get(key, default) 
+        return self.config.get(key, default)

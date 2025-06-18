@@ -22,37 +22,39 @@ import uuid  # ensure this is at the top if not already
 
 class Logger:
     """Manages logging configuration and setup"""
-    
-    _instance: Optional['Logger'] = None
-    
+
+    _instance: Optional["Logger"] = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(Logger, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
-            
+
         # Get configuration values with fallbacks
-        self.log_level = getattr(SIMULATION_CONFIG, 'log_level', 'INFO')
-        self.log_dir = get_project_root() / 'logs'
-        self.log_format = getattr(SIMULATION_CONFIG, 'log_format', 
-            '%(asctime)s - %(levelname)s - %(message)s')
-        self.log_date_format = getattr(SIMULATION_CONFIG, 'log_date_format', 
-            '%Y-%m-%d %H:%M:%S')
+        self.log_level = getattr(SIMULATION_CONFIG, "log_level", "INFO")
+        self.log_dir = get_project_root() / "logs"
+        self.log_format = getattr(
+            SIMULATION_CONFIG, "log_format", "%(asctime)s - %(levelname)s - %(message)s"
+        )
+        self.log_date_format = getattr(
+            SIMULATION_CONFIG, "log_date_format", "%Y-%m-%d %H:%M:%S"
+        )
         self.log_to_file = True  # Disable CSV logging
-        self.log_to_console = getattr(SIMULATION_CONFIG, 'log_to_console', True)
-        
+        self.log_to_console = getattr(SIMULATION_CONFIG, "log_to_console", True)
+
         # Initialize CSV logging attributes
         self.csv_file = None
         self.csv_writer = None
         self._row_count = 0
-        
+
         self._setup_logging()
         self._initialized = True
-        
+
     def _setup_logging(self) -> None:
         """Setup logging configuration"""
         try:
@@ -60,15 +62,17 @@ class Logger:
             os.makedirs(self.log_dir, exist_ok=True)
 
             # Generate log filename with current date
-            current_date = datetime.now().strftime('%Y%m%d')
-            log_file = self.log_dir / f'simulation_{current_date}.log'
+            current_date = datetime.now().strftime("%Y%m%d")
+            log_file = self.log_dir / f"simulation_{current_date}.log"
 
             # Configure root logger
             handlers = []
 
             if self.log_to_file:
                 # Use buffered file handler with 8KB buffer
-                file_handler = logging.FileHandler(str(log_file), mode='a', encoding='utf-8')
+                file_handler = logging.FileHandler(
+                    str(log_file), mode="a", encoding="utf-8"
+                )
                 file_handler.setLevel(self.log_level)
                 handlers.append(file_handler)
 
@@ -77,8 +81,7 @@ class Logger:
 
             # Configure logging format
             formatter = logging.Formatter(
-                fmt=self.log_format,
-                datefmt=self.log_date_format
+                fmt=self.log_format, datefmt=self.log_date_format
             )
 
             # Apply formatter to all handlers
@@ -86,10 +89,7 @@ class Logger:
                 handler.setFormatter(formatter)
 
             # Configure root logger
-            logging.basicConfig(
-                level=self.log_level,
-                handlers=handlers
-            )
+            logging.basicConfig(level=self.log_level, handlers=handlers)
 
             # Create logger instance
             self.logger = logging.getLogger(__name__)
@@ -97,11 +97,11 @@ class Logger:
 
             # Setup CSV logging if enabled
             if self.log_to_file:
-                csv_file = log_file.with_suffix('.csv')
+                csv_file = log_file.with_suffix(".csv")
                 # Check if CSV file exists to determine if we need to write header
                 file_exists = os.path.exists(csv_file)
                 # Use buffered I/O with 8KB buffer
-                self.csv_file = open(csv_file, 'a', newline='', buffering=8192)
+                self.csv_file = open(csv_file, "a", newline="", buffering=8192)
                 self.csv_writer = csv.writer(self.csv_file)
                 if not file_exists:
                     self._write_csv_header()
@@ -115,7 +115,7 @@ class Logger:
         """Get a logger instance for the specified name"""
         logger = logging.getLogger(name)
         # Remove the src.utils.logging prefix from the logger name
-        logger.name = name.split('.')[-1]
+        logger.name = name.split(".")[-1]
         return logger
 
     def set_level(self, level: str) -> None:
@@ -133,12 +133,34 @@ class Logger:
             return
 
         header = [
-            'elapsed_time', 'speed', 'position_x', 'position_y', 'position_z',
-            'throttle', 'brake', 'steer', 'target_distance', 'target_heading',
-            'vehicle_heading', 'heading_diff', 'acceleration', 'angular_velocity',
-            'gear', 'hand_brake', 'reverse', 'manual_gear_shift',
-            'collision_intensity', 'cloudiness', 'precipitation', 'traffic_count',
-            'fps', 'event', 'event_details', 'rotation_x', 'rotation_y', 'rotation_z'
+            "elapsed_time",
+            "speed",
+            "position_x",
+            "position_y",
+            "position_z",
+            "throttle",
+            "brake",
+            "steer",
+            "target_distance",
+            "target_heading",
+            "vehicle_heading",
+            "heading_diff",
+            "acceleration",
+            "angular_velocity",
+            "gear",
+            "hand_brake",
+            "reverse",
+            "manual_gear_shift",
+            "collision_intensity",
+            "cloudiness",
+            "precipitation",
+            "traffic_count",
+            "fps",
+            "event",
+            "event_details",
+            "rotation_x",
+            "rotation_y",
+            "rotation_z",
         ]
         self.csv_writer.writerow(header)
         self.csv_file.flush()
@@ -147,7 +169,7 @@ class Logger:
         """Set debug mode"""
         global DEBUG_MODE
         DEBUG_MODE = enabled
-        self.logger.setLevel('DEBUG' if enabled else 'INFO')
+        self.logger.setLevel("DEBUG" if enabled else "INFO")
 
     def info(self, message: str):
         """Log info message"""
@@ -190,8 +212,8 @@ class Logger:
             db = SessionLocal()
             metrics_data = SimulationMetricsData.from_simulation_data(
                 data,
-                scenario_id=getattr(self, '_scenario_id', None),
-                session_id=getattr(self, '_session_id', None)
+                scenario_id=getattr(self, "_scenario_id", None),
+                session_id=getattr(self, "_session_id", None),
             )
             db_metrics = SimulationMetrics.from_metrics_data(metrics_data)
             db.add(db_metrics)
@@ -207,7 +229,9 @@ class Logger:
     def close(self) -> None:
         """Close all log files"""
         self.logger.info("")  # Empty line for readability
-        self.logger.info(f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info(
+            f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         if self.csv_file:
             try:
                 # Flush any remaining data
@@ -217,4 +241,4 @@ class Logger:
                 self.csv_file = None
                 self.csv_writer = None
             except Exception as e:
-                self.logger.error(f"Error closing CSV file: {str(e)}") 
+                self.logger.error(f"Error closing CSV file: {str(e)}")

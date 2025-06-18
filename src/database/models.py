@@ -2,7 +2,16 @@
 Database models for the CARLA Driving Simulator.
 """
 
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import (
+    Column,
+    Integer,
+    Float,
+    String,
+    DateTime,
+    ForeignKey,
+    JSON,
+    Boolean,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -12,13 +21,17 @@ from .config import Base
 from .db_manager import DatabaseManager
 from src.models.metrics import SimulationMetricsData
 
+
 def log_error(message: str, error: Exception) -> None:
     """Centralized error logging function"""
     from src.utils.logging import Logger
+
     Logger().error(f"{message}: {error}")
+
 
 class Scenario(Base):
     """Model for storing scenario executions (was Simulation)"""
+
     __tablename__ = "scenarios"
 
     scenario_id = Column(Integer, primary_key=True, index=True)
@@ -35,7 +48,7 @@ class Scenario(Base):
     metrics = relationship("SimulationMetrics", back_populates="scenario")
 
     @classmethod
-    def create(cls, db: DatabaseManager, **kwargs) -> Optional['Scenario']:
+    def create(cls, db: DatabaseManager, **kwargs) -> Optional["Scenario"]:
         """Create a new scenario"""
         try:
             query = """
@@ -50,11 +63,11 @@ class Scenario(Base):
             return None
 
     @classmethod
-    def get_by_id(cls, db: DatabaseManager, scenario_id: int) -> Optional['Scenario']:
+    def get_by_id(cls, db: DatabaseManager, scenario_id: int) -> Optional["Scenario"]:
         """Get scenario by ID"""
         try:
             query = "SELECT * FROM scenarios WHERE scenario_id = %(scenario_id)s"
-            result = db.execute_query(query, {'scenario_id': scenario_id})
+            result = db.execute_query(query, {"scenario_id": scenario_id})
             return result[0] if result else None
         except Exception as e:
             log_error("Error getting scenario", e)
@@ -64,8 +77,8 @@ class Scenario(Base):
         """Update scenario"""
         try:
             update_fields = []
-            params = {'scenario_id': self.scenario_id}
-            
+            params = {"scenario_id": self.scenario_id}
+
             for key, value in kwargs.items():
                 if hasattr(self, key):
                     update_fields.append(f"{key} = %({key})s")
@@ -86,12 +99,16 @@ class Scenario(Base):
             log_error("Error updating scenario", e)
             return False
 
+
 class VehicleData(Base):
     """Model for storing vehicle telemetry data"""
+
     __tablename__ = "vehicle_data"
 
     id = Column(Integer, primary_key=True, index=True)
-    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE"))
+    scenario_id = Column(
+        Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE")
+    )
     session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     position_x = Column(Float)
@@ -106,12 +123,16 @@ class VehicleData(Base):
     # Relationship
     scenario = relationship("Scenario", back_populates="vehicle_data")
 
+
 class SensorData(Base):
     """Model for storing sensor data"""
+
     __tablename__ = "sensor_data"
 
     id = Column(Integer, primary_key=True, index=True)
-    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE"))
+    scenario_id = Column(
+        Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE")
+    )
     session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     sensor_type = Column(String)  # 'camera', 'lidar', 'radar', etc.
@@ -120,12 +141,16 @@ class SensorData(Base):
     # Relationship
     scenario = relationship("Scenario", back_populates="sensor_data")
 
+
 class SimulationMetrics(Base):
     """Model for storing all metrics from simulation CSV logs"""
+
     __tablename__ = "simulation_metrics"
 
     id = Column(Integer, primary_key=True, index=True)
-    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE"))
+    scenario_id = Column(
+        Integer, ForeignKey("scenarios.scenario_id", ondelete="CASCADE")
+    )
     session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     elapsed_time = Column(Float)
@@ -161,7 +186,7 @@ class SimulationMetrics(Base):
     scenario = relationship("Scenario", back_populates="metrics")
 
     @classmethod
-    def from_metrics_data(cls, data: SimulationMetricsData) -> 'SimulationMetrics':
+    def from_metrics_data(cls, data: SimulationMetricsData) -> "SimulationMetrics":
         """Create a database model instance from metrics data"""
         return cls(
             scenario_id=data.scenario_id,
@@ -194,5 +219,5 @@ class SimulationMetrics(Base):
             event_details=data.event_details,
             rotation_x=data.rotation_x,
             rotation_y=data.rotation_y,
-            rotation_z=data.rotation_z
-        ) 
+            rotation_z=data.rotation_z,
+        )

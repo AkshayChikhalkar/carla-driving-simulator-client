@@ -7,15 +7,18 @@ import pytest
 from src.utils.config import ConfigLoader, SimulationConfig
 from src.utils.logging import Logger, SimulationData
 
+
 @pytest.fixture
 def config_loader():
     """Fixture providing a ConfigLoader instance."""
     return ConfigLoader("config/simulation_config.yaml")
 
+
 @pytest.fixture
 def simulation_logger():
     """Fixture providing a Logger instance."""
     return Logger("test_simulation.csv", "test_operations.log")
+
 
 def test_config_loader_initialization(config_loader):
     """Test ConfigLoader initialization."""
@@ -23,18 +26,21 @@ def test_config_loader_initialization(config_loader):
     assert config_loader.config is None
     assert config_loader.simulation_config is None
 
+
 def test_config_loading(config_loader):
     """Test configuration loading from YAML file."""
     config = config_loader.load_config()
     assert isinstance(config, dict)
-    assert 'target' in config
-    assert 'vehicle' in config
-    assert 'simulation' in config
+    assert "target" in config
+    assert "vehicle" in config
+    assert "simulation" in config
+
 
 def test_config_validation(config_loader):
     """Test configuration validation."""
     config_loader.load_config()
     assert config_loader.validate_config() is True
+
 
 def test_simulation_config_creation(config_loader):
     """Test creation of SimulationConfig object."""
@@ -43,12 +49,14 @@ def test_simulation_config_creation(config_loader):
     assert sim_config.target_distance == 500.0
     assert sim_config.vehicle_model == "vehicle.dodge.charger"
 
+
 def test_simulation_logger_initialization(simulation_logger):
     """Test Logger initialization."""
     assert simulation_logger.simulation_log == "test_simulation.csv"
     assert simulation_logger.operations_log == "test_operations.log"
     assert simulation_logger.simulation_file is not None
     assert simulation_logger.operations_file is not None
+
 
 def test_simulation_data_logging(simulation_logger):
     """Test logging of simulation data."""
@@ -80,34 +88,37 @@ def test_simulation_data_logging(simulation_logger):
         event_details="",
         rotation_pitch=0.0,
         rotation_yaw=40.0,
-        rotation_roll=0.0
+        rotation_roll=0.0,
     )
-    
+
     simulation_logger.log_simulation_data(data)
-    
+
     # Verify file was created and contains data
     assert os.path.exists("test_simulation.csv")
-    with open("test_simulation.csv", 'r') as f:
+    with open("test_simulation.csv", "r") as f:
         content = f.read()
         assert "Time_Elapsed[s]" in content
         assert "1.00" in content  # time_elapsed
         assert "50.00" in content  # speed
 
+
 def test_operation_logging(simulation_logger):
     """Test logging of operational messages."""
     test_message = "Test operation message"
     simulation_logger.log_operation(test_message)
-    
+
     # Verify file was created and contains message
     assert os.path.exists("test_operations.log")
-    with open("test_operations.log", 'r') as f:
+    with open("test_operations.log", "r") as f:
         content = f.read()
         assert "Test operation message" in content
+
 
 def test_logger_cleanup(simulation_logger):
     """Test proper cleanup of logger resources."""
     simulation_logger.close()
     assert simulation_logger.operations_file is None
+
 
 @pytest.fixture(autouse=True)
 def cleanup():
@@ -115,4 +126,4 @@ def cleanup():
     yield
     for file in ["test_simulation.csv", "test_operations.log"]:
         if os.path.exists(file):
-            os.remove(file) 
+            os.remove(file)
