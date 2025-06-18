@@ -67,7 +67,11 @@ jobs:
       - name: Get version
         id: get_version
         run: |
-          VERSION=$(python -c "import re; print(re.search('version=\"([^\"]+)\"', open('setup.py').read()).group(1))")
+          if [ -f "VERSION" ]; then
+            VERSION=$(cat VERSION)
+          else
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build Python package
@@ -100,7 +104,11 @@ jobs:
       - name: Get version
         id: get_version
         run: |
-          VERSION=$(python -c "import re; print(re.search('version=\"([^\"]+)\"', open('setup.py').read()).group(1))")
+          if [ -f "VERSION" ]; then
+            VERSION=$(cat VERSION)
+          else
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
@@ -175,7 +183,11 @@ jobs:
       - name: Get version
         id: get_version
         run: |
-          VERSION=$(python -c "import re; print(re.search('version=\"([^\"]+)\"', open('setup.py').read()).group(1))")
+          if [ -f "VERSION" ]; then
+            VERSION=$(cat VERSION)
+          else
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create Git tag
