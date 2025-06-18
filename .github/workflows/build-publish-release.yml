@@ -29,6 +29,10 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: |
+          requirements.txt
+          web/backend/requirements.txt
     
     - name: Install Python dependencies
       run: |
@@ -37,8 +41,8 @@ jobs:
         pip install -r requirements.txt
         # Install backend requirements
         pip install -r web/backend/requirements.txt
-        # Install package in development mode
-        pip install -e .
+      env:
+        PIP_CACHE_DIR: ~/.cache/pip
     
     - name: Run backend tests
       run: |
@@ -79,6 +83,10 @@ jobs:
   #     uses: actions/setup-python@v4
   #     with:
   #       python-version: 3.11
+  #       cache: 'pip'
+  #       cache-dependency-path: |
+  #         requirements.txt
+  #         web/backend/requirements.txt
     
   #   - name: Install dependencies
   #     run: |
@@ -87,10 +95,10 @@ jobs:
   #       pip install -r requirements.txt
   #       # Install backend requirements
   #       pip install -r web/backend/requirements.txt
-  #       # Install linting tools
-  #       pip install black flake8 mypy
   #       # Install package in development mode
   #       pip install -e .
+  #     env:
+  #       PIP_CACHE_DIR: ~/.cache/pip
     
   #   - name: Run Black
   #     run: black . --check
@@ -105,6 +113,8 @@ jobs:
   #     uses: actions/setup-node@v3
   #     with:
   #       node-version: '18'
+  #       cache: 'npm'
+  #       cache-dependency-path: web/frontend/package-lock.json
     
   #   - name: Install frontend dependencies
   #     run: |
@@ -131,6 +141,19 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            web/backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r web/backend/requirements.txt
+          pip install build twine
+        env:
+          PIP_CACHE_DIR: ~/.cache/pip
 
       - name: Get version
         id: get_version
@@ -164,11 +187,6 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache,mode=max
-
-      - name: Set up Python package
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
 
       - name: Build Python package
         run: |
