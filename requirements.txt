@@ -4,10 +4,17 @@
 # Linux
 ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl; platform_system == "Linux"
 
+# Production dependencies
 pygame>=2.0.0
 numpy>=1.19.0
 matplotlib>=3.3.0
 tabulate>=0.8.7
+pyyaml>=5.4.0
+psycopg2-binary>=2.9.9
+SQLAlchemy>=2.0.0
+alembic>=1.13.0
+
+# Development dependencies
 pytest>=6.0.0
 pytest-cov>=2.10.0
 pytest-html>=3.2.0
@@ -15,8 +22,4 @@ black>=21.5b2
 flake8>=3.9.0
 mypy>=0.812
 sphinx>=4.0.0
-sphinx-rtd-theme>=0.5.0
-pyyaml>=5.4.0  # For YAML config file handling
-psycopg2-binary>=2.9.9  # PostgreSQL adapter for Python
-SQLAlchemy>=2.0.0  # SQL toolkit and ORM
-alembic>=1.13.0  # Database migration tool 
+sphinx-rtd-theme>=0.5.0 
