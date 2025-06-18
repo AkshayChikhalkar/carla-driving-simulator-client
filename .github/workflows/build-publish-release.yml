@@ -79,6 +79,13 @@ jobs:
 
       - name: Build Python package
         run: |
+          # Clean any existing builds
+          rm -rf dist/ build/ *.egg-info/
+          # Get version from VERSION file
+          VERSION=$(cat VERSION)
+          # Set version environment variable
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+          # Build package
           python -m build
 
       - name: Upload build artifacts
@@ -98,43 +105,43 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: python-package
           path: dist/
 
-      - name: Get version
-        id: get_version
-        run: |
-          if [ -f "VERSION" ]; then
-            VERSION=$(cat VERSION)
-          else
-            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          images: akshaychikhalkar/carla-driving-simulator-client
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.sha }},enable={{is_default_branch}}
+            type=raw,value=${{ github.ref_name }},enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache,mode=max
-          build-args: |
-            PYTHON_VERSION=3.11
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   pypi-publish:
     needs: build
@@ -152,10 +159,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install twine
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install twine
+          pip install build twine
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -172,10 +179,20 @@ jobs:
           fi
           echo "PyPI token is set"
 
+      - name: List files to upload
+        run: ls -la dist/
+
+      - name: Get version from VERSION file
+        id: get_version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
       - name: Publish to PyPI
         run: |
           echo "Uploading to PyPI..."
-          python -m twine upload --verbose dist/*
+          python -m twine upload --skip-existing --verbose dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
