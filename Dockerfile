@@ -54,7 +54,7 @@ ENV HOST=0.0.0.0
 # Create start script
 RUN echo '#!/bin/bash\n\
 cd /app/web/frontend && npm start & \
-cd /app/web/backend && uvicorn main:app --host 0.0.0.0 --port 8000 & \
+cd /app/web/backend && python main.py & \
 carla-simulator-client\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
