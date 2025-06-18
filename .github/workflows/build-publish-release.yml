@@ -2,9 +2,9 @@ name: Build, Publish, and Release
 
 on:
   push:
-    branches: [ CI-CD ]
+    branches: [ CI/CD ]
   pull_request:
-    branches: [ CI-CD ]
+    branches: [ CI/CD ]
 
 env:
   DOCKER_IMAGE: carla-driving-simulator-client
