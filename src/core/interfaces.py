@@ -69,6 +69,11 @@ class IVehicleController(ABC):
         """Get the controlled vehicle instance"""
         pass
 
+    @abstractmethod
+    def set_target(self, target: carla.Location) -> None:
+        """Set the target location for the vehicle"""
+        pass
+
 
 class ISensorManager(ABC):
     """Interface for managing vehicle sensors"""

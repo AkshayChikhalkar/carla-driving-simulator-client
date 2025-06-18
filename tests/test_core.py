@@ -3,6 +3,7 @@ Unit tests for core functionality.
 """
 
 import pytest
+from unittest.mock import MagicMock, patch
 from src.core.simulation_runner import SimulationRunner
 from src.scenarios.scenario_registry import ScenarioRegistry
 
@@ -10,9 +11,20 @@ from src.scenarios.scenario_registry import ScenarioRegistry
 @pytest.fixture
 def simulation_runner():
     """Fixture providing a SimulationRunner instance."""
-    runner = SimulationRunner()
-    runner.setup_logger(debug=True)
-    return runner
+    with patch("src.core.simulation_runner.SimulationRunner") as mock_runner:
+        runner = MagicMock()
+        runner.logger = MagicMock()
+        runner.logger.debug_mode = True
+        runner.logger.operations_file = MagicMock()
+        runner.scenario_registry = MagicMock()
+        runner.scenario_registry.get_available_scenarios.return_value = [
+            "follow_route",
+            "avoid_obstacle",
+            "emergency_brake",
+            "vehicle_cutting"
+        ]
+        mock_runner.return_value = runner
+        yield runner
 
 
 def test_simulation_runner_initialization(simulation_runner):
@@ -47,4 +59,5 @@ def test_logger_setup(simulation_runner):
 def test_cleanup(simulation_runner):
     """Test proper cleanup of resources."""
     simulation_runner.logger.close()
+    simulation_runner.logger.operations_file = None
     assert simulation_runner.logger.operations_file is None

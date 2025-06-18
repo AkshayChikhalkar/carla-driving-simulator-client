@@ -50,10 +50,13 @@ class WeatherConfig:
 
     cloudiness: float = 0
     precipitation: float = 0
+    precipitation_deposits: float = 0
     sun_altitude_angle: float = 45
     sun_azimuth_angle: float = 0
     wind_intensity: float = 0
     fog_density: float = 0
+    fog_distance: float = 0
+    fog_falloff: float = 0
     wetness: float = 0
 
 
@@ -396,8 +399,8 @@ def save_config(config: Config, config_path: str) -> None:
                 "sun_altitude_angle": config.world.weather.sun_altitude_angle,
                 "fog_density": config.world.weather.fog_density,
                 "fog_distance": config.world.weather.fog_distance,
-                "wetness": config.world.weather.wetness,
                 "fog_falloff": config.world.weather.fog_falloff,
+                "wetness": config.world.weather.wetness,
             },
             "physics": {
                 "gravity": config.world.physics.max_substep_delta_time,
@@ -529,3 +532,44 @@ def save_config(config: Config, config_path: str) -> None:
 
     with open(config_path, "w") as f:
         yaml.dump(config_dict, f, default_flow_style=False)
+
+
+class ConfigLoader:
+    """Configuration loader class for managing simulation configuration."""
+
+    def __init__(self, config_path: str):
+        """Initialize the config loader with the path to the config file."""
+        self.config_path = config_path
+        self.config = None
+        self.simulation_config = None
+
+    def load_config(self) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        with open(self.config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+        return self.config
+
+    def validate_config(self) -> bool:
+        """Validate the loaded configuration."""
+        if not self.config:
+            return False
+        required_sections = ['target', 'vehicle', 'simulation']
+        return all(section in self.config for section in required_sections)
+
+    def get_simulation_config(self) -> SimulationConfig:
+        """Get the simulation configuration object."""
+        if not self.config:
+            self.load_config()
+        
+        sim_config = self.config.get('simulation', {})
+        self.simulation_config = SimulationConfig(
+            max_speed=sim_config.get('max_speed', 100.0),
+            simulation_time=sim_config.get('simulation_time', 60),
+            update_rate=sim_config.get('update_rate', 0.1),
+            speed_change_threshold=sim_config.get('speed_change_threshold', 0.1),
+            position_change_threshold=sim_config.get('position_change_threshold', 0.1),
+            heading_change_threshold=sim_config.get('heading_change_threshold', 0.1),
+            target_tolerance=sim_config.get('target_tolerance', 1.0),
+            max_collision_force=sim_config.get('max_collision_force', 1000.0)
+        )
+        return self.simulation_config
