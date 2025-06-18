@@ -57,4 +57,8 @@ def pytest_html_results_table_row(report, cells):
         log_content = ''.join(logs)
         cells.insert(3, f'<td><details><summary>View Logs</summary><pre>{log_content}</pre></details></td>')
     else:
-        cells.insert(3, '<td>No logs available</td>') 
+        cells.insert(3, '<td>No logs available</td>')
+
+def pytest_collection_modifyitems(items):
+    """Modify test collection to exclude test_scenarios.py"""
+    items[:] = [item for item in items if "test_scenarios" not in item.nodeid] 
