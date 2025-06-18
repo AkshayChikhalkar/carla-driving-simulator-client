@@ -39,12 +39,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install -r web/backend/requirements.txt
+        pip install pytest pytest-cov
       env:
         PIP_CACHE_DIR: ~/.cache/pip
     
     - name: Run backend tests
       run: |
-        pytest tests/ --cov=src/ --cov-report=xml
+        pytest --cov --cov-branch --cov-report=xml tests/
       env:
         TESTING: "true"
         PYTHONPATH: ${{ github.workspace }}
@@ -55,6 +56,11 @@ jobs:
         file: ./coverage.xml
         fail_ci_if_error: true
         token: ${{ secrets.CODECOV_TOKEN }}
+        flags: unittests
+        name: codecov-umbrella
+        verbose: true
+        branch: ${{ github.ref_name }}
+        slug: ${{ github.repository }}
 
   build:
     needs: test
