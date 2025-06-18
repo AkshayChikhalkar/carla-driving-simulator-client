@@ -10,7 +10,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases)
 [![GitHub issues](https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls)
-
+[![Run tests and upload coverage](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD)](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml)
 A personal project for experimenting with CARLA client, featuring vehicle control, sensor management, and visualization capabilities.
 
 ## Features

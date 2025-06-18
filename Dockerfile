@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Create necessary directories
+RUN mkdir -p /app/config /app/logs
+
 # Copy wheels and requirements
 COPY wheels/ ./wheels/
 COPY requirements.txt .
@@ -19,6 +22,9 @@ RUN pip install --no-cache-dir wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
 
 # Install other Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy config files first
+COPY config/simulation.yaml /app/config/
 
 # Copy the rest of the application
 COPY . .
