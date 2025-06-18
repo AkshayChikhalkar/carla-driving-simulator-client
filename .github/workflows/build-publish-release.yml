@@ -10,6 +10,7 @@ env:
   DOCKER_IMAGE: carla-driving-simulator-client
   PYTHON_PACKAGE: carla-driving-simulator-client
   TESTING: "true"
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   test:
@@ -32,13 +33,19 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        # Install main requirements
         pip install -r requirements.txt
+        # Install backend requirements
+        pip install -r web/backend/requirements.txt
+        # Install package in development mode
+        pip install -e .
     
     - name: Run backend tests
       run: |
         pytest tests/ --cov=src/ --cov-report=xml
       env:
         TESTING: "true"
+        PYTHONPATH: ${{ github.workspace }}
     
     - name: Set up Node.js
       uses: actions/setup-node@v3
@@ -76,7 +83,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        # Install main requirements
+        pip install -r requirements.txt
+        # Install backend requirements
+        pip install -r web/backend/requirements.txt
+        # Install linting tools
         pip install black flake8 mypy
+        # Install package in development mode
+        pip install -e .
     
     - name: Run Black
       run: black . --check
