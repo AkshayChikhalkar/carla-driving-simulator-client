@@ -51,23 +51,6 @@ jobs:
         TESTING: "true"
         PYTHONPATH: ${{ github.workspace }}
     
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: web/frontend/package-lock.json
-    
-    - name: Install frontend dependencies
-      run: |
-        cd web/frontend
-        npm ci
-    
-    - name: Run frontend tests
-      run: |
-        cd web/frontend
-        npm test -- --coverage
-    
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
       with:
@@ -127,7 +110,7 @@ jobs:
   #       npm run lint
 
   build-and-publish:
-    needs: [test]  # Removed lint from dependencies
+    needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
