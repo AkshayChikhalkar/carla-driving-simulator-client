@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -120,15 +120,22 @@ jobs:
           name: python-package
           path: dist/
 
+      - name: Get version from VERSION file
+        id: get_version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: akshaychikhalkar/carla-driving-simulator-client
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ github.sha }},enable={{is_default_branch}}
-            type=raw,value=${{ github.ref_name }},enable={{is_default_branch}}
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+            type=raw,value=${{ github.ref_name }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -142,6 +149,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: true
 
   pypi-publish:
     needs: build
@@ -152,7 +160,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -206,7 +214,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -231,7 +239,7 @@ jobs:
           git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
           git push origin "v${{ steps.get_version.outputs.version }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -243,4 +251,4 @@ jobs:
             dist/*.tar.gz
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
