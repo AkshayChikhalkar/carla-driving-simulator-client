@@ -1,18 +1,24 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
+  // Proxy all API calls to the backend
   app.use(
-    '/api/reports', 
+    '/api', 
     createProxyMiddleware({
       target: 'http://localhost:8000',
       changeOrigin: true,
+      logLevel: 'debug',
     })
   );
+  
+  // Proxy WebSocket connections
   app.use(
-    '/api/logs',
+    '/ws',
     createProxyMiddleware({
-      target: 'http://localhost:8000',
+      target: 'ws://localhost:8000',
+      ws: true,
       changeOrigin: true,
+      logLevel: 'debug',
     })
   );
 }; 

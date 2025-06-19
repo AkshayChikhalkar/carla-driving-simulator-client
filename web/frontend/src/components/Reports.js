@@ -20,6 +20,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import Link from '@mui/material/Link';
 
+const API_BASE_URL = process.env.NODE_ENV === 'production' ? window.location.origin : '';
+
 function descendingComparator(a, b, orderBy) {
   if (b[orderBy] < a[orderBy]) {
     return -1;
@@ -59,7 +61,7 @@ function Reports() {
     // Fetch the list of reports from the backend
     const fetchReports = async () => {
       try {
-        const response = await fetch('/api/reports');
+        const response = await fetch(`${API_BASE_URL}/api/reports`);
         if (!response.ok) throw new Error('Failed to fetch reports');
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
@@ -86,7 +88,7 @@ function Reports() {
   const handleDelete = async (filename) => {
     if (!window.confirm(`Delete report "${filename}"?`)) return;
     try {
-      const response = await fetch(`/api/reports/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      const response = await fetch(`${API_BASE_URL}/api/reports/${encodeURIComponent(filename)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete');
       setReports(reports => reports.filter(r => r.filename !== filename));
     } catch (err) {
@@ -107,7 +109,7 @@ function Reports() {
         </Box>
         <Paper sx={{ p: 1, minHeight: 600 }}>
           <iframe
-            src={`/api/reports/${encodeURIComponent(filename)}`}
+            src={`${API_BASE_URL}/api/reports/${encodeURIComponent(filename)}`}
             title={filename}
             width="100%"
             height="600px"

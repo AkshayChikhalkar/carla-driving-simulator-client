@@ -27,7 +27,10 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
 import logger from '../utils/logger';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = process.env.NODE_ENV === 'production' ? window.location.origin + '/api' : '/api';
+const WS_BASE_URL = process.env.NODE_ENV === 'production' ? 
+  window.location.origin.replace('http', 'ws') : 
+  window.location.origin.replace('http', 'ws');
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
   const [scenarios, setScenarios] = useState([]);
@@ -49,17 +52,19 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     // Fetch available scenarios
     axios.get(`${API_BASE_URL}/scenarios`)
       .then(response => {
-        setScenarios(response.data.scenarios);
-        logger.info(`Loaded ${response.data.scenarios.length} scenarios`);
+        setScenarios(Array.isArray(response.data.scenarios) ? response.data.scenarios : []);
+        setStatus('Connected to simulation server');
       })
       .catch(error => {
-        logger.error('Error fetching scenarios:', error);
+        setScenarios([]);
         setStatus('Error loading scenarios');
+        logger.error('Error fetching scenarios:', error);
       });
 
     // Setup WebSocket connection for both video and status
     const setupWebSocket = () => {
-      wsRef.current = new WebSocket('ws://localhost:8000/ws/simulation-view');
+      const wsUrl = `${WS_BASE_URL}/ws/simulation-view`;
+      wsRef.current = new WebSocket(wsUrl);
       
       wsRef.current.onopen = () => {
         logger.info('WebSocket connected');
@@ -349,11 +354,15 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   }}
                 >
                   <MenuItem value="all">All Scenarios</MenuItem>
-                  {scenarios.map((scenario) => (
-                    <MenuItem key={scenario} value={scenario}>
-                      {scenario}
-                    </MenuItem>
-                  ))}
+                  {status === 'Error loading scenarios' ? (
+                    <MenuItem disabled>Failed to load scenarios from server.</MenuItem>
+                  ) : (
+                    Array.isArray(scenarios) && scenarios.map((scenario) => (
+                      <MenuItem key={scenario} value={scenario}>
+                        {scenario}
+                      </MenuItem>
+                    ))
+                  )}
                 </Select>
               </FormControl>
             </Grid>

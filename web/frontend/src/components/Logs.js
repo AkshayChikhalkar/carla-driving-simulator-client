@@ -19,6 +19,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import Link from '@mui/material/Link';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 
+const API_BASE_URL = process.env.NODE_ENV === 'production' ? window.location.origin : '';
+
 function descendingComparator(a, b, orderBy) {
   if (b[orderBy] < a[orderBy]) {
     return -1;
@@ -57,7 +59,7 @@ function Logs() {
   useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const response = await fetch('/api/logs');
+        const response = await fetch(`${API_BASE_URL}/api/logs`);
         if (!response.ok) throw new Error('Failed to fetch logs');
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
@@ -84,7 +86,7 @@ function Logs() {
   const handleDelete = async (filename) => {
     if (!window.confirm(`Delete log file "${filename}"?`)) return;
     try {
-      const response = await fetch(`/api/logs/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      const response = await fetch(`${API_BASE_URL}/api/logs/${encodeURIComponent(filename)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete');
       setLogs(logs => logs.filter(r => r.filename !== filename));
     } catch (err) {
@@ -105,7 +107,7 @@ function Logs() {
         </Box>
         <Paper sx={{ p: 1, minHeight: 600 }}>
           <iframe
-            src={`/api/logs/${encodeURIComponent(filename)}`}
+            src={`${API_BASE_URL}/api/logs/${encodeURIComponent(filename)}`}
             title={filename}
             width="100%"
             height="600px"
@@ -173,7 +175,7 @@ function Logs() {
                       <IconButton
                         color="primary"
                         component="a"
-                        href={`/api/logs/${encodeURIComponent(log.filename)}`}
+                        href={`${API_BASE_URL}/api/logs/${encodeURIComponent(log.filename)}`}
                         target="_blank"
                         rel="noopener"
                         aria-label={`Open ${log.filename}`}

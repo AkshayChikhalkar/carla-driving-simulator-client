@@ -24,6 +24,9 @@ class Logger {
       dateFormat: 'YYYY-MM-DD HH:mm:ss'
     };
 
+    // Get API base URL
+    this.apiBaseUrl = process.env.NODE_ENV === 'production' ? window.location.origin : '';
+
     // Initialize console methods
     this._setupConsoleMethods();
     this._initialized = true;
@@ -35,7 +38,7 @@ class Logger {
   async _initializeFileLogging() {
     try {
       // Create logs directory if it doesn't exist
-      const response = await fetch('/api/logs/directory', {
+      const response = await fetch(`${this.apiBaseUrl}/api/logs/directory`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -51,7 +54,7 @@ class Logger {
       const logFileName = `web_simulation_${today}.log`;
       
       // Get the log file handle from the backend
-      const fileResponse = await fetch('/api/logs/file', {
+      const fileResponse = await fetch(`${this.apiBaseUrl}/api/logs/file`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -65,7 +68,7 @@ class Logger {
 
       // Write header
       const header = `=== Web Simulation Log - ${today} ===\n`;
-      const writeResponse = await fetch('/api/logs/write', {
+      const writeResponse = await fetch(`${this.apiBaseUrl}/api/logs/write`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -106,7 +109,7 @@ class Logger {
       if (this.config.logToFile) {
         try {
           const logEntry = `${formattedMessage}\n`;
-          const response = await fetch('/api/logs/write', {
+          const response = await fetch(`${this.apiBaseUrl}/api/logs/write`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -166,7 +169,7 @@ class Logger {
   async close() {
     if (this.config.logToFile) {
       try {
-        await fetch('/api/logs/close', { method: 'POST' });
+        await fetch(`${this.apiBaseUrl}/api/logs/close`, { method: 'POST' });
         console.log('Log file closed successfully');
       } catch (error) {
         console.error('Error closing log file:', error);
