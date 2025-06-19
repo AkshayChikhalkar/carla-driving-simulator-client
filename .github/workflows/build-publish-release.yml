@@ -65,12 +65,12 @@ jobs:
 
       - name: Test Docker Compose
         run: |
-          # Test docker-compose build
-          docker-compose build
+          # Test docker compose build
+          docker compose build
           echo "Docker Compose build successful"
           
-          # Test docker-compose config validation
-          docker-compose config
+          # Test docker compose config validation
+          docker compose config
           echo "Docker Compose configuration is valid"
 
   build:
