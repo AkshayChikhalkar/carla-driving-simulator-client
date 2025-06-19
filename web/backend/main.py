@@ -53,6 +53,10 @@ class ConfigUpdate(BaseModel):
     config_data: dict
 
 
+class LogDirectoryRequest(BaseModel):
+    pass
+
+
 # Thread-safe state management
 class ThreadSafeState:
     def __init__(self):
@@ -310,6 +314,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Use robust project root
+project_root = get_project_root()
+
 # Initialize simulation runner with thread-safe state
 runner = SimulationRunner()
 runner.state = ThreadSafeState()
@@ -317,8 +324,17 @@ runner.state = ThreadSafeState()
 # Web frontend log file handle
 web_log_file = None
 
-# Use robust project root
-project_root = get_project_root()
+
+@app.get("/")
+async def root():
+    """Root endpoint for health check"""
+    return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/scenarios")
@@ -787,6 +803,54 @@ async def delete_log(filename: str):
         file_path,
         lambda p: {"success": True, "message": "Log deleted"} if p.unlink() else None,
     )
+
+
+@app.post("/api/logs/directory")
+async def create_logs_directory():
+    """Create logs directory if it doesn't exist"""
+    try:
+        logs_dir = Path(get_project_root()) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return {"message": "Logs directory created/verified"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/logs/file")
+async def create_log_file(request: LogFileRequest):
+    """Create a new log file"""
+    try:
+        logs_dir = Path(get_project_root()) / "logs"
+        log_file = logs_dir / request.filename
+        # Create file if it doesn't exist
+        log_file.touch()
+        return {"message": f"Log file {request.filename} created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/logs/write")
+async def write_to_log(request: LogWriteRequest):
+    """Write content to the current log file"""
+    try:
+        logs_dir = Path(get_project_root()) / "logs"
+        # Get the most recent log file
+        log_files = sorted(logs_dir.glob("web_simulation_*.log"), reverse=True)
+        if not log_files:
+            raise HTTPException(status_code=404, detail="No log file found")
+        
+        current_log = log_files[0]
+        with open(current_log, "a") as f:
+            f.write(request.content)
+        return {"message": "Log entry written"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/logs/close")
+async def close_log():
+    """Close the current log file (no-op since files are closed after each write)"""
+    return {"message": "Log file closed"}
 
 
 if __name__ == "__main__":

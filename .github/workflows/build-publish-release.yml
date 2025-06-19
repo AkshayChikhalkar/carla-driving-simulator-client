@@ -4,7 +4,7 @@ on:
   push
 
 env:
-  DOCKER_IMAGE: carla-driving-simulator-client
+  DOCKER_IMAGE: akshaychikhalkar/carla-driving-simulator-client
 
 jobs:
   test:
@@ -21,13 +21,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           pip install pytest pytest-cov
-          pip install -r requirements.txt
-          pip install -r web/backend/requirements.txt
+          pip install -r requirements-docker.txt
+          # Don't install duplicate dependencies from web/backend/requirements.txt
+          # as they're already in requirements-docker.txt
 
-      - name: Run tests
+      - name: Run Python tests
         run: pytest --cov=src --cov-branch --cov-report=xml tests/
         env:
           TESTING: "true"
@@ -39,8 +40,39 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: AkshayChikhalkar/carla-driving-simulator-client
 
-  build:
+  docker-build-test:
+    name: Test Docker Builds
+    runs-on: ubuntu-latest
     needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test Production Dockerfile
+        run: |
+          docker build -t test-prod .
+          echo "Production Dockerfile builds successfully"
+
+      - name: Test Development Dockerfile
+        run: |
+          docker build -f Dockerfile.dev -t test-dev .
+          echo "Development Dockerfile builds successfully"
+
+      - name: Test Docker Compose
+        run: |
+          # Test docker-compose build
+          docker-compose build
+          echo "Docker Compose build successful"
+          
+          # Test docker-compose config validation
+          docker-compose config
+          echo "Docker Compose configuration is valid"
+
+  build:
+    needs: [test, docker-build-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -56,13 +88,12 @@ jobs:
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
-            web/backend/requirements.txt
+            requirements-docker.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r web/backend/requirements.txt
+          pip install -r requirements-docker.txt
           pip install build twine
         env:
           PIP_CACHE_DIR: ~/.cache/pip
@@ -76,15 +107,14 @@ jobs:
             VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
 
       - name: Build Python package
         run: |
           # Clean any existing builds
           rm -rf dist/ build/ *.egg-info/
-          # Get version from VERSION file
-          VERSION=$(cat VERSION)
-          # Set version environment variable
-          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+          # Set version environment variable for setup.py
+          echo "PACKAGE_VERSION=${{ steps.get_version.outputs.version }}" >> $GITHUB_ENV
           # Build package
           python -m build
 
@@ -131,16 +161,17 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: akshaychikhalkar/carla-driving-simulator-client
+          images: ${{ env.DOCKER_IMAGE }}
           tags: |
             type=raw,value=latest
+            type=raw,value=prod
             type=raw,value=${{ github.sha }}
             type=raw,value=${{ github.ref_name }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
 
-      - name: Build and push Docker image
+      - name: Build and push production image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -150,6 +181,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build and push development image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.dev
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          platforms: linux/amd64,linux/arm64
 
   pypi-publish:
     needs: build
@@ -250,5 +294,49 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
           generate_release_notes: true
+          body: |
+            ## Docker Images
+            
+            ### Production Image
+            ```bash
+            docker pull ${{ env.DOCKER_IMAGE }}:latest
+            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:latest
+            ```
+            
+            ### Development Image
+            ```bash
+            docker pull ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
+            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
+            ```
+            
+            ### Docker Compose (Recommended)
+            ```bash
+            # Clone the repository
+            git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
+            cd carla-driving-simulator-client
+            
+            # Run with docker-compose
+            docker-compose up --build
+            
+            # Or pull the latest image and run
+            docker-compose pull
+            docker-compose up
+            ```
+            
+            ## Python Package
+            
+            Install via pip:
+            ```bash
+            pip install carla-driving-simulator-client==${{ steps.get_version.outputs.version }}
+            ```
+            
+            ## Features
+            
+            - 🚗 CARLA autonomous driving simulation client
+            - 🌐 Web-based frontend and backend API
+            - 📊 Real-time visualization and analytics
+            - 🎯 Scenario-based testing framework
+            - 🐳 Docker and Docker Compose support
+            - 📦 Multi-platform support (Linux/Windows)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

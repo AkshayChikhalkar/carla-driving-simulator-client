@@ -1,0 +1,83 @@
+# Development Dockerfile - simpler for development
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy wheels directory first
+COPY wheels/ ./wheels/
+
+# Copy requirements for Docker (without CARLA wheel references)
+COPY requirements-docker.txt .
+RUN pip install --no-cache-dir -r requirements-docker.txt
+
+# Install CARLA wheel file
+RUN pip install --no-cache-dir ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
+
+# Copy the rest of the application
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/config /app/logs /app/reports
+
+# Copy default config if it doesn't exist
+RUN if [ ! -f /app/config/simulation.yaml ]; then \
+    cp /app/config/simulation.yaml; \
+    fi
+
+# Install the package in development mode
+RUN pip install -e .
+
+# Install frontend dependencies
+WORKDIR /app/web/frontend
+RUN npm install
+WORKDIR /app
+
+# Expose ports
+EXPOSE 3000 8000 2000-2002
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV HOST=0.0.0.0
+ENV REACT_APP_API_URL=http://localhost:8000
+ENV WDS_SOCKET_HOST=0.0.0.0
+ENV WDS_SOCKET_PORT=3000
+
+# Create start script
+RUN echo '#!/bin/bash\n\
+echo "Starting CARLA Simulator Client (Development Mode)..."\n\
+echo "Starting backend..."\n\
+cd /app/web/backend && python main.py &\n\
+BACKEND_PID=$!\n\
+echo "Backend started with PID: $BACKEND_PID"\n\
+sleep 5\n\
+echo "Starting frontend..."\n\
+cd /app/web/frontend && npm start &\n\
+FRONTEND_PID=$!\n\
+echo "Frontend started with PID: $FRONTEND_PID"\n\
+echo "Services started. Frontend available at http://localhost:3000"\n\
+echo "Backend API available at http://localhost:8000"\n\
+echo "Press Ctrl+C to stop all services"\n\
+wait\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/start.sh"] 
