@@ -24,6 +24,8 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install pytest pytest-cov
+          # Install CARLA wheel for Linux
+          pip install ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
           pip install -r requirements-docker.txt
           # Don't install duplicate dependencies from web/backend/requirements.txt
           # as they're already in requirements-docker.txt
@@ -93,6 +95,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install CARLA wheel for Linux
+          pip install ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
           pip install -r requirements-docker.txt
           pip install build twine
         env:
