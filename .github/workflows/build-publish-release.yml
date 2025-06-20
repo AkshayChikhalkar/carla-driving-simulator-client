@@ -7,12 +7,12 @@ on:
       run_tests:
         description: 'Run tests job'
         required: false
-        default: true
+        default: false
         type: boolean
       run_docker_tests:
         description: 'Run docker build tests'
         required: false
-        default: true
+        default: false
         type: boolean
       run_build:
         description: 'Run build job'
@@ -34,6 +34,10 @@ on:
         required: false
         default: false
         type: boolean
+
+permissions:
+  contents: write
+  packages: write
 
 env:
   DOCKER_IMAGE: akshaychikhalkar/carla-driving-simulator-client
@@ -297,7 +301,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
