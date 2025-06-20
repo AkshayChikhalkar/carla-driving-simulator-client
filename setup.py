@@ -74,6 +74,8 @@ extras_require = {
         "black>=21.5b2",
         "flake8>=3.9.0",
         "mypy>=0.812",
+    ],
+    "docs": [
         "sphinx>=4.0.0",
         "sphinx-rtd-theme>=0.5.0",
     ]
