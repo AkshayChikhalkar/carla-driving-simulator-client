@@ -1,24 +1,21 @@
-version: '3.8'
 
 services:
   carla-driving-simulator-client:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    image: carla-simulator-client:dev
+    container_name: carla-simulator-client-dev
     ports:
-      - "3000:3000"  # Frontend
-      - "8000:8000"  # Backend API
-      - "2000-2002:2000-2002"  # CARLA ports
+      - "3000:3000"    # Frontend
+      #- "8000:8000"    # Backend API
+      #- "2000-2002:2000-2002"  # CARLA ports
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./reports:/app/reports
-    environment:
-      - PYTHONPATH=/app
-      - HOST=0.0.0.0
-      - REACT_APP_API_URL=http://localhost:8000
-      - WDS_SOCKET_HOST=0.0.0.0
-      - WDS_SOCKET_PORT=3000
+    env_file:
+      - .env
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
@@ -26,10 +23,13 @@ services:
       timeout: 30s
       retries: 3
       start_period: 40s
+    networks:
+      - carla-network
 
-  # Optional: Add a database service if needed
+  # Optional: PostgreSQL service
   # postgres:
   #   image: postgres:13
+  #   container_name: carla-postgres
   #   environment:
   #     POSTGRES_DB: carla_simulator
   #     POSTGRES_USER: carla_user
@@ -38,6 +38,18 @@ services:
   #     - postgres_data:/var/lib/postgresql/data
   #   ports:
   #     - "5432:5432"
+  #   networks:
+  #     - carla-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "pg_isready", "-U", "carla_user"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+networks:
+  carla-network:
+    driver: bridge
 
 # volumes:
-#   postgres_data: 
+#   postgres_data:
