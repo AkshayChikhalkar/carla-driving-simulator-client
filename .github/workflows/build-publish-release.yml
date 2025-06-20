@@ -7,12 +7,12 @@ on:
       run_tests:
         description: 'Run tests job'
         required: false
-        default: false
+        default: true
         type: boolean
       run_docker_tests:
         description: 'Run docker build tests'
         required: false
-        default: false
+        default: true
         type: boolean
       run_build:
         description: 'Run build job'
@@ -27,12 +27,12 @@ on:
       run_pypi_publish:
         description: 'Run PyPI publish'
         required: false
-        default: false
+        default: true
         type: boolean
       run_github_release:
         description: 'Run GitHub release'
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -114,7 +114,7 @@ jobs:
   build:
     needs: [test, docker-build-test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && inputs.run_build == 'true'
+    if: github.event_name == 'push' || inputs.run_build == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
