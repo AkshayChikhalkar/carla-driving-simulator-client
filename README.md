@@ -1,7 +1,7 @@
 # CARLA Driving Simulator Client
 
-[![CI/CD Pipeline](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/Run%20tests,%20build,%20publish%20and%20release/badge.svg?branch=CI%2FCD)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/Run%20tests,%20build,%20publish%20and%20release)
-[![Tests](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/Run%20tests,%20build,%20publish%20and%20release/badge.svg?branch=main)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/Run%20tests,%20build,%20publish%20and%20release)
+[![CI/CD Pipeline](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml)
+[![Tests](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml)
 [![codecov](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client/branch/CI%2FCD/graph/badge.svg)](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client)
 [![Documentation Status](https://readthedocs.org/projects/carla-driving-simulator-client/badge/?version=latest)](https://carla-driving-simulator-client.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
