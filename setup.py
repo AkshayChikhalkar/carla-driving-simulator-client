@@ -5,43 +5,42 @@ Setup script for the CARLA Driving Simulator Client.
 from setuptools import setup, find_packages
 import os
 import re
-
-# Read README.md for long description
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+import subprocess
 
 
-# Get version from environment variable or fallback to VERSION file
 def get_version():
-    # First try to get version from environment variable
+    """
+    Get the current version of the package.
+    
+    Priority order:
+    1. PACKAGE_VERSION environment variable (set by CI/CD)
+    2. Git tag
+    3. Default version
+    
+    Returns:
+        str: The version string
+    """
+    # First try to get version from environment variable (set by CI/CD)
     version = os.environ.get("PACKAGE_VERSION")
     if version:
         return version
 
-    # If not in environment, try VERSION file
+    # If not in environment, try git tag
     try:
-        with open("VERSION", "r") as f:
-            version = f.read().strip()
-            if version:
-                return version
-    except:
-        pass
-
-    # If VERSION file doesn't exist or is empty, try git tag
-    try:
-        import subprocess
-
         version = (
-            subprocess.check_output(["git", "describe", "--tags", "--always"])
+            subprocess.check_output(["git", "describe", "--tags", "--match", "v[0-9]*", "--abbrev=0"])
             .decode()
             .strip()
         )
-        # Remove any leading 'v' and any additional git info after the version number
-        version = re.sub(r"^v", "", version)
-        version = re.sub(r"-.*$", "", version)
-        return version
+        # Remove 'v' prefix
+        return version[1:] if version.startswith('v') else version
     except:
         return "1.0.0"  # Default version if nothing else is available
+
+
+# Read README.md for long description
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
 
 
 # Get version

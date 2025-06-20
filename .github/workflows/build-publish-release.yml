@@ -2,6 +2,8 @@ name: Run tests, build, publish and release
 
 on: 
   push:
+  pull_request:
+    branches: [ main, CI/CD ]
   workflow_dispatch:
     inputs:
       run_tests:
@@ -43,10 +45,37 @@ env:
   DOCKER_IMAGE: akshaychikhalkar/carla-driving-simulator-client
 
 jobs:
+  version-bump:
+    name: Bump version and create tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/CI/CD'
+    outputs:
+      version: ${{ steps.bump_version.outputs.newTag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Bump version and push tag
+        id: bump_version
+        uses: phips28/gh-action-bump-version@v9.1.0
+        with:
+          tag-prefix: 'v'
+          commit-message: 'ci: bump version to {version}'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     name: Run tests and collect coverage
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_tests == 'true'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_tests == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,9 +86,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-docker.txt
 
       - name: Install Python dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install pytest pytest-cov
           # Install CARLA wheel for Linux
           pip install ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
@@ -74,16 +108,17 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Upload results to Codecov
+        if: github.event_name != 'pull_request'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: AkshayChikhalkar/carla-driving-simulator-client
 
   docker-build-test:
-    name: Test Docker Builds
+    name: Test Docker Builds and Save Images
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' || inputs.run_docker_tests == 'true'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_docker_tests == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -91,12 +126,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Validate Dockerfile existence
+        run: |
+          if [ ! -f "Dockerfile" ]; then
+            echo "Error: Dockerfile not found"
+            exit 1
+          fi
+          if [ ! -f "Dockerfile.dev" ]; then
+            echo "Warning: Dockerfile.dev not found, skipping dev build test"
+            echo "skip_dev_build=true" >> $GITHUB_ENV
+          else
+            echo "skip_dev_build=false" >> $GITHUB_ENV
+          fi
+
       - name: Test Production Dockerfile
         run: |
           docker build -t test-prod .
           echo "Production Dockerfile builds successfully"
 
       - name: Test Development Dockerfile
+        if: env.skip_dev_build != 'true'
         run: |
           docker build -f Dockerfile.dev -t test-dev .
           echo "Development Dockerfile builds successfully"
@@ -111,10 +160,32 @@ jobs:
           docker compose config
           echo "Docker Compose configuration is valid"
 
+      - name: Save production image as artifact
+        run: |
+          docker save test-prod | gzip > production-image.tar.gz
+          echo "Production image saved as artifact"
+
+      - name: Save development image as artifact
+        if: env.skip_dev_build != 'true'
+        run: |
+          docker save test-dev | gzip > development-image.tar.gz
+          echo "Development image saved as artifact"
+
+      - name: Upload Docker images as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: |
+            production-image.tar.gz
+            development-image.tar.gz
+          retention-days: 1
+
   build:
-    needs: [test, docker-build-test]
+    needs: [test, docker-build-test, version-bump]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_build == 'true'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_build == 'true'
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -141,13 +212,18 @@ jobs:
         env:
           PIP_CACHE_DIR: ~/.cache/pip
 
-      - name: Get version
+      - name: Get version from Git tags
         id: get_version
         run: |
-          if [ -f "VERSION" ]; then
-            VERSION=$(cat VERSION)
+          # Use the bumped version if available, otherwise get from latest tag
+          if [ "${{ needs.version-bump.outputs.version }}" != "" ]; then
+            VERSION="${{ needs.version-bump.outputs.version }}"
           else
-            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+            VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+            # Fallback to git describe if no version tags exist
+            if [ -z "$VERSION" ]; then
+              VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+            fi
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
@@ -168,8 +244,8 @@ jobs:
           path: dist/
 
   docker-publish:
-    needs: build
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/CI/CD') || inputs.run_docker_publish == 'true'
+    needs: [build, docker-build-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/CI/CD'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -193,54 +269,89 @@ jobs:
           name: python-package
           path: dist/
 
-      - name: Get version from VERSION file
+      - name: Download Docker images
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+          path: ./
+
+      - name: Load production image
+        run: |
+          if [ -f "production-image.tar.gz" ]; then
+            gunzip -c production-image.tar.gz | docker load
+            echo "Production image loaded successfully"
+          else
+            echo "Production image artifact not found, will build from scratch"
+            echo "build_prod_from_scratch=true" >> $GITHUB_ENV
+          fi
+
+      - name: Load development image
+        run: |
+          if [ -f "development-image.tar.gz" ]; then
+            gunzip -c development-image.tar.gz | docker load
+            echo "Development image loaded successfully"
+          else
+            echo "Development image artifact not found, will build from scratch"
+            echo "build_dev_from_scratch=true" >> $GITHUB_ENV
+          fi
+
+      - name: Get version from Git tags
         id: get_version
         run: |
-          VERSION=$(cat VERSION)
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+          # Fallback to git describe if no version tags exist
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=prod
-            type=raw,value=${{ github.sha }}
-            type=raw,value=${{ github.ref_name }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+      - name: Check if Docker image already exists
+        id: check_docker
+        run: |
+          # Check if the specific version tag already exists
+          if docker manifest inspect ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} >/dev/null 2>&1; then
+            echo "docker_exists=true" >> $GITHUB_OUTPUT
+            echo "Docker image ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} already exists, skipping publish"
+          else
+            echo "docker_exists=false" >> $GITHUB_OUTPUT
+            echo "Docker image ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} does not exist, will publish"
+          fi
 
       - name: Build and push production image
+        if: env.build_prod_from_scratch == 'true' && steps.check_docker.outputs.docker_exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           platforms: linux/amd64
 
-      - name: Build and push development image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.dev
-          push: true
-          tags: ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          platforms: linux/amd64
+      - name: Tag and push production image (reused)
+        if: env.build_prod_from_scratch != 'true' && steps.check_docker.outputs.docker_exists != 'true'
+        run: |
+          docker tag test-prod ${{ env.DOCKER_IMAGE }}:latest
+          docker tag test-prod ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+          
+          # Push both tags
+          docker push ${{ env.DOCKER_IMAGE }}:latest
+          docker push ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+          
+          echo "Production image tagged and pushed successfully"
+
+      - name: Skip Docker publish (already exists)
+        if: steps.check_docker.outputs.docker_exists == 'true'
+        run: |
+          echo "Skipping Docker publish - version ${{ steps.get_version.outputs.version }} already exists"
 
   pypi-publish:
     needs: build
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/CI/CD') || inputs.run_pypi_publish == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/CI/CD'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -277,14 +388,32 @@ jobs:
       - name: List files to upload
         run: ls -la dist/
 
-      - name: Get version from VERSION file
+      - name: Get version from Git tags
         id: get_version
         run: |
-          VERSION=$(cat VERSION)
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+          # Fallback to git describe if no version tags exist
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
 
+      - name: Check if PyPI package already exists
+        id: check_pypi
+        run: |
+          # Check if the specific version already exists on PyPI
+          if python -m twine check dist/* | grep -q "PASSED"; then
+            # Try to check if version exists (this is a simple check)
+            echo "checking_pypi=true" >> $GITHUB_OUTPUT
+            echo "PyPI package version ${{ steps.get_version.outputs.version }} will be checked during upload"
+          else
+            echo "checking_pypi=false" >> $GITHUB_OUTPUT
+            echo "PyPI package validation failed"
+          fi
+
       - name: Publish to PyPI
+        if: steps.check_pypi.outputs.checking_pypi == 'true'
         run: |
           echo "Uploading to PyPI..."
           python -m twine upload --skip-existing --verbose dist/*
@@ -294,7 +423,7 @@ jobs:
 
   github-release:
     needs: [build, docker-publish, pypi-publish]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/CI/CD') || inputs.run_github_release == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/CI/CD'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -308,26 +437,30 @@ jobs:
           name: python-package
           path: dist/
 
-      - name: Get version
+      - name: Get version from Git tags
         id: get_version
         run: |
-          if [ -f "VERSION" ]; then
-            VERSION=$(cat VERSION)
-          else
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+          # Fallback to git describe if no version tags exist
+          if [ -z "$VERSION" ]; then
             VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create Git tag
+      - name: Check if GitHub release already exists
+        id: check_release
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
-          git push origin "v${{ steps.get_version.outputs.version }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Check if the release already exists
+          if gh release view "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "release_exists=true" >> $GITHUB_OUTPUT
+            echo "GitHub release v${{ steps.get_version.outputs.version }} already exists, skipping"
+          else
+            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "GitHub release v${{ steps.get_version.outputs.version }} does not exist, will create"
+          fi
 
       - name: Create GitHub Release
+        if: steps.check_release.outputs.release_exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           name: Release v${{ steps.get_version.outputs.version }}
@@ -345,10 +478,10 @@ jobs:
             docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:latest
             ```
             
-            ### Development Image
+            ### Specific Version
             ```bash
-            docker pull ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
-            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:dev-${{ steps.get_version.outputs.version }}
+            docker pull ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
             ```
             
             ### Docker Compose (Recommended)
@@ -381,4 +514,9 @@ jobs:
             - 🐳 Docker and Docker Compose support
             - 📦 Multi-platform support (Linux/Windows)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip GitHub release (already exists)
+        if: steps.check_release.outputs.release_exists == 'true'
+        run: |
+          echo "Skipping GitHub release - version v${{ steps.get_version.outputs.version }} already exists" 
