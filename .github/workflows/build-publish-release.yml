@@ -17,12 +17,12 @@ on:
       run_build:
         description: 'Run build job'
         required: false
-        default: true
+        default: false
         type: boolean
       run_docker_publish:
         description: 'Run docker publish'
         required: false
-        default: false
+        default: true
         type: boolean
       run_pypi_publish:
         description: 'Run PyPI publish'
@@ -46,7 +46,7 @@ jobs:
   test:
     name: Run tests and collect coverage
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_tests == 'true'
+    if: github.event_name == 'push_kdlsfjldfjdlkf' || inputs.run_tests == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +83,7 @@ jobs:
     name: Test Docker Builds
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' || inputs.run_docker_tests == 'true'
+    if: github.event_name == 'push_kdlsfjldfjdlkf' || inputs.run_docker_tests == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -114,7 +114,7 @@ jobs:
   build:
     needs: [test, docker-build-test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_build == 'true'
+    if: github.event_name == 'push_kdlsfjldfjdlkf' || inputs.run_build == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -240,7 +240,7 @@ jobs:
 
   pypi-publish:
     needs: build
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/CI/CD') || inputs.run_pypi_publish == 'true'
+    if: (github.event_name == 'push_kdlsfjldfjdlkf' && github.ref == 'refs/heads/CI/CD') || inputs.run_pypi_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -294,7 +294,7 @@ jobs:
 
   github-release:
     needs: [build, docker-publish, pypi-publish]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/CI/CD') || inputs.run_github_release == 'true'
+    if: (github.event_name == 'push_kdlsfjldfjdlkf' && github.ref == 'refs/heads/CI/CD') || inputs.run_github_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

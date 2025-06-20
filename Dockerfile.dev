@@ -39,9 +39,11 @@ COPY . .
 RUN mkdir -p /app/config /app/logs /app/reports
 
 # Copy default config if it doesn't exist
-RUN if [ ! -f /app/config/simulation.yaml ]; then \
-    cp /app/config/simulation.yaml; \
-    fi
+# RUN if [ ! -f /app/config/simulation.yaml ]; then \
+#     cp /app/config/simulation.yaml; \
+#     fi
+
+COPY config/simulation.yaml /app/config/simulation.yaml
 
 # Install the package in development mode
 RUN pip install -e .
