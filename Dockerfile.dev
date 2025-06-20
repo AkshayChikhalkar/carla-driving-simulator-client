@@ -48,6 +48,17 @@ ENV REACT_APP_API_URL=http://localhost:8000
 ENV WDS_SOCKET_HOST=0.0.0.0
 ENV WDS_SOCKET_PORT=3000
 
+# Application-specific environment variables with sensible defaults
+ENV DATABASE_URL=postgresql://carla_user:carla_password@localhost:5432/carla_simulator
+ENV CARLA_HOST=localhost
+ENV CARLA_PORT=2000
+ENV WEB_HOST=0.0.0.0
+ENV WEB_PORT=8000
+ENV FRONTEND_PORT=3000
+ENV LOG_LEVEL=INFO
+ENV DEBUG=true
+ENV TESTING=false
+
 # Create start script
 RUN echo '#!/bin/bash\n\
 echo "Starting services..."\n\

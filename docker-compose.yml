@@ -1,4 +1,3 @@
-
 services:
   carla-driving-simulator-client:
     build:
@@ -16,6 +15,17 @@ services:
       - ./reports:/app/reports
     env_file:
       - .env
+    environment:
+      # Override defaults if .env file doesn't exist
+      - DATABASE_URL=${DATABASE_URL:-postgresql://carla_user:carla_password@localhost:5432/carla_simulator}
+      - CARLA_HOST=${CARLA_HOST:-localhost}
+      - CARLA_PORT=${CARLA_PORT:-2000}
+      - WEB_HOST=${WEB_HOST:-0.0.0.0}
+      - WEB_PORT=${WEB_PORT:-8000}
+      - FRONTEND_PORT=${FRONTEND_PORT:-3000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-true}
+      - TESTING=${TESTING:-false}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
