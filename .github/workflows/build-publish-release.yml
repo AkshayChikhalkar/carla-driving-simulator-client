@@ -182,7 +182,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: AkshayChikhalkar/carla-driving-simulator-client
+          slug: akshaychikhalkar/carla-driving-simulator-client
 
   docker-build-test:
     name: Test Docker Builds and Save Images

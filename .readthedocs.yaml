@@ -18,9 +18,10 @@ sphinx:
 formats:
   - pdf
 
-# Optionally set the path to your Python project to install it
+# Set the path to your Python project to install it
 python:
   install:
-    - requirements: docs/requirements.txt
     - method: pip
-      path: . 
+      path: .
+      extra_requirements:
+        - docs 
