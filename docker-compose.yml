@@ -13,10 +13,8 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./reports:/app/reports
-    env_file:
-      - .env
     environment:
-      # Override defaults if .env file doesn't exist
+      # Environment variables with defaults (no .env file required)
       - DATABASE_URL=${DATABASE_URL:-postgresql://carla_user:carla_password@localhost:5432/carla_simulator}
       - CARLA_HOST=${CARLA_HOST:-localhost}
       - CARLA_PORT=${CARLA_PORT:-2000}

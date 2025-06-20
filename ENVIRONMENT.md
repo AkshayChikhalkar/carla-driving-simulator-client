@@ -9,9 +9,10 @@ This project uses a **hybrid approach** for environment variables that provides 
 - ✅ **CI/CD friendly** - No external file dependencies
 - ✅ **Consistent behavior** - Same defaults across environments
 
-### **Override with .env Files**
+### **Optional .env Files**
 - ✅ **Environment-specific** - Different values for dev/staging/prod
 - ✅ **Easy customization** - No rebuild needed
+- ✅ **Truly optional** - Works without .env file
 - ✅ **Standard practice** - Widely used in development
 
 ## 📋 **Environment Variables**
@@ -32,13 +33,16 @@ This project uses a **hybrid approach** for environment variables that provides 
 
 ### **Option 1: Use Defaults (Simplest)**
 ```bash
-# Just run with defaults
+# Just run with defaults - no .env file needed!
 docker run -p 3000:3000 -p 8000:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+
+# Or with docker-compose
+docker-compose up
 ```
 
 ### **Option 2: Override with .env File**
 ```bash
-# Create .env file
+# Create .env file (optional)
 cat > .env << EOF
 DATABASE_URL=postgresql://user:pass@db:5432/carla
 CARLA_HOST=carla-server
@@ -67,10 +71,10 @@ docker run -p 3000:3000 -p 8000:8000 \
 git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
 cd carla-driving-simulator-client
 
-# Option 1: Use defaults
+# Option 1: Use defaults (no .env needed)
 docker-compose up
 
-# Option 2: Create .env for customization
+# Option 2: Create .env for customization (optional)
 cp .env.example .env
 # Edit .env with your settings
 docker-compose up
@@ -116,14 +120,14 @@ LOG_LEVEL=WARNING
 Environment variables are resolved in this order:
 
 1. **Runtime environment variables** (highest priority)
-2. **.env file** (if exists)
+2. **.env file** (if exists and variables are set)
 3. **Dockerfile defaults** (lowest priority)
 
 ## 📝 **Examples**
 
 ### **Development with Custom Database**
 ```bash
-# .env file
+# .env file (optional)
 DATABASE_URL=postgresql://dev:password@localhost:5432/carla_dev
 DEBUG=true
 LOG_LEVEL=DEBUG
@@ -143,5 +147,13 @@ docker run -d \
   -p 3000:3000 -p 8000:8000 \
   akshaychikhalkar/carla-driving-simulator-client:latest
 ```
+
+## ✅ **Key Benefits**
+
+- **Zero configuration** - Works immediately with defaults
+- **CI/CD friendly** - No .env file dependencies
+- **Flexible** - Can override any variable when needed
+- **Secure** - Sensitive data handled properly
+- **Standard** - Follows Docker best practices
 
 This approach gives you the best of both worlds: **simplicity for quick starts** and **flexibility for customization**! 🎉 
