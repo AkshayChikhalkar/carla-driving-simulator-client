@@ -63,14 +63,84 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-      - name: Bump version and push tag
+      - name: Get current version
+        id: current_version
+        run: |
+          # Get the latest version tag
+          CURRENT_VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 2>/dev/null || echo "v1.0.0")
+          # Remove 'v' prefix
+          CURRENT_VERSION=${CURRENT_VERSION#v}
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Determine version bump type
+        id: bump_type
+        run: |
+          # Get the last commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+          
+          # Determine bump type based on commit message
+          if echo "$COMMIT_MSG" | grep -q "BREAKING CHANGE"; then
+            echo "bump_type=major" >> $GITHUB_OUTPUT
+            echo "Bump type: major (breaking change detected)"
+          elif echo "$COMMIT_MSG" | grep -q "^feat:"; then
+            echo "bump_type=minor" >> $GITHUB_OUTPUT
+            echo "Bump type: minor (feature detected)"
+          elif echo "$COMMIT_MSG" | grep -q "^fix:"; then
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Bump type: patch (fix detected)"
+          else
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Bump type: patch (default)"
+          fi
+
+      - name: Calculate new version
         id: bump_version
-        uses: phips28/gh-action-bump-version@v9.1.0
-        with:
-          tag-prefix: 'v'
-          commit-message: 'ci: bump version to {version}'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_VERSION="${{ steps.current_version.outputs.current_version }}"
+          BUMP_TYPE="${{ steps.bump_type.outputs.bump_type }}"
+          
+          # Parse current version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Bump version based on type
+          case $BUMP_TYPE in
+            "major")
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            "minor")
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            "patch")
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "newTag=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ steps.bump_version.outputs.newTag }}"
+          TAG_NAME="v$NEW_VERSION"
+          
+          # Check if tag already exists
+          if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
+            echo "Tag $TAG_NAME already exists, skipping tag creation"
+          else
+            # Create tag
+            git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+            echo "Created tag: $TAG_NAME"
+            
+            # Push tag
+            git push origin "$TAG_NAME"
+            echo "Pushed tag: $TAG_NAME"
+          fi
 
   test:
     name: Run tests and collect coverage

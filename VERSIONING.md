@@ -10,6 +10,12 @@ Versions follow the format: `vX.Y.Z` (e.g., `v1.2.3`)
 - **Minor (Y)**: New features, backward-compatible additions
 - **Patch (Z)**: Bug fixes, backward-compatible changes
 
+## 🚀 Current Version
+
+**Current version: `v1.0.7`**
+
+The next version will be determined by your commit message when you push to the CI/CD branch.
+
 ## 🔄 Version Detection Priority
 
 The system detects versions in this order:
@@ -24,11 +30,21 @@ The system detects versions in this order:
 
 1. **Push to CI/CD branch** triggers automatic version bump
 2. **Version is incremented** according to commit messages:
-   - `feat:` → Minor version bump
-   - `fix:` → Patch version bump
-   - `BREAKING CHANGE:` → Major version bump
+   - `feat:` → Minor version bump (1.0.7 → 1.1.0)
+   - `fix:` → Patch version bump (1.0.7 → 1.0.8)
+   - `BREAKING CHANGE:` → Major version bump (1.0.7 → 2.0.0)
+   - Other commits → Patch version bump (1.0.7 → 1.0.8)
 3. **New tag is created** and pushed automatically
 4. **Single version is published** to all platforms
+
+### Commit Message Examples
+
+| Commit Message | Version Bump | New Version |
+|----------------|--------------|-------------|
+| `feat: add new dashboard` | Minor | 1.0.7 → 1.1.0 |
+| `fix: resolve login bug` | Patch | 1.0.7 → 1.0.8 |
+| `BREAKING CHANGE: API redesign` | Major | 1.0.7 → 2.0.0 |
+| `docs: update README` | Patch | 1.0.7 → 1.0.8 |
 
 ### No Manual Versioning Required
 
@@ -45,7 +61,7 @@ The Python package version is automatically extracted from Git tags:
 
 ```python
 from src import __version__
-print(__version__)  # e.g., "1.2.3"
+print(__version__)  # e.g., "1.0.7"
 ```
 
 ### Docker Images
@@ -57,7 +73,7 @@ Only **one production image** is published per version:
 docker pull akshaychikhalkar/carla-driving-simulator-client:latest
 
 # Specific version
-docker pull akshaychikhalkar/carla-driving-simulator-client:1.2.3
+docker pull akshaychikhalkar/carla-driving-simulator-client:1.0.7
 ```
 
 ## 🔧 CI/CD Integration
@@ -88,7 +104,7 @@ git tag --list "v*"
 git describe --tags --match "v[0-9]*" --abbrev=0
 
 # Check if a version exists
-git tag -l v1.2.3
+git tag -l v1.0.7
 ```
 
 ## 🎯 Best Practices
