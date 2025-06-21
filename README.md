@@ -2,34 +2,34 @@
 
 <p align="left">
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
-        <img src="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD&job=Test+Docker+Builds+and+Save+Images&event=push" alt="CI/CD Pipeline">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=CI%2FCD%20Pipeline&logo=github" alt="CI/CD Pipeline">
     </a>
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
-        <img src="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD&job=Run+tests+and+collect+coverage&event=push" alt="Tests">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=Tests&logo=github" alt="Tests">
     </a>
     <a href="https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
-        <img src="https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client/branch/CI%2FCD/graph/badge.svg" alt="Codecov">
+        <img src="https://img.shields.io/codecov/c/github/akshaychikhalkar/carla-driving-simulator-client/CI%2FCD?logo=codecov" alt="Codecov">
     </a>
     <a href="https://carla-driving-simulator-client.readthedocs.io/en/latest/" target="_blank">
-        <img src="https://readthedocs.org/projects/carla-driving-simulator-client/badge/?version=latest" alt="Documentation Status">
+        <img src="https://img.shields.io/readthedocs/carla-driving-simulator-client?logo=read-the-docs" alt="Documentation Status">
     </a>
     <a href="https://opensource.org/licenses/MIT" target="_blank">
-        <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
+        <img src="https://img.shields.io/github/license/akshaychikhalkar/carla-driving-simulator-client" alt="License">
     </a>
     <a href="https://www.python.org/downloads/" target="_blank">
-        <img src="https://img.shields.io/badge/python-3.11-blue.svg" alt="Python 3.11">
+        <img src="https://img.shields.io/badge/python-3.11-blue.svg?logo=python" alt="Python 3.11">
     </a>
     <a href="https://github.com/psf/black" target="_blank">
         <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black">
     </a>
-    <a href="https://badge.fury.io/py/carla-driving-simulator-client" target="_blank">
-        <img src="https://badge.fury.io/py/carla-driving-simulator-client.svg" alt="PyPI version">
+    <a href="https://pypi.org/project/carla-driving-simulator-client/" target="_blank">
+        <img src="https://img.shields.io/pypi/v/carla-driving-simulator-client?logo=pypi" alt="PyPI version">
     </a>
     <a href="https://hub.docker.com/r/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
-        <img src="https://img.shields.io/docker/pulls/akshaychikhalkar/carla-driving-simulator-client.svg" alt="Docker Hub">
+        <img src="https://img.shields.io/docker/pulls/akshaychikhalkar/carla-driving-simulator-client?logo=docker" alt="Docker Hub">
     </a>
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases" target="_blank">
-        <img src="https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub release">
+        <img src="https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client?logo=github" alt="GitHub release">
     </a>
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues" target="_blank">
         <img src="https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub issues">
