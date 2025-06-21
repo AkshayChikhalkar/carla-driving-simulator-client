@@ -1,18 +1,49 @@
 # CARLA Driving Simulator Client
 
-[![CI/CD Pipeline](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml)
-[![Tests](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml/badge.svg?branch=CI%2FCD)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml)
-[![codecov](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client/branch/CI%2FCD/graph/badge.svg)](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client)
-[![Documentation Status](https://readthedocs.org/projects/carla-driving-simulator-client/badge/?version=latest)](https://carla-driving-simulator-client.readthedocs.io/en/latest/?badge=latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![PyPI version](https://badge.fury.io/py/carla-driving-simulator-client.svg)](https://badge.fury.io/py/carla-driving-simulator-client)
-[![Docker Hub](https://img.shields.io/docker/pulls/akshaychikhalkar/carla-driving-simulator-client.svg)](https://hub.docker.com/r/akshaychikhalkar/carla-driving-simulator-client)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases)
-[![GitHub issues](https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls)
-
+<p align="left">
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=CI%2FCD%20Pipeline&logo=github" alt="CI/CD Pipeline">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=Tests&logo=github" alt="Tests">
+    </a>
+    <a href="https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/codecov/c/github/akshaychikhalkar/carla-driving-simulator-client/CI%2FCD?logo=codecov" alt="Codecov">
+    </a>
+    <a href="https://carla-driving-simulator-client.readthedocs.io/en/latest/" target="_blank">
+        <img src="https://img.shields.io/readthedocs/carla-driving-simulator-client?logo=read-the-docs" alt="Documentation Status">
+    </a>
+    <a href="https://opensource.org/licenses/MIT" target="_blank">
+        <img src="https://img.shields.io/github/license/akshaychikhalkar/carla-driving-simulator-client" alt="License">
+    </a>
+    <a href="https://www.python.org/downloads/" target="_blank">
+        <img src="https://img.shields.io/badge/python-3.11-blue.svg?logo=python" alt="Python 3.11">
+    </a>
+    <a href="https://github.com/psf/black" target="_blank">
+        <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black">
+    </a>
+    <a href="https://pypi.org/project/carla-driving-simulator-client/" target="_blank">
+        <img src="https://img.shields.io/pypi/v/carla-driving-simulator-client?logo=pypi" alt="PyPI version">
+    </a>
+    <a href="https://hub.docker.com/r/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/docker/pulls/akshaychikhalkar/carla-driving-simulator-client?logo=docker" alt="Docker Hub">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases" target="_blank">
+        <img src="https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client?logo=github" alt="GitHub release">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues" target="_blank">
+        <img src="https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub issues">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls" target="_blank">
+        <img src="https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub pull requests">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/commits/CI/CD" target="_blank">
+        <img src="https://img.shields.io/github/last-commit/akshaychikhalkar/carla-driving-simulator-client/CI/CD" alt="GitHub last commit">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/github/repo-size/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub repo size">
+    </a>
+</p>
 
 A personal project for experimenting with CARLA client, featuring vehicle control, sensor management, and visualization capabilities.
 

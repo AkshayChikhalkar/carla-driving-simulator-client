@@ -1,22 +1,58 @@
 API Reference
 =============
 
-This is the API reference for the project.
+This section provides an auto-generated summary of the package's API.
 
-.. toctree::
-   :maxdepth: 2
+Core Modules
+------------
 
-.. automodule:: src
+.. automodule:: core
    :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive:
 
-.. rubric:: Modules
+Control
+-------
 
-.. autosummary::
-   :toctree: generated
+.. automodule:: control
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive:
 
-   src.control.controller
-   src.control.keyboard
-   src.core.simulation_manager
-   src.core.vehicle
-   src.scenarios.base_scenario
-   src.utils.config 
+Scenarios
+---------
+
+.. automodule:: scenarios
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive:
+
+Database
+--------
+
+.. automodule:: database
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive:
+
+Utilities
+---------
+
+.. automodule:: utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive:
+
+Visualization
+-------------
+
+.. automodule:: visualization
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :recursive: 
