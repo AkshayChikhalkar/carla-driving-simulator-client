@@ -8,7 +8,7 @@ SCHEMA_NAME = "carla_simulator"
 
 # Database configuration
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/carla_simulator"
+    "DATABASE_URL", "postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator"
 )
 
 # Create SQLAlchemy engine with schema

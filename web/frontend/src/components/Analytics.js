@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 
-const GRAFANA_URL = 'http://localhost:3001/d/carla-simulator-metrics?orgId=1&kiosk'; 
+const GRAFANA_URL = 'http://localhost:3005/d/carla-simulator-metrics?orgId=1&kiosk'; 
 
 const Analytics = () => {
   return (

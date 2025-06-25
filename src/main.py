@@ -1,7 +1,13 @@
 """
 Main entry point for the CARLA Driving Simulator.
 """
+import os
 
+if "XDG_RUNTIME_DIR" not in os.environ:
+    os.environ["XDG_RUNTIME_DIR"] = "/tmp/xdg"
+    if not os.path.exists("/tmp/xdg"):
+        os.makedirs("/tmp/xdg", exist_ok=True)
+        
 import sys
 from typing import Optional, List
 import uuid

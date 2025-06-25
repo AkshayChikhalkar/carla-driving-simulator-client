@@ -1,3 +1,10 @@
+import os
+
+if "XDG_RUNTIME_DIR" not in os.environ:
+    os.environ["XDG_RUNTIME_DIR"] = "/tmp/xdg"
+    if not os.path.exists("/tmp/xdg"):
+        os.makedirs("/tmp/xdg", exist_ok=True)
+
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
