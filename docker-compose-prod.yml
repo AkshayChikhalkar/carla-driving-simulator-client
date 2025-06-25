@@ -1,0 +1,103 @@
+services:
+  carla-driving-simulator-client:
+    image: akshaychikhalkar/carla-simulator-client:dev_v1.0
+    container_name: carla-client
+    pull_policy: always
+    ports:
+      - "3000:3000"  # Frontend
+    environment:
+      - PYTHONPATH=/app
+      - HOST=0.0.0.0
+      - REACT_APP_API_URL=http://localhost:8000
+      - WDS_SOCKET_HOST=0.0.0.0
+      - WDS_SOCKET_PORT=3000
+      - DATABASE_URL=postgresql://carla_user:carla_password@postgres:5432/carla_simulator
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./config:/app/config
+    depends_on:
+      - carla-server
+      - postgres
+      - grafana
+    shm_size: "2g"
+    ulimits:
+      stack: 67108864
+
+  carla-server:
+    image: carlasim/carla:0.10.0
+    container_name: carla-server
+    privileged: true
+    runtime: nvidia
+    ports:
+      - "2000-2002:2000-2002"
+    shm_size: "32g"
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    env_file:
+      - .env
+    volumes:
+      - ./carla-server-scripts/start.sh:/start.sh:ro
+    command: bash /start.sh
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2
+
+  postgres:
+    image: postgres:13
+    container_name: carla-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./src/database/init/00-init-check.sql:/docker-entrypoint-initdb.d/00-init-check.sql
+      - ./src/database/init/01-init-user-db.sql:/docker-entrypoint-initdb.d/01-init-user-db.sql
+      - ./src/database/init/02-init-schema.sql:/docker-entrypoint-initdb.d/02-init-schema.sql
+      - ./src/database/init/03-init-tables.sql:/docker-entrypoint-initdb.d/03-init-tables.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: carla-grafana
+    ports:
+      - "3005:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  grafana_data:
