@@ -150,7 +150,9 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     } catch (error) {
       logger.error('Error starting simulation:', error);
       setStatus('Error starting simulation');
-      setError('Failed to start simulation, please try again!');
+      // Use backend error message if available
+      const backendMsg = error.response?.data?.detail || 'Failed to start simulation, please try again!';
+      setError(backendMsg);
       setIsRunning(false);
     } finally {
       // Reset isStarting after a short delay to ensure the button state is visible
@@ -201,7 +203,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         } catch (error) {
           logger.error('Error stopping simulation:', error);
           setStatus('Error stopping simulation');
-          setError('Failed to stop simulation properly. Please try again.');
+          setError('Failed to stop simulation. Please try again.');
         } finally {
           // Add a small delay before resetting the stopping state
           setTimeout(() => {

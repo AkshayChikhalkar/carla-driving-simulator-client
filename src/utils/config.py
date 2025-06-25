@@ -341,6 +341,7 @@ class Config:
     controller: ControllerConfig
     vehicle: VehicleConfig
     scenarios: ScenarioConfig
+    web_mode: bool = False
 
 
 def load_config(config_path: str) -> Config:
@@ -348,7 +349,7 @@ def load_config(config_path: str) -> Config:
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
 
-    return Config(
+    config = Config(
         server=ServerConfig(
             host=config_dict["server"]["host"],
             port=config_dict["server"]["port"],
@@ -374,6 +375,11 @@ def load_config(config_path: str) -> Config:
         vehicle=VehicleConfig(**config_dict["vehicle"]),
         scenarios=ScenarioConfig(**config_dict["scenarios"]),
     )
+
+    if os.environ.get("WEB_MODE", "false").lower() == "true":
+        config.web_mode = True
+
+    return config
 
 
 def save_config(config: Config, config_path: str) -> None:
@@ -528,6 +534,7 @@ def save_config(config: Config, config_path: str) -> None:
                 "cutting_speed": config.scenarios.vehicle_cutting.cutting_speed,
             },
         },
+        "web_mode": config.web_mode,
     }
 
     with open(config_path, "w") as f:

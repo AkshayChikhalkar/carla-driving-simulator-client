@@ -64,7 +64,14 @@ ENV PYTHONPATH=/app \
     FRONTEND_PORT=3000 \
     LOG_LEVEL=INFO \
     DEBUG=true \
-    TESTING=false
+    TESTING=false \
+    # Container-specific environment variables for vehicle spawning fixes
+    CONTAINER_ENV=true \
+    WEB_MODE=true \
+    CARLA_CONNECTION_TIMEOUT=60.0 \
+    CARLA_SPAWN_TIMEOUT=30.0 \
+    CARLA_SYNC_MODE=true \
+    CARLA_FIXED_DELTA_SECONDS=0.05
 
 # Copy start script (better than inline)
 COPY start.sh /app/start.sh
