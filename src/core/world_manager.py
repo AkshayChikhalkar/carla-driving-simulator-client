@@ -174,7 +174,7 @@ class WorldManager(IWorldManager):
         self, blueprint: carla.ActorBlueprint, transform: carla.Transform
     ) -> Optional[carla.Actor]:
         """Spawn an actor in the world using the centralized spawning logic"""
-        return self._spawn_with_retry(blueprint, transform)
+        return self._spawn_with_retry(blueprint, transform, spawn_id="direct_spawn")
 
     def destroy_actor(self, actor: carla.Actor) -> None:
         """Destroy an actor from the world"""
@@ -211,6 +211,7 @@ class WorldManager(IWorldManager):
         blueprint: carla.ActorBlueprint,
         spawn_point: carla.Transform,
         max_attempts: int = 10,
+        spawn_id: str = "unknown",
     ) -> Optional[carla.Actor]:
         """
         Attempt to spawn an actor with retry logic and location adjustment
@@ -219,6 +220,7 @@ class WorldManager(IWorldManager):
             blueprint: Actor blueprint to spawn
             spawn_point: Initial spawn point
             max_attempts: Maximum number of spawn attempts
+            spawn_id: Identifier for this spawn attempt (for debugging)
 
         Returns:
             Optional[carla.Actor]: Spawned actor if successful, None otherwise
@@ -232,15 +234,47 @@ class WorldManager(IWorldManager):
         # Try initial spawn point first
         for attempt in range(max_attempts):
             try:
+                self.logger.debug(f"[{spawn_id}] Spawn attempt {attempt + 1}/{max_attempts} for {blueprint.id}")
+                
                 # Try to spawn at current spawn point
                 actor = self.world.spawn_actor(blueprint, spawn_point)
-                if actor and actor.is_alive:
-                    self.logger.debug(
-                        f"{actor.type_id} spawned successfully at {spawn_point.location}"
-                    )
-                    return actor
-                elif actor:
-                    actor.destroy()
+                
+                if actor:
+                    self.logger.debug(f"[{spawn_id}] Actor object created: {actor}")
+                    self.logger.debug(f"[{spawn_id}] Actor type: {type(actor)}")
+                    self.logger.debug(f"[{spawn_id}] Actor type_id: {actor.type_id}")
+                    self.logger.debug(f"[{spawn_id}] Actor is_alive: {actor.is_alive}")
+                    
+                    if actor.is_alive:
+                        self.logger.info(
+                            f"[{spawn_id}] {actor.type_id} spawned successfully at {spawn_point.location} on attempt {attempt + 1}"
+                        )
+                        
+                        # Tick the world to ensure the actor is properly registered in synchronous mode
+                        try:
+                            self.world.tick()
+                            self.logger.debug(f"[{spawn_id}] World ticked after successful spawn")
+                        except Exception as e:
+                            self.logger.warning(f"[{spawn_id}] Error ticking world after spawn: {str(e)}")
+                        
+                        # Double-check actor is still alive after tick
+                        if not actor.is_alive:
+                            self.logger.warning(f"[{spawn_id}] Actor not alive after world tick, destroying and retrying")
+                            try:
+                                actor.destroy()
+                            except Exception as destroy_error:
+                                self.logger.warning(f"[{spawn_id}] Error destroying actor: {str(destroy_error)}")
+                            continue
+                        
+                        return actor
+                    else:
+                        self.logger.warning(f"[{spawn_id}] Actor spawned but not alive, destroying and retrying")
+                        try:
+                            actor.destroy()
+                        except Exception as destroy_error:
+                            self.logger.warning(f"[{spawn_id}] Error destroying actor: {str(destroy_error)}")
+                else:
+                    self.logger.warning(f"[{spawn_id}] Spawn returned None for {blueprint.id}")
 
                 # If spawn failed, try a different spawn point
                 if attempt < max_attempts - 1:
@@ -261,29 +295,44 @@ class WorldManager(IWorldManager):
 
                     spawn_point = new_spawn_point
                     self.logger.info(
-                        f"Trying new spawn point at {spawn_point.location}"
+                        f"[{spawn_id}] Trying new spawn point at {spawn_point.location}"
                     )
-                    time.sleep(0.5)  # Wait before retry
+                    time.sleep(1.0)  # Increased wait time for synchronous mode
 
             except Exception as e:
-                self.logger.warning(f"Spawn attempt {attempt + 1} failed: {str(e)}")
+                self.logger.warning(f"[{spawn_id}] Spawn attempt {attempt + 1} failed: {str(e)}")
+                self.logger.debug(f"[{spawn_id}] Exception type: {type(e).__name__}")
                 if attempt < max_attempts - 1:
                     # Try a different spawn point on next attempt
                     spawn_point = random.choice(spawn_points)
-                    time.sleep(0.5)  # Wait before retry
+                    time.sleep(1.0)  # Increased wait time for synchronous mode
                 continue
 
-        self.logger.info(f"Successfully spawned all actors")
+        self.logger.error(f"[{spawn_id}] Failed to spawn {blueprint.id} after {max_attempts} attempts")
         return None
 
     def create_vehicle(self) -> Optional[carla.Vehicle]:
         """Create and spawn a vehicle in the world"""
         try:
+            self.logger.info(f"Starting vehicle creation for model: {self.vehicle_model}")
+            
             # Get vehicle blueprint
             vehicle_bp = self.blueprint_library.find(self.vehicle_model)
             if not vehicle_bp:
                 self.logger.error(f"Vehicle blueprint {self.vehicle_model} not found")
+                # List available vehicle blueprints for debugging
+                available_vehicles = self.blueprint_library.filter("vehicle.*")
+                self.logger.info(f"Available vehicle blueprints: {[bp.id for bp in available_vehicles[:5]]}")
                 return None
+
+            self.logger.info(f"Found vehicle blueprint: {vehicle_bp.id}")
+
+            # Check spawn points
+            if not self.spawn_points:
+                self.logger.error("No spawn points available")
+                return None
+                
+            self.logger.info(f"Using spawn point: {self.spawn_points[0].location}")
 
             # Set vehicle attributes with proper CARLA attribute names
             try:
@@ -297,14 +346,43 @@ class WorldManager(IWorldManager):
 
                 # Try to spawn vehicle with retries
                 spawn_point = self.spawn_points[0]  # Use first spawn point
-                self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point)
+                self.logger.info(f"Attempting to spawn vehicle at {spawn_point.location}")
+                
+                self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point, spawn_id="main_vehicle")
 
                 if not self.vehicle:
                     self.logger.error("Failed to spawn vehicle after all attempts")
                     return None
 
+                self.logger.info(f"Vehicle spawned successfully: {self.vehicle.type_id}")
+                self.logger.debug(f"Vehicle object: {self.vehicle}")
+                self.logger.debug(f"Vehicle is_alive: {self.vehicle.is_alive}")
+
+                # Tick the world to ensure the vehicle is properly registered
+                try:
+                    self.world.tick()
+                    self.logger.debug("World ticked after vehicle spawn")
+                except Exception as e:
+                    self.logger.warning(f"Error ticking world after spawn: {str(e)}")
+
+                # Double-check vehicle is still alive after tick
+                if not self.vehicle.is_alive:
+                    self.logger.error("Vehicle is not alive after world tick")
+                    return None
+
                 # Apply physics control after spawning
-                self.vehicle.apply_physics_control(physics_control)
+                try:
+                    self.vehicle.apply_physics_control(physics_control)
+                    self.logger.debug("Physics control applied successfully")
+                    
+                    # Tick again after applying physics control
+                    self.world.tick()
+                    self.logger.debug("World ticked after physics control")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error applying physics control: {str(e)}")
+                    # Don't destroy the vehicle, just log the error
+                    pass
 
                 # Set additional vehicle attributes if available
                 if hasattr(vehicle_bp, "set_attribute"):
@@ -337,6 +415,19 @@ class WorldManager(IWorldManager):
                                 f"Could not set engine_max_rpm for {self.vehicle.type_id}: {str(e)}"
                             )
 
+                # Final tick to ensure everything is registered
+                try:
+                    self.world.tick()
+                    self.logger.debug("Final world tick after vehicle setup")
+                except Exception as e:
+                    self.logger.warning(f"Error in final world tick: {str(e)}")
+
+                # Final check before returning
+                if not self.vehicle.is_alive:
+                    self.logger.error("Vehicle is not alive after setup")
+                    return None
+                    
+                self.logger.info(f"Vehicle creation completed successfully: {self.vehicle.type_id}")
                 return self.vehicle
 
             except Exception as e:
@@ -402,11 +493,11 @@ class WorldManager(IWorldManager):
         self.traffic_manager.set_random_device_seed(0)
 
         # Spawn traffic vehicles
-        for _ in range(self.config.num_vehicles):
+        for i in range(self.config.num_vehicles):
             transform = random.choice(self.world.get_map().get_spawn_points())
             bp = random.choice(self.world.get_blueprint_library().filter("vehicle.*"))
 
-            npc = self._spawn_with_retry(bp, transform)
+            npc = self._spawn_with_retry(bp, transform, spawn_id=f"traffic_vehicle_{i}")
             if npc is not None:
                 npc.set_autopilot(True, self.traffic_manager_port)
                 self.traffic_manager.ignore_lights_percentage(npc, 0)
@@ -503,7 +594,7 @@ class WorldManager(IWorldManager):
                     blueprint.set_attribute(key, str(value))
 
             # Spawn the actor
-            actor = self._spawn_with_retry(blueprint, transform)
+            actor = self._spawn_with_retry(blueprint, transform, spawn_id=f"scenario_{actor_type}")
             if actor:
                 self._scenario_actors.append(actor)
                 self.logger.debug(
