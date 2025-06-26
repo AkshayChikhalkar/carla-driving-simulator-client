@@ -243,23 +243,35 @@ class WorldManager(IWorldManager):
                     self.logger.debug(f"[{spawn_id}] Actor object created: {actor}")
                     self.logger.debug(f"[{spawn_id}] Actor type: {type(actor)}")
                     self.logger.debug(f"[{spawn_id}] Actor type_id: {actor.type_id}")
-                    self.logger.debug(f"[{spawn_id}] Actor is_alive: {actor.is_alive}")
+                    
+                    # CRITICAL FIX: Tick the world immediately after spawning in synchronous mode
+                    # This ensures the actor is properly registered before checking is_alive
+                    if self.synchronous_mode:
+                        try:
+                            self.world.tick()
+                            self.logger.debug(f"[{spawn_id}] World ticked immediately after spawn")
+                            # Small delay to ensure CARLA processes the spawn
+                            time.sleep(0.1)
+                        except Exception as e:
+                            self.logger.warning(f"[{spawn_id}] Error ticking world after spawn: {str(e)}")
+                    
+                    self.logger.debug(f"[{spawn_id}] Actor is_alive after tick: {actor.is_alive}")
                     
                     if actor.is_alive:
                         self.logger.info(
                             f"[{spawn_id}] {actor.type_id} spawned successfully at {spawn_point.location} on attempt {attempt + 1}"
                         )
                         
-                        # Tick the world to ensure the actor is properly registered in synchronous mode
+                        # Additional tick to ensure everything is stable
                         try:
                             self.world.tick()
-                            self.logger.debug(f"[{spawn_id}] World ticked after successful spawn")
+                            self.logger.debug(f"[{spawn_id}] World ticked after successful spawn verification")
                         except Exception as e:
-                            self.logger.warning(f"[{spawn_id}] Error ticking world after spawn: {str(e)}")
+                            self.logger.warning(f"[{spawn_id}] Error ticking world after spawn verification: {str(e)}")
                         
-                        # Double-check actor is still alive after tick
+                        # Final check that actor is still alive after additional tick
                         if not actor.is_alive:
-                            self.logger.warning(f"[{spawn_id}] Actor not alive after world tick, destroying and retrying")
+                            self.logger.warning(f"[{spawn_id}] Actor not alive after final tick, destroying and retrying")
                             try:
                                 actor.destroy()
                             except Exception as destroy_error:
