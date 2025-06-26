@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Create necessary directories
-RUN mkdir -p /app/config /app/logs /app/reports /app/postgres-data /app/grafana
+RUN mkdir -p /app/config /app/logs /app/reports
 
 # Copy requirements and wheels first for better layer caching
 COPY requirements-docker.txt ./
@@ -35,9 +35,6 @@ COPY src/ ./src/
 COPY web/backend/ ./web/backend/
 COPY setup.py run.py VERSION README.md ./
 RUN pip install -e .
-
-# Copy Grafana files
-COPY grafana/ ./grafana/
 
 # Copy frontend source
 COPY web/frontend/package*.json web/frontend/craco.config.js ./web/frontend/
@@ -56,7 +53,7 @@ ENV PYTHONPATH=/app \
     REACT_APP_API_URL=http://localhost:8000 \
     WDS_SOCKET_HOST=0.0.0.0 \
     WDS_SOCKET_PORT=3000 \
-    DATABASE_URL=postgresql://carla_user:carla_password@postgres:5432/carla_simulator \
+    DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator \
     CARLA_HOST=carla-server \
     CARLA_PORT=2000 \
     WEB_HOST=0.0.0.0 \
@@ -67,12 +64,7 @@ ENV PYTHONPATH=/app \
     TESTING=false \
     # Container-specific environment variables for vehicle spawning fixes
     CONTAINER_ENV=true \
-    WEB_MODE=true \
-    CARLA_CONNECTION_TIMEOUT=60.0 \
-    CARLA_SPAWN_TIMEOUT=30.0 \
-    CARLA_SYNC_MODE=true \
-    CARLA_FIXED_DELTA_SECONDS=0.05
-
+    WEB_MODE=true
 # Copy start script (better than inline)
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh

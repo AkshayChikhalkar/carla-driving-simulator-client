@@ -1,20 +1,27 @@
 services:
   carla-driving-simulator-client:
-    image: akshaychikhalkar/carla-simulator-client:dev_v1.0
+    image: akshaychikhalkar/carla-simulator-client:dev_v1.2
     container_name: carla-client
+    shm_size: "2g"
+    runtime: nvidia
+    ulimits:
+      stack: 67108864  #
     pull_policy: always
     ports:
-      - "3000:3000"  # Frontend
+      - "3000:3000"  # Frontend only - backend communicates internally
     environment:
       - PYTHONPATH=/app
       - HOST=0.0.0.0
       - REACT_APP_API_URL=http://localhost:8000
       - WDS_SOCKET_HOST=0.0.0.0
       - WDS_SOCKET_PORT=3000
-      - DATABASE_URL=postgresql://carla_user:carla_password@postgres:5432/carla_simulator
+      - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
+      - CARLA_HOST=carla-server  # Connect to CARLA server container
+      - CARLA_PORT=2000
+      - NVIDIA_VISIBLE_DEVICES=all
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 30s
       retries: 3
@@ -24,12 +31,12 @@ services:
       - ./reports:/app/reports
       - ./config:/app/config
     depends_on:
-      - carla-server
-      - postgres
-      - grafana
-    shm_size: "2g"
-    ulimits:
-      stack: 67108864
+      carla-server:
+        condition: service_healthy
+    networks:
+      - carla-network
+
+
 
   carla-server:
     image: carlasim/carla:0.10.0
@@ -54,50 +61,15 @@ services:
     command: bash /start.sh
     environment:
       - NVIDIA_VISIBLE_DEVICES=2
-
-  postgres:
-    image: postgres:13
-    container_name: carla-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    volumes:
-      - ./postgres-data:/var/lib/postgresql/data
-      - ./src/database/init/00-init-check.sql:/docker-entrypoint-initdb.d/00-init-check.sql
-      - ./src/database/init/01-init-user-db.sql:/docker-entrypoint-initdb.d/01-init-user-db.sql
-      - ./src/database/init/02-init-schema.sql:/docker-entrypoint-initdb.d/02-init-schema.sql
-      - ./src/database/init/03-init-tables.sql:/docker-entrypoint-initdb.d/03-init-tables.sql
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: carla-grafana
-    ports:
-      - "3005:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    restart: unless-stopped
-    depends_on:
-      - postgres
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 60s
+    networks:
+      - carla-network
 
-volumes:
-  postgres_data:
-  grafana_data:
+networks:
+  carla-network:
+    driver: bridge
