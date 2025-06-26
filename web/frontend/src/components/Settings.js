@@ -47,13 +47,6 @@ function Settings() {
     setNotification({ ...notification, open: false });
   };
 
-  const handleConfigChange = (key, value) => {
-    logger.debug(`Configuration change - ${key}: ${value}`);
-    setEditedConfig(prev => ({
-      ...prev,
-      [key]: value,
-    }));
-  };
 
   const handleConfigChangeByPath = (path, value) => {
     setEditedConfig(prev => {
