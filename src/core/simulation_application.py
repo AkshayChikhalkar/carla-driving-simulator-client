@@ -244,72 +244,112 @@ class SimulationApplication:
         self.state.start()
         self.logger.info("Starting simulation loop")
 
+        # Test database connection before starting simulation loop
+        # try:
+        #     db = SessionLocal()
+        #     db.execute("SELECT 1")  # Simple test query
+        #     db.close()
+        #     self.logger.info("Database connection test successful")
+        # except Exception as e:
+        #     self.logger.error(f"Database connection test failed: {str(e)}")
+        #     # Continue anyway, but log the issue
+
         try:
             world = self.connection.client.get_world()
+            frame_count = 0
+            
             while self.state.is_running and not self.current_scenario.is_completed():
+                frame_count += 1
                 loop_start = time.time()
+
+                # Debug: Log every 30 frames to track progress
+                if frame_count % 30 == 0:
+                    self.logger.debug(f"Simulation frame {frame_count}: is_running={self.state.is_running}, scenario_completed={self.current_scenario.is_completed()}")
 
                 if self.state.is_paused:
                     time.sleep(0.1)
                     continue
 
                 # Process input first (keyboard events, etc.)
-                if self.vehicle_controller.process_input():
-                    break  # Exit if process_input returns True
+                try:
+                    if self.vehicle_controller.process_input():
+                        self.logger.info("Vehicle controller requested exit")
+                        break  # Exit if process_input returns True
+                except Exception as e:
+                    self.logger.error(f"Error in vehicle controller input processing: {str(e)}")
 
                 # Get sensor data
-                sensor_data = self.sensor_manager.get_sensor_data()
+                try:
+                    sensor_data = self.sensor_manager.get_sensor_data()
+                except Exception as e:
+                    self.logger.error(f"Error getting sensor data: {str(e)}")
+                    sensor_data = {}
 
                 # Get vehicle state
-                vehicle = self.vehicle_controller.get_vehicle()
-                if not vehicle:
+                try:
+                    vehicle = self.vehicle_controller.get_vehicle()
+                    if not vehicle:
+                        self.logger.warning("No vehicle available, skipping frame")
+                        continue
+                except Exception as e:
+                    self.logger.error(f"Error getting vehicle: {str(e)}")
                     continue
 
-                vehicle_state = {
-                    "location": vehicle.get_location(),
-                    "velocity": vehicle.get_velocity(),
-                    "acceleration": vehicle.get_acceleration(),
-                    "transform": vehicle.get_transform(),
-                    "sensor_data": sensor_data,
-                }
+                try:
+                    vehicle_state = {
+                        "location": vehicle.get_location(),
+                        "velocity": vehicle.get_velocity(),
+                        "acceleration": vehicle.get_acceleration(),
+                        "transform": vehicle.get_transform(),
+                        "sensor_data": sensor_data,
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error getting vehicle state: {str(e)}")
+                    continue
 
                 # --- DB: Write vehicle data ---
-                db = SessionLocal()
-                db.add(
-                    VehicleData(
-                        scenario_id=scenario_id,
-                        session_id=self.session_id,
-                        timestamp=datetime.utcnow(),
-                        position_x=vehicle_state["location"].x,
-                        position_y=vehicle_state["location"].y,
-                        position_z=vehicle_state["location"].z,
-                        velocity=vehicle_state["velocity"].length(),
-                        acceleration=vehicle_state["acceleration"].length(),
-                        steering_angle=vehicle_state["transform"].rotation.yaw,
-                        throttle=getattr(vehicle, "throttle", 0.0),
-                        brake=getattr(vehicle, "brake", 0.0),
-                    )
-                )
-                db.commit()
-                db.close()
-                # --- End DB vehicle data ---
-
-                # --- DB: Write sensor data ---
-                db = SessionLocal()
-                for sensor_type, sdata in (
-                    sensor_data.items() if isinstance(sensor_data, dict) else []
-                ):
+                try:
+                    db = SessionLocal()
                     db.add(
-                        SensorData(
+                        VehicleData(
                             scenario_id=scenario_id,
                             session_id=self.session_id,
                             timestamp=datetime.utcnow(),
-                            sensor_type=sensor_type,
-                            data=sdata,
+                            position_x=vehicle_state["location"].x,
+                            position_y=vehicle_state["location"].y,
+                            position_z=vehicle_state["location"].z,
+                            velocity=vehicle_state["velocity"].length(),
+                            acceleration=vehicle_state["acceleration"].length(),
+                            steering_angle=vehicle_state["transform"].rotation.yaw,
+                            throttle=getattr(vehicle, "throttle", 0.0),
+                            brake=getattr(vehicle, "brake", 0.0),
                         )
                     )
-                db.commit()
-                db.close()
+                    db.commit()
+                    db.close()
+                except Exception as e:
+                    self.logger.error(f"Error writing vehicle data to DB: {str(e)}")
+                # --- End DB vehicle data ---
+
+                # --- DB: Write sensor data ---
+                try:
+                    db = SessionLocal()
+                    for sensor_type, sdata in (
+                        sensor_data.items() if isinstance(sensor_data, dict) else []
+                    ):
+                        db.add(
+                            SensorData(
+                                scenario_id=scenario_id,
+                                session_id=self.session_id,
+                                timestamp=datetime.utcnow(),
+                                sensor_type=sensor_type,
+                                data=sdata,
+                            )
+                        )
+                    db.commit()
+                    db.close()
+                except Exception as e:
+                    self.logger.error(f"Error writing sensor data to DB: {str(e)}")
                 # --- End DB sensor data ---
 
                 try:
@@ -375,13 +415,27 @@ class SimulationApplication:
                 except Exception as e:
                     self.logger.error("Exception in logging", exc_info=e)
 
-                world.tick()
+                try:
+                    world.tick()
+                except Exception as e:
+                    self.logger.error(f"Error in world tick: {str(e)}")
+                    break
+
+            # Log why the loop ended
+            if not self.state.is_running:
+                self.logger.info("Simulation loop ended: state.is_running = False")
+            elif self.current_scenario.is_completed():
+                self.logger.info("Simulation loop ended: scenario completed")
+            else:
+                self.logger.info(f"Simulation loop ended: frame_count = {frame_count}")
 
         except Exception as e:
             self.logger.error("Error in simulation loop", exc_info=e)
             raise
         finally:
+            self.logger.info("Simulation loop cleanup starting")
             self.cleanup()
+            self.logger.info("Simulation loop cleanup completed")
 
     def pause(self) -> None:
         """Pause the simulation"""
