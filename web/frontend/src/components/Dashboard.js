@@ -21,10 +21,15 @@ import {
 import axios from 'axios';
 import logger from '../utils/logger';
 
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? window.location.origin + '/api' : '/api';
-const WS_BASE_URL = process.env.NODE_ENV === 'production' ? 
-  window.location.origin.replace('http', 'ws') : 
-  window.location.origin.replace('http', 'ws');
+const API_BASE_URL =
+  window.location.hostname === 'localhost'
+    ? '/api'
+    : `http://${window.location.hostname}:8081/api`;
+const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_BASE_URL =
+  window.location.hostname === 'localhost'
+    ? '/ws/simulation-view'
+    : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
   const [scenarios, setScenarios] = useState([]);
@@ -52,69 +57,101 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       .catch(error => {
         setScenarios([]);
         setStatus('Error loading scenarios');
-        logger.error('Error fetching scenarios:', error);
+        if (process.env.NODE_ENV !== 'production') {
+          logger.error('Error fetching scenarios:', error);
+        }
       });
 
     // Setup WebSocket connection for both video and status
+    let ws;
+    let isUnmounted = false;
+    let lastFrameTime = 0;
+    const FRAME_INTERVAL = 1000 / 30; // Target 30 FPS
+
     const setupWebSocket = () => {
-      const wsUrl = `${WS_BASE_URL}/ws/simulation-view`;
-      wsRef.current = new WebSocket(wsUrl);
-      
-      wsRef.current.onopen = () => {
-        logger.info('WebSocket connected');
+      ws = new WebSocket(WS_BASE_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('WebSocket connection opened');
+        }
         setStatus('Connected to simulation server');
       };
-      
-      wsRef.current.onclose = () => {
-        logger.info('WebSocket disconnected');
+
+      ws.onclose = () => {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('WebSocket connection closed');
+        }
         setIsRunning(false);
         setIsPaused(false);
         setStatus('Disconnected from simulation server');
-        // Attempt to reconnect after 2 seconds
-        setTimeout(setupWebSocket, 2000);
+        // Attempt to reconnect after 2 seconds, but only if not unmounted
+        if (!isUnmounted) setTimeout(setupWebSocket, 2000);
       };
-      
-      wsRef.current.onerror = (error) => {
-        logger.error('WebSocket error:', error);
+
+      ws.onerror = (e) => {
+        if (e && e.code && (e.code === 1001 || e.code === 1005)) {
+          // Suppress normal disconnect errors
+          return;
+        }
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('WebSocket error', e);
+        }
         setStatus('Error in simulation connection');
       };
-      
-      wsRef.current.onmessage = (event) => {
+
+      ws.onmessage = (event) => {
         try {
-          // Try to parse as JSON for status updates
           const data = JSON.parse(event.data);
           if (data.type === 'status') {
-            // Update state based on backend information
             const backendRunning = data.is_running;
             const isTransitioning = data.is_transitioning || false;
-            
-            // Only update isRunning if we're not in the starting process
-            if (!isStarting) {
-              setIsRunning(backendRunning);
+
+            // If stop is in progress, keep overlay and all buttons disabled until stopped
+            if (isStopping) {
+              setStatus('Stopping simulation...');
               if (!backendRunning) {
                 setIsPaused(false);
                 setIsStopping(false);
+                setIsSkipping(false);
                 setHasReceivedFrame(false);
+                setStatus('Ready to Start');
               }
+              return; // Do not update other UI state while stopping
             }
-            
-            // Update status if transitioning
-            if (isTransitioning) {
+
+            // Only reset isStopping when backend confirms stopped
+            if (!backendRunning && !isStarting) {
+              setIsPaused(false);
+              setIsStopping(false);
+              setIsSkipping(false);
+              setHasReceivedFrame(false);
+              setStatus('Ready to Start');
+            } else if (isSkipping) {
+              setStatus('Skipping scenario...');
+            } else if (isTransitioning) {
               setStatus('Transitioning between scenarios...');
             }
-            
-            // Log state changes for debugging
-            logger.debug(`WebSocket state update: running=${backendRunning}, transitioning=${isTransitioning}`);
+            if (process.env.NODE_ENV !== 'production') {
+              logger.debug(`WebSocket state update: running=${backendRunning}, transitioning=${isTransitioning}, frontend_isStarting=${isStarting}`);
+            }
           }
         } catch (e) {
-          // If not JSON, treat as image data
-          const img = new Image();
+          // If not JSON, treat as image data (frame)
+          const now = Date.now();
+          if (now - lastFrameTime < FRAME_INTERVAL) return; // Throttle to target FPS
+          lastFrameTime = now;
+          const img = new window.Image();
           img.onload = () => {
             const canvas = canvasRef.current;
             if (canvas) {
               const ctx = canvas.getContext('2d');
-              canvas.width = img.width;
-              canvas.height = img.height;
+              if (canvas.width !== img.width || canvas.height !== img.height) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+              }
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
               ctx.drawImage(img, 0, 0);
               setHasReceivedFrame(true);
             }
@@ -127,14 +164,15 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setupWebSocket();
 
     return () => {
+      isUnmounted = true;
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, [isStarting]);
+  }, []); // Only run on mount/unmount
 
   const handleStart = async () => {
-    if (isStarting) return; // Prevent multiple clicks
+    if (isStarting || isRunning) return; // Prevent multiple clicks and starting when already running
     
     try {
       setIsStarting(true);
@@ -149,17 +187,17 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         report,
       });
 
-      // Only set isRunning to true after successful API call
-      setIsRunning(true);
+      // Don't manually set isRunning here - let the WebSocket handle it
+      // This prevents race conditions between API response and WebSocket updates
       setStatus(response.data.message);
-      logger.info(`Simulation started successfully: ${response.data.message}`);
+      logger.info(`Simulation start API call successful: ${response.data.message}`);
     } catch (error) {
       logger.error('Error starting simulation:', error);
       setStatus('Error starting simulation');
       // Use backend error message if available
       const backendMsg = error.response?.data?.detail || 'Failed to start simulation, please try again!';
       setError(backendMsg);
-      setIsRunning(false);
+      // Don't set isRunning to false here - let WebSocket handle it
     } finally {
       // Reset isStarting after a short delay to ensure the button state is visible
       setTimeout(() => {
@@ -170,54 +208,20 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
   const handleStop = async () => {
     if (isStopping) return; // Prevent multiple clicks
-    
     try {
       setIsStopping(true);
       setStatus('Stopping simulation...');
       setError(null); // Clear any previous errors
-      
+      // Do NOT reset isRunning or the canvas here! Wait for WebSocket status update.
       logger.info('Initiating simulation stop');
-      
-      // Reset the entire view immediately
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        // Clear the entire canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // Reset canvas dimensions
-        canvas.width = 0;
-        canvas.height = 0;
-        logger.debug('Canvas completely reset after stop button click');
-      }
-      
-      // Reset all view states immediately
-      setIsRunning(false);
-      setHasReceivedFrame(false);
-      
-      // Call the stop API
-      const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
-      
-      if (response.data.success) {
-        setStatus(response.data.message);
-        logger.info(`Simulation stopped successfully: ${response.data.message}`);
-        
-        // Wait for 2 seconds before showing "Ready to Start"
-        setTimeout(() => {
-          setStatus('Ready to Start');
-          setIsPaused(false);
-        }, 2000);
-      } else {
-        setStatus('Error stopping simulation');
-        setError(response.data.message || 'Failed to stop simulation');
-      }
-      
+      await axios.post(`${API_BASE_URL}/simulation/stop`);
+      // Optionally, set a timeout to show "Still stopping..." if it takes too long.
     } catch (error) {
       logger.error('Error stopping simulation:', error);
       setStatus('Error stopping simulation');
       const errorMsg = error.response?.data?.detail || 'Failed to stop simulation. Please try again.';
       setError(errorMsg);
     } finally {
-      // Add a small delay before resetting the stopping state
       setTimeout(() => {
         setIsStopping(false);
       }, 1000);
@@ -297,7 +301,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         
         // If simulation is complete, update UI after a delay
         if (response.data.message.includes("Simulation complete")) {
-          // Wait for 2 seconds before showing "Ready to Start"
+          setStatus('Simulation complete');
           setTimeout(() => {
             setStatus('Ready to Start');
             setIsRunning(false);
