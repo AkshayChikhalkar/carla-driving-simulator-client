@@ -118,7 +118,7 @@ jobs:
                   - NVIDIA_GPU_MEMORY_ALLOCATION_PERCENT=80
                 ports:
                   - "2000-2002:2000-2002"
-                command: ./CarlaUE4.sh -opengl -RenderOffScreen -nosound -quality-level=low -benchmark -fps=30 -ResX=1920 -ResY=1080
+                command: ./CarlaUnreal.sh -opengl -RenderOffScreen -nosound -quality-level=low -benchmark -fps=30 -ResX=1920 -ResY=1080
                 volumes:
                   - /tmp/.X11-unix:/tmp/.X11-unix
                 shm_size: 32g
