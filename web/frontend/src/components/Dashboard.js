@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
-  Card,
-  CardContent,
   FormControl,
   InputLabel,
   Select,
@@ -12,9 +10,7 @@ import {
   Checkbox,
   Typography,
   Grid,
-  Paper,
-  Switch,
-  IconButton
+  Paper
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -22,8 +18,6 @@ import {
   Pause as PauseIcon,
   SkipNext as SkipNextIcon
 } from '@mui/icons-material';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
-import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
 import logger from '../utils/logger';
 
@@ -90,15 +84,27 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           // Try to parse as JSON for status updates
           const data = JSON.parse(event.data);
           if (data.type === 'status') {
+            // Update state based on backend information
+            const backendRunning = data.is_running;
+            const isTransitioning = data.is_transitioning || false;
+            
             // Only update isRunning if we're not in the starting process
             if (!isStarting) {
-              setIsRunning(data.is_running);
-              if (!data.is_running) {
+              setIsRunning(backendRunning);
+              if (!backendRunning) {
                 setIsPaused(false);
                 setIsStopping(false);
                 setHasReceivedFrame(false);
               }
             }
+            
+            // Update status if transitioning
+            if (isTransitioning) {
+              setStatus('Transitioning between scenarios...');
+            }
+            
+            // Log state changes for debugging
+            logger.debug(`WebSocket state update: running=${backendRunning}, transitioning=${isTransitioning}`);
           }
         } catch (e) {
           // If not JSON, treat as image data
@@ -125,7 +131,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [isStarting]);
 
   const handleStart = async () => {
     if (isStarting) return; // Prevent multiple clicks
@@ -172,7 +178,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       
       logger.info('Initiating simulation stop');
       
-      // Reset the entire view
+      // Reset the entire view immediately
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -184,38 +190,37 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         logger.debug('Canvas completely reset after stop button click');
       }
       
-      // Reset all view states
+      // Reset all view states immediately
       setIsRunning(false);
       setHasReceivedFrame(false);
       
-      // Wait for the transition to complete before stopping the simulation
-      setTimeout(async () => {
-        try {
-          const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
-          setStatus(response.data.message);
-          logger.info(`Simulation stopped successfully: ${response.data.message}`);
-          
-          // Wait for 3 seconds before showing "Ready to Start"
-          setTimeout(() => {
-            setStatus('Ready to Start');
-            setIsPaused(false);
-          }, 3000);
-        } catch (error) {
-          logger.error('Error stopping simulation:', error);
-          setStatus('Error stopping simulation');
-          setError('Failed to stop simulation. Please try again.');
-        } finally {
-          // Add a small delay before resetting the stopping state
-          setTimeout(() => {
-            setIsStopping(false);
-          }, 500);
-        }
-      }, 500); // Match the transition duration
+      // Call the stop API
+      const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
+      
+      if (response.data.success) {
+        setStatus(response.data.message);
+        logger.info(`Simulation stopped successfully: ${response.data.message}`);
+        
+        // Wait for 2 seconds before showing "Ready to Start"
+        setTimeout(() => {
+          setStatus('Ready to Start');
+          setIsPaused(false);
+        }, 2000);
+      } else {
+        setStatus('Error stopping simulation');
+        setError(response.data.message || 'Failed to stop simulation');
+      }
+      
     } catch (error) {
       logger.error('Error stopping simulation:', error);
       setStatus('Error stopping simulation');
-      setError('Failed to stop simulation. Please try again.');
-      setIsStopping(false);
+      const errorMsg = error.response?.data?.detail || 'Failed to stop simulation. Please try again.';
+      setError(errorMsg);
+    } finally {
+      // Add a small delay before resetting the stopping state
+      setTimeout(() => {
+        setIsStopping(false);
+      }, 1000);
     }
   };
 
@@ -280,34 +285,38 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     try {
       setIsSkipping(true);
       setStatus('Skipping scenario...');
+      setError(null); // Clear any previous errors
+      
+      logger.info('Initiating scenario skip');
       
       const response = await axios.post(`${API_BASE_URL}/simulation/skip`);
       
       // Update status based on response
       if (response.data.success) {
-        // Use the message directly from the backend
-      setStatus(response.data.message);
+        setStatus(response.data.message);
         
         // If simulation is complete, update UI after a delay
         if (response.data.message.includes("Simulation complete")) {
-          // Wait for 3 seconds before showing "Ready to Start"
+          // Wait for 2 seconds before showing "Ready to Start"
           setTimeout(() => {
             setStatus('Ready to Start');
             setIsRunning(false);
             setIsPaused(false);
             setHasReceivedFrame(false);
-          }, 3000);
+          }, 2000);
         }
+        // If there's a next scenario, the WebSocket will update the state
       } else {
         setStatus('Error skipping scenario');
-        setError('Failed to skip scenario, please try again!');
+        setError(response.data.message || 'Failed to skip scenario');
       }
       
-      logger.info(`Scenario skipped: ${response.data.message}`);
+      logger.info(`Scenario skip result: ${response.data.message}`);
     } catch (error) {
       logger.error('Error skipping scenario:', error);
       setStatus('Error skipping scenario');
-      setError('Failed to skip scenario, please try again!');
+      const errorMsg = error.response?.data?.detail || 'Failed to skip scenario, please try again!';
+      setError(errorMsg);
     } finally {
       setIsSkipping(false);
     }
@@ -329,7 +338,6 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         {/* Control Panel */}
         <Paper sx={{
           p: 1,
-          borderRadius: 0,
           mb: 1,
           mt: 0,
           boxShadow: 3,
