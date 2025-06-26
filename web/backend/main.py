@@ -27,7 +27,6 @@ from threading import Lock, Event, Condition
 import queue
 import time
 import uuid  # Added import for UUID generation
-from starlette.websockets import WebSocketDisconnect
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -900,30 +899,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     elif state_info["is_transitioning"]:
                         logger.debug("Simulation is transitioning")
                         
-            except WebSocketDisconnect as e:
-                logger.info(f"WebSocket disconnected: {e}")
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
                 break
             except Exception as e:
-                # Check for 'going away' or 'no status code'
-                msg = str(e)
-                if "1001" in msg or "going away" in msg or "1005" in msg or "no status code" in msg:
-                    logger.info(f"WebSocket closed normally: {msg}")
-                else:
-                    logger.error(f"Error sending WebSocket data: {msg}")
-                if "WebSocketDisconnect" in msg:
+                logger.error(f"Error sending WebSocket data: {str(e)}")
+                # Don't break on frame errors, just log them
+                if "WebSocketDisconnect" in str(e):
                     break
 
             # Reduced sleep time for more responsive updates
             await asyncio.sleep(0.05)  # ~20 FPS for status updates
             
-    except WebSocketDisconnect as e:
-        logger.info(f"WebSocket disconnected: {e}")
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        msg = str(e)
-        if "1001" in msg or "going away" in msg or "1005" in msg or "no status code" in msg:
-            logger.debug(f"WebSocket closed normally: {msg}")
-        else:
-            logger.error(f"Error in websocket: {msg}")
+        logger.error(f"Error in websocket: {str(e)}")
     finally:
         logger.info("WebSocket connection closed")
 

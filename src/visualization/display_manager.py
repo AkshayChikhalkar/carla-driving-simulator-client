@@ -201,6 +201,15 @@ class CameraView(SensorObserver):
                     self.logger.warning("Received empty camera data")
                     return
 
+                # Debug: Log camera data reception
+                if hasattr(self, '_frame_count'):
+                    self._frame_count += 1
+                else:
+                    self._frame_count = 1
+                
+                if self._frame_count % 30 == 0:  # Log every 30 frames
+                    self.logger.debug(f"Camera view: Received frame with shape {array.shape}")
+
                 # Convert from RGB to BGR if needed
                 if array.shape[2] == 3:  # Ensure it's a color image
                     array = array[:, :, ::-1]  # Convert from RGB to BGR
@@ -414,14 +423,27 @@ class DisplayManager:
                 self.clock.tick(self.config.fps)
 
             # Store frame for web UI
-            frame = pygame.surfarray.array3d(self.screen)
-            frame = frame.swapaxes(0, 1)  # Swap axes for correct orientation
+            try:
+                frame = pygame.surfarray.array3d(self.screen)
+                frame = frame.swapaxes(0, 1)  # Swap axes for correct orientation
 
-            # Convert to BGR if in web mode
-            if self.web_mode:
-                frame = frame[:, :, ::-1]
+                # Convert to BGR if in web mode
+                if self.web_mode:
+                    frame = frame[:, :, ::-1]
 
-            self.last_frame = frame
+                self.last_frame = frame
+                
+                # Debug logging for web mode
+                if self.web_mode and self._frame_count % 30 == 0:  # Log every 30 frames
+                    self.logger.debug(f"Web mode: Captured frame with shape {frame.shape}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error capturing frame for web UI: {str(e)}")
+                # Create a fallback frame if capture fails
+                if self.web_mode:
+                    fallback_frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
+                    fallback_frame.fill(32)  # Dark gray
+                    self.last_frame = fallback_frame
 
             return True
         except Exception as e:

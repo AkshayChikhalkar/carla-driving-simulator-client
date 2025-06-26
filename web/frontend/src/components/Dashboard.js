@@ -122,12 +122,30 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             }
 
             // Only reset isStopping when backend confirms stopped
-            if (!backendRunning && !isStarting) {
+            if (!backendRunning) {
               setIsPaused(false);
               setIsStopping(false);
               setIsSkipping(false);
               setHasReceivedFrame(false);
               setStatus('Ready to Start');
+            }
+
+            if (backendRunning !== isRunning) {
+              if (process.env.NODE_ENV !== 'production') {
+                logger.debug(`WebSocket: Updating isRunning from ${isRunning} to ${backendRunning}`);
+              }
+              setIsRunning(backendRunning);
+              if (!backendRunning) {
+                setIsPaused(false);
+                setIsStopping(false);
+                setIsSkipping(false);
+                setHasReceivedFrame(false);
+                setStatus('Ready to Start');
+              }
+            }
+            // If stop or skip is in progress, always show the appropriate message
+            if (isStopping) {
+              setStatus('Stopping simulation...');
             } else if (isSkipping) {
               setStatus('Skipping scenario...');
             } else if (isTransitioning) {
