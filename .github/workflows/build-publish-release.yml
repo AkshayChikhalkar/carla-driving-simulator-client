@@ -604,17 +604,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install -r docs/requirements.txt || true
           pip install sphinx sphinx-autodoc-typehints
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: web/frontend/package-lock.json
 
       - name: Install Mermaid CLI
         run: npm install -g @mermaid-js/mermaid-cli
@@ -629,4 +630,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: html-docs
-          path: docs/_build/html/ 
+          path: docs/_build/html/
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: web/frontend 
