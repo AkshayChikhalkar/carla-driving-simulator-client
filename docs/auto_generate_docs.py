@@ -23,6 +23,7 @@ import argparse
 from pathlib import Path
 from typing import List, Dict, Any
 import importlib.util
+import glob
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -390,6 +391,20 @@ class DocumentationAutomator:
             print(f"   - .mmd files: {self.mmd_dir}")
             print(f"   - Images: {self.images_dir}")
             print(f"   - Documentation: {self.docs_dir}/_build/html/")
+
+            # --- Cleanup unused .rst files in docs/ ---
+            print("🧹 Cleaning up unused .rst files in docs/ ...")
+            toctree_files = set([
+                'index.rst', 'api.rst', 'architecture.rst', 'changelog.rst', 'contributing.rst',
+                'diagrams.rst', 'faq.rst', 'getting_started.rst', 'installation.rst', 'license.rst',
+                'support.rst', 'tutorials.rst'
+            ])
+            for rst_file in glob.glob(os.path.join(self.docs_dir, '*.rst')):
+                if os.path.basename(rst_file) not in toctree_files:
+                    print(f"   - Removing unused file: {rst_file}")
+                    os.remove(rst_file)
+            print("✅ Cleanup completed.")
+
             return True
             
         except Exception as e:

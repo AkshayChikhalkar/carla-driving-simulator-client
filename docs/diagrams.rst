@@ -1,7 +1,13 @@
 Architecture & Pipeline Diagrams
 ================================
 
-This section contains all the architecture and pipeline diagrams for the CARLA Driving Simulator Client.
+Below are links to the system architecture and CI/CD pipeline diagrams:
+
+- `System Architecture Diagram <../mmd/system_architecture_diagram.mmd>`_
+- `Deployment Architecture Diagram <../mmd/system_architecture_deployment.mmd>`_
+- `CI/CD Pipeline Diagram <../mmd/pipeline.mmd>`_
+
+To view these diagrams, use a Mermaid live editor or compatible tool.
 
 System Architecture
 -------------------
