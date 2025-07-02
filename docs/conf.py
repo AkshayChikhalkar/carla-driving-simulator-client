@@ -12,7 +12,11 @@ sys.path.insert(0, os.path.abspath('../web'))
 # Debug: print sys.path to ensure src is included
 print('sys.path for Sphinx:', sys.path)
 
-from src import __version__
+try:
+    from src import __version__
+except Exception:
+    __version__ = '1.0.0'  # fallback if import fails
+
 release = __version__
 version = __version__
 
