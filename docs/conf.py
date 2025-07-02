@@ -55,4 +55,19 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
 # -- Autodoc settings --------------------------------------------------------
-autodoc_member_order = 'bysource' 
+autodoc_member_order = 'bysource'
+
+from sphinx.ext import apidoc
+
+def run_apidoc(_):
+    src_path = os.path.abspath('../src')
+    docs_path = os.path.abspath('.')
+    apidoc.main([
+        '--force',
+        '--module-first',
+        '--output-dir', docs_path,
+        src_path,
+    ])
+
+def setup(app):
+    app.connect('builder-inited', run_apidoc) 
