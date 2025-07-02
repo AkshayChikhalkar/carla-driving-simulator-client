@@ -78,6 +78,7 @@ extras_require = {
     "docs": [
         "sphinx>=4.0.0",
         "sphinx-rtd-theme>=0.5.0",
+        "myst-parser>=0.15.0",
     ]
 }
 
