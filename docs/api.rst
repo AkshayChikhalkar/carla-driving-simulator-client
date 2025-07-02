@@ -1,58 +1,24 @@
 API Reference
 =============
 
-This section provides an auto-generated summary of the package's API.
+.. toctree::
+   :maxdepth: 2
+   :caption: API Modules
 
-Core Modules
-------------
-
-.. automodule:: core
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive:
-
-Control
--------
-
-.. automodule:: control
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive:
-
-Scenarios
----------
-
-.. automodule:: scenarios
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive:
-
-Database
---------
-
-.. automodule:: database
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive:
-
-Utilities
----------
-
-.. automodule:: utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive:
-
-Visualization
--------------
-
-.. automodule:: visualization
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :recursive: 
+   src
+   src.utils
+   src.visualization
+   src.web
+   src.tests
+   src.conftest
+   src.core
+   src.backend
+   src.scenarios
+   src.utils
+   test_utils
+   test_scenarios
+   test_core
+   test_backend
+   conftest
+   # Add more as needed, e.g.:
+   # web 

@@ -6,6 +6,15 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath('../src'))
+sys.path.insert(0, os.path.abspath('../tests'))
+sys.path.insert(0, os.path.abspath('../web'))
+
+# Debug: print sys.path to ensure src is included
+print('sys.path for Sphinx:', sys.path)
+
+from src import __version__
+release = __version__
+version = __version__
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -13,12 +22,6 @@ sys.path.insert(0, os.path.abspath('../src'))
 project = 'carla-driving-simulator-client'
 copyright = '2024, Akshay Chikhalkar'
 author = 'Akshay Chikhalkar'
-
-# The full version, including alpha/beta/rc tags
-try:
-    from src import __version__ as release
-except ImportError:
-    release = '1.0.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

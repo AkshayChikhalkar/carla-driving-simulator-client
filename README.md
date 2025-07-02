@@ -187,15 +187,15 @@ Note: I cannot guarantee response times or implementation of suggested features 
 
 ## Support
 
-If you need help, please check our [Support Guide](SUPPORT.md) for various ways to get assistance.
+If you need help, please check our [Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SUPPORT.md) for various ways to get assistance.
 
 ## Security
 
-Please report any security issues to our [Security Policy](SECURITY.md).
+Please report any security issues to our [Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SECURITY.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -204,14 +204,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Roadmap
 
-Check our [Roadmap](ROADMAP.md) for planned features and improvements.
+Check our [Roadmap](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/ROADMAP.md) for planned features and improvements.
 
 ## Documentation
 
-- **[Versioning Strategy](VERSIONING.md)** - How automatic versioning works
-- **[Environment Configuration](ENVIRONMENT.md)** - Environment variables and configuration
-- **[Support Guide](SUPPORT.md)** - Getting help and support
-- **[Security Policy](SECURITY.md)** - Reporting security issues
-- **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute to the project
+- **[Versioning Strategy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/VERSIONING.md)** - How automatic versioning works
+- **[Environment Configuration](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/ENVIRONMENT.md)** - Environment variables and configuration
+- **[Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SUPPORT.md)** - Getting help and support
+- **[Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SECURITY.md)** - Reporting security issues
+- **[Contributing Guidelines](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/CONTRIBUTING.md)** - How to contribute to the project
 
 ## Configuration 
