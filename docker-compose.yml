@@ -1,144 +1,63 @@
 services:
   carla-driving-simulator-client:
-    image: akshaychikhalkar/carla-simulator-client:dev_v1.2
-    container_name: carla-client
-    shm_size: "2g"
-    runtime: nvidia
-    ulimits:
-      stack: 67108864  #
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: carla-simulator-client:dev
+    container_name: carla-simulator-client-dev
     ports:
-      - "3000:3000"  # Frontend only - backend communicates internally
+      - "3000:3000"    # Frontend
+      #- "8000:8000"    # Backend API
+      #- "2000-2002:2000-2002"  # CARLA ports
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./reports:/app/reports
     environment:
-      - PYTHONPATH=/app
-      - HOST=0.0.0.0
-      - REACT_APP_API_URL=http://localhost:8000
-      - WDS_SOCKET_HOST=0.0.0.0
-      - WDS_SOCKET_PORT=3000
-      - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
-      - CARLA_HOST=carla-server  # Connect to CARLA server container
-      - CARLA_PORT=2000
-      - NVIDIA_VISIBLE_DEVICES=all
+      # Environment variables with defaults (no .env file required)
+      - DATABASE_URL=${DATABASE_URL:-postgresql://carla_user:carla_password@localhost:5432/carla_simulator}
+      - CARLA_HOST=${CARLA_HOST:-localhost}
+      - CARLA_PORT=${CARLA_PORT:-2000}
+      - WEB_HOST=${WEB_HOST:-0.0.0.0}
+      - WEB_PORT=${WEB_PORT:-8000}
+      - FRONTEND_PORT=${FRONTEND_PORT:-3000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-true}
+      - TESTING=${TESTING:-false}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
       interval: 30s
       timeout: 30s
       retries: 3
       start_period: 40s
-    volumes:
-      - ./logs:/app/logs
-      - ./reports:/app/reports
-      - ./config:/app/config
-    depends_on:
-      carla-server:
-        condition: service_healthy
     networks:
       - carla-network
 
-
-
-  carla-server:
-    image: carlasim/carla:0.10.0
-    container_name: carla-server
-    privileged: true
-    runtime: nvidia
-    ports:
-      - "2000-2002:2000-2002"
-    shm_size: "32g"
-    ipc: host
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      stack:
-        soft: 67108864
-        hard: 67108864
-    env_file:
-      - .env
-    volumes:
-      - ./carla-server-scripts/start.sh:/start.sh:ro
-    command: bash /start.sh
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=2
-    healthcheck:
-      test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    networks:
-      - carla-network
+  # Optional: PostgreSQL service
+  # postgres:
+  #   image: postgres:13
+  #   container_name: carla-postgres
+  #   environment:
+  #     POSTGRES_DB: carla_simulator
+  #     POSTGRES_USER: carla_user
+  #     POSTGRES_PASSWORD: carla_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - carla-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "pg_isready", "-U", "carla_user"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
 networks:
   carla-network:
     driver: bridge
 
-
-
-    #Test for CICD
-
-
-# services:
-#   carla-driving-simulator-client:
-#     build:
-#       context: .
-#       dockerfile: Dockerfile.dev
-#     image: carla-simulator-client:dev
-#     container_name: carla-simulator-client-dev
-#     ports:
-#       - "3000:3000"    # Frontend
-#       #- "8000:8000"    # Backend API
-#       #- "2000-2002:2000-2002"  # CARLA ports
-#     volumes:
-#       - ./config:/app/config
-#       - ./logs:/app/logs
-#       - ./reports:/app/reports
-#     environment:
-#       # Environment variables with defaults (no .env file required)
-#       - DATABASE_URL=${DATABASE_URL:-postgresql://carla_user:carla_password@localhost:5432/carla_simulator}
-#       - CARLA_HOST=${CARLA_HOST:-localhost}
-#       - CARLA_PORT=${CARLA_PORT:-2000}
-#       - WEB_HOST=${WEB_HOST:-0.0.0.0}
-#       - WEB_PORT=${WEB_PORT:-8000}
-#       - FRONTEND_PORT=${FRONTEND_PORT:-3000}
-#       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-#       - DEBUG=${DEBUG:-true}
-#       - TESTING=${TESTING:-false}
-#     restart: unless-stopped
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
-#       interval: 30s
-#       timeout: 30s
-#       retries: 3
-#       start_period: 40s
-#     networks:
-#       - carla-network
-
-#   # Optional: PostgreSQL service
-#   # postgres:
-#   #   image: postgres:13
-#   #   container_name: carla-postgres
-#   #   environment:
-#   #     POSTGRES_DB: carla_simulator
-#   #     POSTGRES_USER: carla_user
-#   #     POSTGRES_PASSWORD: carla_password
-#   #   volumes:
-#   #     - postgres_data:/var/lib/postgresql/data
-#   #   ports:
-#   #     - "5432:5432"
-#   #   networks:
-#   #     - carla-network
-#   #   restart: unless-stopped
-#   #   healthcheck:
-#   #     test: ["CMD", "pg_isready", "-U", "carla_user"]
-#   #     interval: 10s
-#   #     timeout: 5s
-#   #     retries: 5
-
-# networks:
-#   carla-network:
-#     driver: bridge
-
-# # volumes:
-# #   postgres_data:
+# volumes:
+#   postgres_data:
