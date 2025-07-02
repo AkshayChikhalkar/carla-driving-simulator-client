@@ -1,0 +1,94 @@
+Architecture & Pipeline Diagrams
+================================
+
+This section contains all the architecture and pipeline diagrams for the CARLA Driving Simulator Client.
+
+System Architecture
+-------------------
+
+System Architecture Deployment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/system_architecture_deployment.png
+   :alt: System Architecture Deployment
+   :width: 100%
+   :align: center
+
+System Architecture (Simple)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/system_architecture_simple.png
+   :alt: System Architecture Simple
+   :width: 100%
+   :align: center
+
+System Architecture (Detailed)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/system_architecture_diagram.png
+   :alt: System Architecture Detailed
+   :width: 100%
+   :align: center
+
+Component Interfaces Diagram
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/component_interfaces_diagram.png
+   :alt: Component Interfaces Diagram
+   :width: 100%
+   :align: center
+
+Database Schema
+~~~~~~~~~~~~~~~
+
+.. image:: _static/images/carla_database_schema.png
+   :alt: Database Schema
+   :width: 100%
+   :align: center
+
+CI/CD & Deployment
+------------------
+
+CI/CD Workflow (High Level)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/carla_ci_cd_workflow_high_level.png
+   :alt: CI/CD Workflow High Level
+   :width: 100%
+   :align: center
+
+CI/CD Workflow (Detailed)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/carla_ci_cd_workflow.png
+   :alt: CI/CD Workflow Detailed
+   :width: 100%
+   :align: center
+
+Deployment Diagram
+~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/carla_deployment.png
+   :alt: Deployment Diagram
+   :width: 100%
+   :align: center
+
+Pipeline Diagram
+~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/pipeline.png
+   :alt: Pipeline Diagram
+   :width: 100%
+   :align: center
+
+CARLA Architecture
+~~~~~~~~~~~~~~~~~~
+
+.. image:: _static/images/carla_architecture.png
+   :alt: CARLA Architecture
+   :width: 100%
+   :align: center
+
+.. note::
+   These diagrams are automatically generated from Mermaid source files in the `mmd/` directory.
+   The source files can be viewed and edited using the `Mermaid Live Editor <https://mermaid.live>`_. 
