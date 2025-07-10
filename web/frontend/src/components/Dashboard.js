@@ -28,7 +28,7 @@ const API_BASE_URL =
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
 const WS_BASE_URL =
   window.location.hostname === 'localhost'
-    ? '/ws/simulation-view'
+    ? `${WS_PROTOCOL}://localhost:8000/ws/simulation-view`
     : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
@@ -46,6 +46,87 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   const [isSkipping, setIsSkipping] = useState(false);
   const wsRef = useRef(null);
   const canvasRef = useRef(null);
+  
+  // Backend state tracking for sync
+  const [backendState, setBackendState] = useState({
+    is_running: false,
+    is_starting: false,
+    is_stopping: false,
+    is_skipping: false,
+    is_transitioning: false,
+    current_scenario: null,
+    scenario_index: 0,
+    total_scenarios: 0,
+    status_message: 'Ready to Start'
+  });
+
+  // Add immediate reset of transition flags when backend state changes
+  useEffect(() => {
+    // Reset isStarting when backend confirms start is complete
+    if (isStarting && backendState.is_running && !backendState.is_starting) {
+      console.log('Immediate reset: Backend confirmed start complete');
+      setIsStarting(false);
+    }
+  }, [isStarting, backendState.is_running, backendState.is_starting]);
+
+  useEffect(() => {
+    // Reset isStopping when backend confirms stop is complete
+    if (isStopping && !backendState.is_running && !backendState.is_stopping) {
+      console.log('Immediate reset: Backend confirmed stop complete');
+      setIsStopping(false);
+    }
+  }, [isStopping, backendState.is_running, backendState.is_stopping]);
+
+  useEffect(() => {
+    // Reset isSkipping when backend confirms skip is complete
+    if (isSkipping && !backendState.is_skipping) {
+      console.log('Immediate reset: Backend confirmed skip complete');
+      setIsSkipping(false);
+    }
+  }, [isSkipping, backendState.is_skipping]);
+
+  // Add a fallback mechanism to reset transition flags if backend confirms but frontend doesn't update
+  useEffect(() => {
+    if (isStarting && backendState.is_running && !backendState.is_starting) {
+      // Backend confirmed start is complete but frontend didn't reset
+      const timer = setTimeout(() => {
+        if (isStarting && backendState.is_running && !backendState.is_starting) {
+          console.log('Fallback: Resetting isStarting flag after timeout');
+          setIsStarting(false);
+        }
+      }, 5000); // 5 second timeout
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isStarting, backendState.is_running, backendState.is_starting]);
+
+  useEffect(() => {
+    if (isStopping && !backendState.is_running && !backendState.is_stopping) {
+      // Backend confirmed stop is complete but frontend didn't reset
+      const timer = setTimeout(() => {
+        if (isStopping && !backendState.is_running && !backendState.is_stopping) {
+          console.log('Fallback: Resetting isStopping flag after timeout');
+          setIsStopping(false);
+        }
+      }, 5000); // 5 second timeout
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isStopping, backendState.is_running, backendState.is_stopping]);
+
+  useEffect(() => {
+    if (isSkipping && !backendState.is_skipping) {
+      // Backend confirmed skip is complete but frontend didn't reset
+      const timer = setTimeout(() => {
+        if (isSkipping && !backendState.is_skipping) {
+          console.log('Fallback: Resetting isSkipping flag after timeout');
+          setIsSkipping(false);
+        }
+      }, 5000); // 5 second timeout
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isSkipping, backendState.is_skipping]);
 
   useEffect(() => {
     // Fetch available scenarios
@@ -80,8 +161,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       };
 
       ws.onclose = () => {
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('WebSocket connection closed');
+        if (!isRunning) {
+          setStatus('Ready to Start');
         }
         setIsRunning(false);
         setIsPaused(false);
@@ -103,78 +184,116 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'status') {
-            const backendRunning = data.is_running;
-            const isTransitioning = data.is_transitioning || false;
+          // If it's a status message (JSON)
+          if (event.data.startsWith('{')) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'status') {
+              // Update backend state for sync
+              setBackendState({
+                is_running: data.is_running || false,
+                is_starting: data.is_starting || false,
+                is_stopping: data.is_stopping || false,
+                is_skipping: data.is_skipping || false,
+                is_transitioning: data.is_transitioning || false,
+                current_scenario: data.current_scenario,
+                scenario_index: data.scenario_index || 0,
+                total_scenarios: data.total_scenarios || 0,
+                status_message: data.status_message || 'Ready to Start'
+              });
 
-            // If stop is in progress, keep overlay and all buttons disabled until stopped
-            if (isStopping) {
-              setStatus('Stopping simulation...');
-              if (!backendRunning) {
-                setIsPaused(false);
-                setIsStopping(false);
-                setIsSkipping(false);
-                setHasReceivedFrame(false);
-                setStatus('Ready to Start');
-              }
-              return; // Do not update other UI state while stopping
-            }
-
-            // Only reset isStopping when backend confirms stopped
-            if (!backendRunning) {
-              setIsPaused(false);
-              setIsStopping(false);
-              setIsSkipping(false);
-              setHasReceivedFrame(false);
-              setStatus('Ready to Start');
-            }
-
-            if (backendRunning !== isRunning) {
               if (process.env.NODE_ENV !== 'production') {
-                logger.debug(`WebSocket: Updating isRunning from ${isRunning} to ${backendRunning}`);
+                console.log('WebSocket received:', {
+                  is_running: data.is_running,
+                  is_starting: data.is_starting,
+                  is_stopping: data.is_stopping,
+                  is_skipping: data.is_skipping,
+                  status_message: data.status_message,
+                  local_isStarting: isStarting,
+                  local_isStopping: isStopping,
+                  local_isSkipping: isSkipping
+                });
               }
-              setIsRunning(backendRunning);
-              if (!backendRunning) {
-                setIsPaused(false);
+              
+              // Debug: Log when is_starting is true
+              if (data.is_starting) {
+                console.log('Backend reports is_starting=True');
+              }
+
+              // Always reset UI if backend says simulation is stopped
+              if (!data.is_running && !data.is_starting && !data.is_stopping && !data.is_skipping) {
                 setIsStopping(false);
+                setIsStarting(false);
                 setIsSkipping(false);
+                setIsRunning(false);
                 setHasReceivedFrame(false);
                 setStatus('Ready to Start');
+                return;
               }
+
+              // Reset transition flags when backend confirms operations are complete
+              if (isStarting && data.is_running && !data.is_starting) {
+                // Backend confirmed start is complete
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Resetting isStarting flag - backend confirmed start complete');
+                }
+                setIsStarting(false);
+              }
+              if (isStopping && !data.is_running && !data.is_stopping) {
+                // Backend confirmed stop is complete
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Resetting isStopping flag - backend confirmed stop complete');
+                }
+                setIsStopping(false);
+              }
+              if (isSkipping && !data.is_skipping) {
+                // Backend confirmed skip is complete
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Resetting isSkipping flag - backend confirmed skip complete');
+                }
+                setIsSkipping(false);
+              }
+
+              // Use backend status message - only override with local transition states for immediate UX feedback
+              if (isStarting || data.is_starting) {
+                // Show starting message if either frontend or backend thinks we're starting
+                setStatus('Starting simulation...');
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Setting status to "Starting simulation..." (isStarting=', isStarting, ', data.is_starting=', data.is_starting, ')');
+                }
+              } else if (isStopping || data.is_stopping) {
+                // Show stopping message if either frontend or backend thinks we're stopping
+                setStatus('Stopping simulation...');
+              } else if (isSkipping || data.is_skipping) {
+                // Show skipping message if either frontend or backend thinks we're skipping
+                setStatus('Skipping scenario...');
+              } else {
+                // Trust the backend status message for other states
+                setStatus(data.status_message || 'Ready to Start');
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Setting status to backend message:', data.status_message || 'Ready to Start');
+                }
+              }
+
+              // Update isRunning based on backend state
+              setIsRunning(data.is_running || false);
             }
-            // If stop or skip is in progress, always show the appropriate message
-            if (isStopping) {
-              setStatus('Stopping simulation...');
-            } else if (isSkipping) {
-              setStatus('Skipping scenario...');
-            } else if (isTransitioning) {
-              setStatus('Transitioning between scenarios...');
-            }
-            if (process.env.NODE_ENV !== 'production') {
-              logger.debug(`WebSocket state update: running=${backendRunning}, transitioning=${isTransitioning}, frontend_isStarting=${isStarting}`);
-            }
-          }
-        } catch (e) {
-          // If not JSON, treat as image data (frame)
-          const now = Date.now();
-          if (now - lastFrameTime < FRAME_INTERVAL) return; // Throttle to target FPS
-          lastFrameTime = now;
-          const img = new window.Image();
-          img.onload = () => {
-            const canvas = canvasRef.current;
-            if (canvas) {
-              const ctx = canvas.getContext('2d');
-              if (canvas.width !== img.width || canvas.height !== img.height) {
+          } else {
+            // It's a video frame (base64 string)
+            setHasReceivedFrame(true);
+            const img = new Image();
+            img.onload = () => {
+              const canvas = canvasRef.current;
+              if (canvas) {
+                const ctx = canvas.getContext('2d');
                 canvas.width = img.width;
                 canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
               }
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0);
-              setHasReceivedFrame(true);
-            }
-          };
-          img.src = `data:image/jpeg;base64,${event.data}`;
+            };
+            img.src = `data:image/jpeg;base64,${event.data}`;
+          }
+        } catch (e) {
+          logger.error('Error parsing WebSocket message:', e);
         }
       };
     };
@@ -189,60 +308,49 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     };
   }, []); // Only run on mount/unmount
 
+  // --- Button handlers ---
   const handleStart = async () => {
-    if (isStarting || isRunning) return; // Prevent multiple clicks and starting when already running
+    if (selectedScenarios.length === 0) {
+      setError('Please select at least one scenario');
+      return;
+    }
+    // Set local transition state immediately
+    setIsStarting(true);
+    setIsStopping(false);
+    setIsSkipping(false);
+    setStatus('Starting simulation...');
+    setError(null);
     
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
+    }
     try {
-      setIsStarting(true);
-      setStatus('Starting simulation...');
-      setError(null); // Clear any previous errors
-      
-      logger.info(`Starting simulation with scenarios: ${selectedScenarios.join(', ')}, debug: ${debug}, report: ${report}`);
-      
       const response = await axios.post(`${API_BASE_URL}/simulation/start`, {
         scenarios: selectedScenarios,
-        debug,
-        report,
+        debug: debug,
+        report: report
       });
-
-      // Don't manually set isRunning here - let the WebSocket handle it
-      // This prevents race conditions between API response and WebSocket updates
-      setStatus(response.data.message);
-      logger.info(`Simulation start API call successful: ${response.data.message}`);
-    } catch (error) {
-      logger.error('Error starting simulation:', error);
-      setStatus('Error starting simulation');
-      // Use backend error message if available
-      const backendMsg = error.response?.data?.detail || 'Failed to start simulation, please try again!';
-      setError(backendMsg);
-      // Don't set isRunning to false here - let WebSocket handle it
-    } finally {
-      // Reset isStarting after a short delay to ensure the button state is visible
-      setTimeout(() => {
-        setIsStarting(false);
-      }, 1000);
+      // Do not reset isStarting here; let WebSocket handle it
+    } catch (e) {
+      setIsStarting(false);
+      setStatus('Ready to Start');
+      setError('Failed to start simulation');
     }
   };
 
   const handleStop = async () => {
-    if (isStopping) return; // Prevent multiple clicks
+    setIsStopping(true);
+    setIsStarting(false);
+    setIsSkipping(false);
+    setStatus('Stopping simulation...');
+    setError(null);
     try {
-      setIsStopping(true);
-      setStatus('Stopping simulation...');
-      setError(null); // Clear any previous errors
-      // Do NOT reset isRunning or the canvas here! Wait for WebSocket status update.
-      logger.info('Initiating simulation stop');
-      await axios.post(`${API_BASE_URL}/simulation/stop`);
-      // Optionally, set a timeout to show "Still stopping..." if it takes too long.
-    } catch (error) {
-      logger.error('Error stopping simulation:', error);
-      setStatus('Error stopping simulation');
-      const errorMsg = error.response?.data?.detail || 'Failed to stop simulation. Please try again.';
-      setError(errorMsg);
-    } finally {
-      setTimeout(() => {
-        setIsStopping(false);
-      }, 1000);
+      const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
+      // Do not reset isStopping here; let WebSocket handle it
+    } catch (e) {
+      setIsStopping(false);
+      setStatus('Ready to Start');
+      setError('Failed to stop simulation');
     }
   };
 
@@ -253,24 +361,30 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     logger.info(`Simulation ${newPauseState ? 'paused' : 'resumed'}`);
   };
 
+  // Helper function to determine if any button should be disabled during transitions
+  const isAnyButtonDisabled = () => {
+    // All buttons should be disabled if any transition state is active
+    return isStarting || isStopping || isSkipping;
+  };
+
   // Helper function to determine if start button should be disabled
   const isStartDisabled = () => {
-    return isRunning || !selectedScenarios.length || isStarting || isStopping || isSkipping;
+    return isRunning || !selectedScenarios.length || isAnyButtonDisabled();
   };
 
   // Helper function to determine if stop button should be disabled
   const isStopDisabled = () => {
-    return !isRunning || isStopping || isStarting || isSkipping;
+    return !isRunning || isAnyButtonDisabled();
   };
 
   // Helper function to determine if pause button should be disabled
   const isPauseDisabled = () => {
-    return !isRunning || isStopping || isStarting || isPaused || isSkipping;
+    return !isRunning || isAnyButtonDisabled();
   };
 
   // Helper function to determine if skip button should be disabled
   const isSkipDisabled = () => {
-    return !isRunning || isSkipping || isStopping || isStarting || (selectedScenarios.length === 1 && !selectedScenarios.includes('all'));
+    return !isRunning || isAnyButtonDisabled();
   };
 
   // Update the handleScenarioChange function
@@ -300,47 +414,63 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     }
   };
 
+  // Add state to control dropdown open/close
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  // Handle dropdown open/close
+  const handleDropdownOpen = (event) => {
+    setDropdownOpen(true);
+  };
+
+  const handleDropdownClose = () => {
+    setDropdownOpen(false);
+  };
+
+  // Enhanced scenario change handler with auto-close
+  const handleScenarioChangeEnhanced = (event) => {
+    const value = event.target.value;
+    
+    // If selecting individual scenarios
+    if (!value.includes('all')) {
+      // If all individual scenarios are selected, switch to "all"
+      if (value.length === scenarios.length) {
+        setSelectedScenarios(['all']);
+      } else {
+        setSelectedScenarios(value);
+      }
+      // Auto-close dropdown after selection
+      setTimeout(() => setDropdownOpen(false), 100);
+      return;
+    }
+    
+    // If "all" is selected
+    if (value.includes('all')) {
+      // If "all" is the only selection, keep it
+      if (value.length === 1) {
+        setSelectedScenarios(['all']);
+      } else {
+        // If other scenarios are selected with "all", remove "all" and keep individual selections
+        setSelectedScenarios(value.filter(v => v !== 'all'));
+      }
+      // Auto-close dropdown after selection
+      setTimeout(() => setDropdownOpen(false), 100);
+    }
+  };
+
   // Add skip scenario handler
   const handleSkipScenario = async () => {
-    if (!isRunning || isSkipping) return;
-    
+    setIsSkipping(true);
+    setIsStarting(false);
+    setIsStopping(false);
+    setStatus('Skipping scenario...');
+    setError(null);
     try {
-      setIsSkipping(true);
-      setStatus('Skipping scenario...');
-      setError(null); // Clear any previous errors
-      
-      logger.info('Initiating scenario skip');
-      
       const response = await axios.post(`${API_BASE_URL}/simulation/skip`);
-      
-      // Update status based on response
-      if (response.data.success) {
-        setStatus(response.data.message);
-        
-        // If simulation is complete, update UI after a delay
-        if (response.data.message.includes("Simulation complete")) {
-          setStatus('Simulation complete');
-          setTimeout(() => {
-            setStatus('Ready to Start');
-            setIsRunning(false);
-            setIsPaused(false);
-            setHasReceivedFrame(false);
-          }, 2000);
-        }
-        // If there's a next scenario, the WebSocket will update the state
-      } else {
-        setStatus('Error skipping scenario');
-        setError(response.data.message || 'Failed to skip scenario');
-      }
-      
-      logger.info(`Scenario skip result: ${response.data.message}`);
-    } catch (error) {
-      logger.error('Error skipping scenario:', error);
-      setStatus('Error skipping scenario');
-      const errorMsg = error.response?.data?.detail || 'Failed to skip scenario, please try again!';
-      setError(errorMsg);
-    } finally {
+      // Do not reset isSkipping here; let WebSocket handle it
+    } catch (e) {
       setIsSkipping(false);
+      setStatus('Ready to Start');
+      setError('Failed to skip scenario');
     }
   };
 
@@ -377,12 +507,33 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   multiple
                   value={selectedScenarios}
                   label="Scenarios"
-                  onChange={handleScenarioChange}
+                  onChange={handleScenarioChangeEnhanced}
+                  onOpen={handleDropdownOpen}
+                  onClose={handleDropdownClose}
+                  open={dropdownOpen}
                   disabled={isRunning}
                   size="small"
                   renderValue={(selected) => {
                     if (selected.includes('all')) return 'All Scenarios';
-                    return selected.join(', ');
+                    if (selected.length === 0) return 'Select scenarios...';
+                    if (selected.length === 1) return selected[0];
+                    return `${selected.length} scenarios selected`;
+                  }}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
+                        width: 300 // Set fixed width for dropdown menu
+                      }
+                    },
+                    anchorOrigin: {
+                      vertical: 'bottom',
+                      horizontal: 'left',
+                    },
+                    transformOrigin: {
+                      vertical: 'top',
+                      horizontal: 'left',
+                    }
                   }}
                 >
                   <MenuItem value="all">All Scenarios</MenuItem>
@@ -455,7 +606,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                     '& .MuiButton-startIcon': { 
                       marginRight: 0.5,
                       marginLeft: 0
-                    }
+                    },
+                    display: 'none' // Hide pause button but keep logic
                   }}
                 >
                   {isPaused ? 'Resume' : 'Pause'}
@@ -530,14 +682,14 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               width: '100%',
               height: '100%',
               objectFit: 'cover',
-              display: isRunning && hasReceivedFrame && !isStopping ? 'block' : 'none',
+              display: isRunning && hasReceivedFrame && !isStarting && !isStopping && !isSkipping ? 'block' : 'none',
               background: '#000',
               margin: 0,
               padding: 0,
               position: 'absolute',
               top: 0,
               left: 0,
-              opacity: isRunning && hasReceivedFrame && !isStopping ? 1 : 0,
+              opacity: isRunning && hasReceivedFrame && !isStarting && !isStopping && !isSkipping ? 1 : 0,
               transition: 'opacity 0.5s ease-in-out',
               zIndex: 0
             }}
@@ -554,7 +706,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               alignItems: 'center',
               justifyContent: 'center',
               background: '#000',
-              opacity: (!isRunning || !hasReceivedFrame || isStopping || isSkipping) ? 1 : 0,
+              opacity: isStarting || isStopping || isSkipping || (!isRunning || !hasReceivedFrame) ? 1 : 0,
               transition: 'opacity 0.5s ease-in-out',
               zIndex: 1
             }}
@@ -570,7 +722,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 background: '#000',
                 margin: 0,
                 padding: 0,
-                opacity: isStopping || isSkipping ? 1 : (!isRunning || !hasReceivedFrame ? 1 : 0),
+                opacity: isStarting || isStopping || isSkipping || (!isRunning || !hasReceivedFrame) ? 1 : 0,
                 transition: 'opacity 0.5s ease-in-out'
               }}
             />
@@ -584,12 +736,12 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 whiteSpace: 'pre-line'
               }}
             >
-              {error ? error : 
-               isStarting && !hasReceivedFrame ? 'Hang on,\nLoading Simulation...' : 
-               isStopping ? status : 
-               isSkipping ? status : 
-               status === 'Ready to Start' ? 'Ready to Start' :
-               'Ready to Start'}
+              {error ? error :
+                isStarting && !hasReceivedFrame ? 'Hang on,\nLoading Simulation...' :
+                  isStopping ? status :
+                    isSkipping ? status :
+                      status === 'Ready to Start' ? 'Ready to Start' :
+                        'Ready to Start'}
             </Typography>
             {error && (
               <Typography

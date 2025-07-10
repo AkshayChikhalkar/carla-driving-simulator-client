@@ -70,6 +70,9 @@ class ThreadSafeState:
         self._lock = Lock()
         self._state = {
             "is_running": False,
+            "is_starting": False,  # New flag for starting state
+            "is_stopping": False,  # Explicit flag for stopping state
+            "is_skipping": False,  # New flag for skipping state
             "current_scenario": None,
             "scenarios_to_run": [],
             "current_scenario_index": 0,
@@ -79,7 +82,7 @@ class ThreadSafeState:
             "scenario_start_time": None,
             "cleanup_event": Event(),
             "cleanup_completed": False,
-            "is_transitioning": False,  # New flag to track scenario transitions
+            "is_transitioning": False,  # Flag to track scenario transitions
             "last_state_update": datetime.now(),  # Track when state was last updated
             "setup_complete": False,  # Flag to track if setup is complete
         }
@@ -312,7 +315,7 @@ def run_simulation_thread(runner, scenario):
         simulation_ready.set()
         
         # Wait for setup to complete before starting simulation
-        if setup_event.wait(timeout=30):  # 30 second timeout
+        if setup_event.wait(timeout=600):  # 120 second timeout (2 minutes)
             logger.info("Setup completed, starting simulation loop")
         else:
             logger.error("Setup timeout - simulation thread exiting")
@@ -320,6 +323,11 @@ def run_simulation_thread(runner, scenario):
         
         # Mark setup as complete
         runner.state["setup_complete"] = True
+        
+        # Clear the starting flag now that simulation is actually running
+        runner.state["is_starting"] = False
+        logger.info("Cleared is_starting flag - simulation is now running")
+        logger.info(f"State after clearing is_starting: is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
         
         logger.info("Simulation loop started")
         
@@ -344,6 +352,7 @@ def run_simulation_thread(runner, scenario):
         if hasattr(runner, "state"):
             runner.state["is_running"] = False
             runner.state["is_transitioning"] = False
+            runner.state["is_starting"] = False  # Clear starting flag on error
             runner.state["error"] = str(e)
         
         if hasattr(runner, "app") and runner.app and hasattr(runner.app, "state"):
@@ -352,6 +361,9 @@ def run_simulation_thread(runner, scenario):
         logger.info("Simulation thread ending")
         # Reset setup complete flag
         runner.state["setup_complete"] = False
+        # Clear starting flag when thread ends
+        if hasattr(runner, "state"):
+            runner.state["is_starting"] = False
 
 
 def transition_to_next_scenario(runner, next_scenario):
@@ -501,6 +513,10 @@ async def skip_scenario():
         if runner.state["is_transitioning"]:
             logger.warning("Attempted to skip scenario while transition is in progress")
             return {"success": False, "message": "Scenario transition already in progress"}
+        
+        # Set skipping flag for immediate UX feedback
+        runner.state["is_skipping"] = True
+        
         # Only set is_transitioning for actual scenario transitions
         current_index = runner.state["current_scenario_index"]
         total_scenarios = len(runner.state["scenarios_to_run"])
@@ -548,6 +564,7 @@ async def skip_scenario():
 
                     # Reset transition flag
                     runner.state["is_transitioning"] = False
+                    runner.state["is_skipping"] = False  # Clear skipping flag after successful skip
 
                     return {
                         "success": True,
@@ -565,26 +582,13 @@ async def skip_scenario():
                         "message": "Failed to transition to next scenario",
                     }
             else:
-                # This was the last scenario
+                # This was the last scenario - call stop_simulation to handle cleanup
                 logger.info("================================")
                 logger.info("Last scenario skipped. Simulation complete.")
                 logger.info("================================")
 
-                # Stop current scenario
-                if hasattr(runner.app, "state"):
-                    runner.app.state.is_running = False
-
-                # Wait for cleanup using utility function with increased timeout
-                logger.info("Waiting for final cleanup...")
-                await wait_for_cleanup(runner.app, max_wait_time=20)
-
-                # Generate final report using utility function
-                generate_final_report(runner)
-
-                # Set is_running to false only after everything is complete
-                runner.state["is_running"] = False
-                runner.state["is_transitioning"] = False
-
+                # Call stop_simulation to handle the cleanup properly
+                stop_result = await stop_simulation()
                 return {
                     "success": True,
                     "message": f"Skipped {current_scenario} ({current_index + 1}/{total_scenarios}). Simulation complete.",
@@ -597,14 +601,18 @@ async def skip_scenario():
             logger.error(f"Error during scenario skip process: {str(e)}")
             # Reset state on error
             runner.state["is_running"] = False
+            runner.state["is_stopping"] = False  # Reset stopping flag on error
             runner.state["is_transitioning"] = False
+            runner.state["is_skipping"] = False  # Reset skipping flag on error
             raise
 
     except Exception as e:
         logger.error(f"Error skipping scenario: {str(e)}")
         # Ensure is_running is set to false on error
         runner.state["is_running"] = False
+        runner.state["is_stopping"] = False  # Reset stopping flag on error
         runner.state["is_transitioning"] = False
+        runner.state["is_skipping"] = False  # Reset skipping flag on error
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -626,10 +634,12 @@ async def start_simulation(request: SimulationRequest):
 
         # Set transition flag to prevent race conditions
         runner.state["is_transitioning"] = True
+        runner.state["is_starting"] = True  # Set starting flag for immediate UX feedback
 
         logger.info(
             f"Starting simulation with scenarios: {request.scenarios}, debug: {request.debug}, report: {request.report}"
         )
+        logger.info(f"Set is_starting=True, is_transitioning=True")
 
         # Reset synchronization events
         setup_event.clear()
@@ -663,10 +673,12 @@ async def start_simulation(request: SimulationRequest):
                     "batch_start_time": datetime.now(),
                     "scenario_start_time": datetime.now(),
                     "is_running": True,
+                    "is_stopping": False,  # Reset stopping flag when starting
                     "session_id": session_id,
                     "setup_complete": False,  # Reset setup flag
                 }
             )
+            logger.info(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
             runner.state["scenario_results"].clear_results()
 
             runner.app = runner.create_application(
@@ -732,7 +744,9 @@ async def start_simulation(request: SimulationRequest):
 
             # Reset transition flag after successful start
             runner.state["is_transitioning"] = False
+            # Don't clear is_starting flag here - let the simulation thread clear it when actually running
 
+            logger.info(f"Reset is_transitioning=False, is_starting={runner.state['is_starting']}")
             logger.info("Simulation started successfully")
             return {
                 "success": True,
@@ -742,7 +756,9 @@ async def start_simulation(request: SimulationRequest):
         except Exception as e:
             logger.error(f"Error during simulation setup: {str(e)}")
             runner.state["is_running"] = False
+            runner.state["is_stopping"] = False  # Reset stopping flag on error
             runner.state["is_transitioning"] = False
+            runner.state["is_starting"] = False  # Clear starting flag on error
             cleanup_resources()
             raise e
 
@@ -751,6 +767,11 @@ async def start_simulation(request: SimulationRequest):
         import traceback
 
         logger.error(f"Traceback: {traceback.format_exc()}")
+        # Reset state on error
+        runner.state["is_running"] = False
+        runner.state["is_stopping"] = False  # Reset stopping flag on error
+        runner.state["is_transitioning"] = False
+        runner.state["is_starting"] = False  # Clear starting flag on error
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -766,7 +787,13 @@ async def stop_simulation():
         if not runner.state["is_running"]:
             logger.info("Simulation is not running, returning success")
             return {"success": True, "message": "Simulation is not running"}
-        # Do NOT set is_transitioning for stop
+        
+        # Synchronize the two state objects immediately
+        runner.state["is_running"] = False      # tell WebSocket on next tick
+        runner.state["is_stopping"] = True      # new explicit flag
+
+        if hasattr(runner, "app") and runner.app:
+            runner.app.state.is_running = False  # halt frame producer
         try:
             current_scenario = runner.state["current_scenario"]
             
@@ -798,6 +825,7 @@ async def stop_simulation():
         finally:
             # Always reset simulation state
             runner.state["is_running"] = False
+            runner.state["is_stopping"] = False  # Reset stopping flag
             runner.state["is_transitioning"] = False
             runner.state["current_scenario"] = None
             runner.state["current_scenario_index"] = 0
@@ -815,6 +843,7 @@ async def stop_simulation():
         logger.error(f"Error stopping simulation: {str(e)}")
         # Ensure state is reset on error
         runner.state["is_running"] = False
+        runner.state["is_stopping"] = False  # Reset stopping flag on error
         runner.state["is_transitioning"] = False
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -823,37 +852,62 @@ async def stop_simulation():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection established")
-    
     try:
         while True:
             # Get comprehensive state information with improved reliability
             state_info = {
                 "type": "status",
                 "is_running": False,
+                "is_starting": False,  # New starting flag
+                "is_stopping": False,  # Stopping flag
+                "is_skipping": False,  # New skipping flag
                 "current_scenario": None,
                 "scenario_index": 0,
                 "total_scenarios": 0,
                 "is_transitioning": False,
+                "status_message": "Ready to Start",
                 "timestamp": datetime.now().isoformat(),
             }
 
             # Update state information if runner exists
-            if hasattr(runner, "state"):
+            if hasattr(runner, 'state'):
                 try:
-                    # Force state synchronization if needed
-                    if not runner.state.is_consistent():
-                        logger.warning("State inconsistency detected, forcing sync")
-                        runner.state.force_sync()
+                    # Determine status message based on backend state
+                    status_message = "Ready to Start"
+                    if runner.state["is_starting"]:
+                        status_message = "Starting simulation..."
+                    elif runner.state["is_stopping"]:
+                        status_message = "Stopping simulation..."
+                    elif runner.state["is_skipping"]:
+                        status_message = "Skipping scenario..."
+                    elif runner.state["is_running"]:
+                        if runner.state["is_transitioning"]:
+                            status_message = "Transitioning between scenarios..."
+                        else:
+                            status_message = "Simulation running"
                     
-                    state_info.update(
-                        {
-                            "is_running": runner.state["is_running"],
-                            "current_scenario": runner.state["current_scenario"],
-                            "scenario_index": runner.state["current_scenario_index"] + 1,
-                            "total_scenarios": len(runner.state["scenarios_to_run"]),
-                            "is_transitioning": runner.state["is_transitioning"],
-                        }
-                    )
+                    state_info.update({
+                        "is_running": runner.state["is_running"],
+                        "is_starting": runner.state["is_starting"],
+                        "is_stopping": runner.state["is_stopping"],  # Include stopping flag
+                        "is_skipping": runner.state["is_skipping"],
+                        "current_scenario": runner.state["current_scenario"],
+                        "scenario_index": runner.state["current_scenario_index"] + 1,
+                        "total_scenarios": len(runner.state["scenarios_to_run"]),
+                        "is_transitioning": runner.state["is_transitioning"],
+                        "status_message": status_message,
+                    })
+                    
+                    # Debug: Log the state being sent (only when state changes)
+                    current_state = f"is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_stopping={runner.state['is_stopping']}, is_skipping={runner.state['is_skipping']}, is_transitioning={runner.state['is_transitioning']}"
+                    
+                    # Only log when is_starting changes to avoid spam
+                    if runner.state['is_starting']:
+                        logger.info(f"WebSocket: is_starting=True, is_running={runner.state['is_running']}")
+                    elif not hasattr(websocket, '_last_logged_state') or websocket._last_logged_state != current_state:
+                        logger.debug(f"WebSocket sending state: {current_state}, status_message={status_message}")
+                        websocket._last_logged_state = current_state
+                    
                 except Exception as e:
                     logger.error(f"Error getting state info: {str(e)}")
                     # Use default values on error
@@ -863,19 +917,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(state_info)
 
                 # Send video frame if available and simulation is running
-                if (hasattr(runner, "app") and runner.app and 
+                if (hasattr(runner, 'app') and runner.app and 
                     runner.app.display_manager and 
                     state_info["is_running"] and 
-                    not state_info["is_transitioning"]):
+                    not state_info["is_transitioning"] and
+                    not state_info["is_stopping"]):
                     
                     # Debug: Check if display manager exists and has frames
                     frame = runner.app.display_manager.get_current_frame()
                     if frame is not None:
                         logger.debug(f"Got frame with shape: {frame.shape}")
                         # Convert frame to JPEG
-                        _, buffer = cv2.imencode(".jpg", frame)
+                        _, buffer = cv2.imencode('.jpg', frame)
                         # Convert to base64
-                        frame_base64 = base64.b64encode(buffer).decode("utf-8")
+                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
                         # Send to client
                         await websocket.send_text(frame_base64)
                         logger.debug("Frame sent successfully")
@@ -898,15 +953,22 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.debug("Simulation not running")
                     elif state_info["is_transitioning"]:
                         logger.debug("Simulation is transitioning")
+                    elif state_info["is_stopping"]:
+                        logger.debug("Simulation is stopping")
                         
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected")
                 break
             except Exception as e:
-                logger.error(f"Error sending WebSocket data: {str(e)}")
-                # Don't break on frame errors, just log them
-                if "WebSocketDisconnect" in str(e):
+                # Don't log normal WebSocket disconnection errors
+                if "1001" in str(e) or "1005" in str(e) or "going away" in str(e) or "no status code" in str(e):
+                    # These are normal disconnection errors, just break the loop
                     break
+                else:
+                    logger.error(f"Error sending WebSocket data: {str(e)}")
+                    # Don't break on frame errors, just log them
+                    if "WebSocketDisconnect" in str(e):
+                        break
 
             # Reduced sleep time for more responsive updates
             await asyncio.sleep(0.05)  # ~20 FPS for status updates
@@ -1062,6 +1124,9 @@ async def get_simulation_status():
     try:
         status_info = {
             "is_running": False,
+            "is_starting": False,  # Include starting flag
+            "is_stopping": False,  # Include stopping flag
+            "is_skipping": False,  # Include skipping flag
             "is_transitioning": False,
             "current_scenario": None,
             "scenario_index": 0,
@@ -1076,6 +1141,9 @@ async def get_simulation_status():
         if hasattr(runner, "state"):
             status_info.update({
                 "is_running": runner.state["is_running"],
+                "is_starting": runner.state["is_starting"],  # Include starting flag
+                "is_stopping": runner.state["is_stopping"],  # Include stopping flag
+                "is_skipping": runner.state["is_skipping"],  # Include skipping flag
                 "is_transitioning": runner.state["is_transitioning"],
                 "current_scenario": runner.state["current_scenario"],
                 "scenario_index": runner.state["current_scenario_index"] + 1,
