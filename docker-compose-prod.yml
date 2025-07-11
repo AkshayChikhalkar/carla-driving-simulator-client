@@ -1,31 +1,33 @@
+version: '3.8'
+
 services:
   carla-driving-simulator-client:
-    image: akshaychikhalkar/carla-simulator-client:dev_v1.2
+    image: akshaychikhalkar/carla-driving-simulator-client:latest
     container_name: carla-client
     shm_size: "2g"
     runtime: nvidia
     ulimits:
-      stack: 67108864  #
-    pull_policy: always
+      stack: 67108864
     ports:
-      - "3000:3000"  # Frontend only - backend communicates internally
+      - "3000:3000"  # Frontend
+      - "8081:8000"  # Backend
     environment:
       - PYTHONPATH=/app
       - HOST=0.0.0.0
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=http://localhost:8081
       - WDS_SOCKET_HOST=0.0.0.0
       - WDS_SOCKET_PORT=3000
       - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
-      - CARLA_HOST=carla-server  # Connect to CARLA server container
+      - CARLA_HOST=carla-server
       - CARLA_PORT=2000
       - NVIDIA_VISIBLE_DEVICES=all
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 30s
       retries: 3
-      start_period: 40s
+      start_period: 140s
     volumes:
       - ./logs:/app/logs
       - ./reports:/app/reports
@@ -35,8 +37,15 @@ services:
         condition: service_healthy
     networks:
       - carla-network
-
-
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "prometheus.scrape=true"
+      - "prometheus.port=8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   carla-server:
     image: carlasim/carla:0.10.0
@@ -69,11 +78,155 @@ services:
       start_period: 60s
     networks:
       - carla-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "3"
 
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: carla-watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600  # Check every hour (3600 seconds)
+      - WATCHTOWER_LABEL_ENABLE=true   # Only monitor containers with the watchtower.enable=true label
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_ROLLING_RESTART=true
+      - WATCHTOWER_NOTIFICATIONS_LEVEL=info
+      - TZ=UTC
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - carla-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: carla-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - carla-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Log Management with Loki
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: carla-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - carla-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: carla-promtail
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs:/app/logs:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - carla-network
+    depends_on:
+      - loki
+      - carla-driving-simulator-client
+
+  # System Metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: carla-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - carla-network
+
+  # Container Metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: carla-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - carla-network
+
+  # GPU Metrics for DGX A100 (nvidia-smi based)
+  gpu-exporter:
+    image: mindprince/nvidia_gpu_prometheus_exporter:0.1
+    container_name: carla-gpu-exporter
+    restart: unless-stopped
+    ports:
+      - "9445:9445"
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    networks:
+      - carla-network
+
+# Persistent Volumes
+volumes:
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+
+# Network Configuration
 networks:
   carla-network:
     driver: bridge
-
-
-
-    #Test for CICD
