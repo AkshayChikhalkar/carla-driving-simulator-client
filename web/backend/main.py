@@ -827,6 +827,7 @@ async def stop_simulation():
             runner.state["is_running"] = False
             runner.state["is_stopping"] = False  # Reset stopping flag
             runner.state["is_transitioning"] = False
+            runner.state["is_skipping"] = False  # Reset skipping flag
             runner.state["current_scenario"] = None
             runner.state["current_scenario_index"] = 0
             runner.state["scenarios_to_run"] = []
@@ -845,6 +846,7 @@ async def stop_simulation():
         runner.state["is_running"] = False
         runner.state["is_stopping"] = False  # Reset stopping flag on error
         runner.state["is_transitioning"] = False
+        runner.state["is_skipping"] = False  # Reset skipping flag on error
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -875,11 +877,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Determine status message based on backend state
                     status_message = "Ready to Start"
                     if runner.state["is_starting"]:
-                        status_message = "Starting simulation..."
+                        status_message = "Hang on,\nLoading Simulation..."
                     elif runner.state["is_stopping"]:
                         status_message = "Stopping simulation..."
                     elif runner.state["is_skipping"]:
-                        status_message = "Skipping scenario..."
+                        # Check if this is the last scenario being skipped
+                        current_index = runner.state["current_scenario_index"]
+                        total_scenarios = len(runner.state["scenarios_to_run"])
+                        if current_index >= total_scenarios - 1:
+                            status_message = "Stopping simulation..."
+                        else:
+                            status_message = "Skipping scenario..."
                     elif runner.state["is_running"]:
                         if runner.state["is_transitioning"]:
                             status_message = "Transitioning between scenarios..."
@@ -921,7 +929,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     runner.app.display_manager and 
                     state_info["is_running"] and 
                     not state_info["is_transitioning"] and
-                    not state_info["is_stopping"]):
+                    not state_info["is_stopping"] and
+                    not state_info["is_skipping"] and
+                    not state_info["is_starting"]):
                     
                     # Debug: Check if display manager exists and has frames
                     frame = runner.app.display_manager.get_current_frame()
@@ -955,6 +965,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.debug("Simulation is transitioning")
                     elif state_info["is_stopping"]:
                         logger.debug("Simulation is stopping")
+                    elif state_info["is_skipping"]:
+                        logger.debug("Simulation is skipping - not sending frames")
+                    elif state_info["is_starting"]:
+                        logger.debug("Simulation is starting - not sending frames")
                         
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected")
