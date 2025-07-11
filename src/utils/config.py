@@ -68,7 +68,7 @@ class WorldConfig:
     weather: WeatherConfig
     physics: PhysicsConfig
     traffic: TrafficConfig
-    fixed_delta_seconds: float = 0.1
+    fixed_delta_seconds: float = 0.0167  # 60 FPS default
     target_distance: float = 500.0
     num_vehicles: int = 5
     enable_collision: bool = False

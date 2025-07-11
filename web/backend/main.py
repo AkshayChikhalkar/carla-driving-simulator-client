@@ -975,7 +975,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
             except Exception as e:
                 # Don't log normal WebSocket disconnection errors
-                if "1001" in str(e) or "1005" in str(e) or "going away" in str(e) or "no status code" in str(e):
+                error_str = str(e).lower()
+                if (any(pattern in error_str for pattern in [
+                    "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                    "going away", "no status code", "no close frame received or sent",
+                    "connection closed", "connection reset", "connection aborted",
+                    "connection refused", "connection timed out", "broken pipe",
+                    "websocket is closed", "websocket connection is closed",
+                    "remote end closed connection", "connection lost",
+                    "peer closed connection", "socket is not connected"
+                ])):
                     # These are normal disconnection errors, just break the loop
                     break
                 else:
@@ -984,13 +993,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     if "WebSocketDisconnect" in str(e):
                         break
 
-            # Reduced sleep time for more responsive updates
-            await asyncio.sleep(0.05)  # ~20 FPS for status updates
+            # High frame rate for smooth video streaming
+            await asyncio.sleep(0.0167)  # ~60 FPS for status updates and video frames
             
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except Exception as e:
-        logger.error(f"Error in websocket: {str(e)}")
+        # Don't log normal WebSocket disconnection errors
+        error_str = str(e).lower()
+        if (any(pattern in error_str for pattern in [
+            "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+            "going away", "no status code", "no close frame received or sent",
+            "connection closed", "connection reset", "connection aborted",
+            "connection refused", "connection timed out", "broken pipe",
+            "websocket is closed", "websocket connection is closed",
+            "remote end closed connection", "connection lost",
+            "peer closed connection", "socket is not connected"
+        ])):
+            logger.info("WebSocket connection closed normally")
+        else:
+            logger.error(f"Error in websocket: {str(e)}")
     finally:
         logger.info("WebSocket connection closed")
 

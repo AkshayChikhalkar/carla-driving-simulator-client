@@ -28,7 +28,7 @@ world:
     speed_difference_percentage: -100  # percentage (negative means faster)
     ignore_lights_percentage: 0  # percentage (0 means follow all traffic lights)
     ignore_signs_percentage: 0  # percentage (0 means follow all traffic signs)
-  fixed_delta_seconds: 0.05  # 20 FPS
+  fixed_delta_seconds: 0.0167  # 60 FPS (1/60 = 0.0167)
   target_distance: 500.0
   num_vehicles: 10
   enable_collision: false

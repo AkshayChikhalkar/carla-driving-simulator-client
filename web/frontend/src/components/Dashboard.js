@@ -162,7 +162,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     let ws;
     let isUnmounted = false;
     let lastFrameTime = 0;
-    const FRAME_INTERVAL = 1000 / 30; // Target 30 FPS
+    const FRAME_INTERVAL = 1000 / 60; // Target 60 FPS
 
     const setupWebSocket = () => {
       ws = new WebSocket(WS_BASE_URL);
@@ -318,20 +318,32 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
               // Update isRunning based on backend state
               setIsRunning(data.is_running || false);
+              
+              // Sync local state with backend state on first connection or after refresh
+              if (data.is_running && !isRunning) {
+                setIsRunning(true);
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('Synced local isRunning state with backend on reconnection');
+                }
+              }
             }
           } else {
             // It's a video frame (base64 string)
-            // Block drawing if skipping
+            // Always mark that we've received a frame for proper canvas display logic
+            setHasReceivedFrame(true);
+            
+            // Block drawing if skipping, but still track frame reception
             if (isSkipping || backendState.is_skipping) {
               if (process.env.NODE_ENV !== 'production') {
                 console.log('Skipping: Not drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
               }
               return;
             }
+            
             if (process.env.NODE_ENV !== 'production') {
               console.log('Drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
             }
-            setHasReceivedFrame(true);
+            
             const img = new Image();
             img.onload = () => {
               const canvas = canvasRef.current;
@@ -766,14 +778,20 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               width: '100%',
               height: '100%',
               objectFit: 'cover',
-              display: isRunning && hasReceivedFrame && !isStarting && !isStopping && !isSkipping ? 'block' : 'none',
+              display: (isRunning || backendState.is_running) && hasReceivedFrame && 
+                      !isStarting && !backendState.is_starting && 
+                      !isStopping && !backendState.is_stopping && 
+                      !isSkipping && !backendState.is_skipping ? 'block' : 'none',
               background: '#000',
               margin: 0,
               padding: 0,
               position: 'absolute',
               top: 0,
               left: 0,
-              opacity: isRunning && hasReceivedFrame && !isStarting && !isStopping && !isSkipping ? 1 : 0,
+              opacity: (isRunning || backendState.is_running) && hasReceivedFrame && 
+                      !isStarting && !backendState.is_starting && 
+                      !isStopping && !backendState.is_stopping && 
+                      !isSkipping && !backendState.is_skipping ? 1 : 0,
               transition: 'opacity 0.5s ease-in-out',
               zIndex: 0
             }}
@@ -781,11 +799,18 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               if (process.env.NODE_ENV !== 'production') {
                 console.log('Canvas display state:', {
                   isRunning,
+                  backendRunning: backendState.is_running,
                   hasReceivedFrame,
                   isStarting,
+                  backendStarting: backendState.is_starting,
                   isStopping,
+                  backendStopping: backendState.is_stopping,
                   isSkipping,
-                  display: isRunning && hasReceivedFrame && !isStarting && !isStopping && !isSkipping ? 'block' : 'none'
+                  backendSkipping: backendState.is_skipping,
+                  shouldDisplay: (isRunning || backendState.is_running) && hasReceivedFrame && 
+                                !isStarting && !backendState.is_starting && 
+                                !isStopping && !backendState.is_stopping && 
+                                !isSkipping && !backendState.is_skipping
                 });
               }
             }}
@@ -802,8 +827,11 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               alignItems: 'center',
               justifyContent: 'center',
               background: '#000',
-              opacity: isStarting || isStopping || isSkipping || (!isRunning || !hasReceivedFrame) ? 1 : 0,
-              transition: isSkipping ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out', // Faster transition for skipping
+              opacity: isStarting || backendState.is_starting || 
+                      isStopping || backendState.is_stopping || 
+                      isSkipping || backendState.is_skipping || 
+                      (!(isRunning || backendState.is_running) || !hasReceivedFrame) ? 1 : 0,
+              transition: (isSkipping || backendState.is_skipping) ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out', // Faster transition for skipping
               zIndex: 1
             }}
           >
@@ -818,8 +846,11 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 background: '#000',
                 margin: 0,
                 padding: 0,
-                opacity: isStarting || isStopping || isSkipping || (!isRunning || !hasReceivedFrame) ? 1 : 0,
-                transition: isSkipping ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out' // Faster transition for skipping
+                opacity: isStarting || backendState.is_starting || 
+                        isStopping || backendState.is_stopping || 
+                        isSkipping || backendState.is_skipping || 
+                        (!(isRunning || backendState.is_running) || !hasReceivedFrame) ? 1 : 0,
+                transition: (isSkipping || backendState.is_skipping) ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out' // Faster transition for skipping
               }}
             />
             <Typography
