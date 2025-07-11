@@ -1,0 +1,151 @@
+name: Deploy CARLA Simulator
+
+on:
+  push:
+    branches: [ gui ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CARLA_VERSION: "0.10.0"
+      DOCKER_IMAGE: carlasim/carla:0.10.0
+      OPENSSL_CONF: /etc/ssl/openssl.cnf
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install OpenVPN and OpenSSL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openvpn openssl
+
+      - name: Setup VPN connection
+        run: |
+          # Create VPN config directory
+          mkdir -p ~/.vpn
+          
+          # Write VPN config and clean it up
+          cat << 'EOF' > ~/.vpn/config.ovpn
+          ${{ secrets.OVPN_CONFIG }}
+          EOF
+          
+          # Remove problematic options and certificate blocks
+          sed -i '/cryptoapicert/d' ~/.vpn/config.ovpn
+          sed -i '/tls-auth/d' ~/.vpn/config.ovpn
+          sed -i '/<cert>/,/<\/cert>/d' ~/.vpn/config.ovpn
+          sed -i '/<key>/,/<\/key>/d' ~/.vpn/config.ovpn
+          sed -i '/<ca>/,/<\/ca>/d' ~/.vpn/config.ovpn
+          
+          # Write PKCS#12 certificate
+          echo "${{ secrets.P12_CERT }}" | base64 -d > ~/.vpn/certificate.p12
+          
+          # Extract certificate and private key from PKCS#12 with legacy support
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -clcerts -nokeys -out ~/.vpn/certificate.crt -passin pass:${{ secrets.P12_PASSWORD }} -legacy
+          openssl pkcs12 -in ~/.vpn/certificate.p12 -nocerts -nodes -out ~/.vpn/private.key -passin pass:${{ secrets.P12_PASSWORD }} -legacy
+          
+          # Ensure proper certificate format with more robust sed commands
+          sed -i 's/^---BEGIN/-----BEGIN/g' ~/.vpn/certificate.crt
+          sed -i 's/^---END/-----END/g' ~/.vpn/certificate.crt
+          sed -i 's/^---BEGIN/-----BEGIN/g' ~/.vpn/private.key
+          sed -i 's/^---END/-----END/g' ~/.vpn/private.key
+          
+          # Additional formatting fixes
+          sed -i 's/^BEGIN/-----BEGIN/g' ~/.vpn/certificate.crt
+          sed -i 's/^END/-----END/g' ~/.vpn/certificate.crt
+          sed -i 's/^BEGIN/-----BEGIN/g' ~/.vpn/private.key
+          sed -i 's/^END/-----END/g' ~/.vpn/private.key
+          
+          # Verify certificate format using a safer approach
+          if ! head -n 1 ~/.vpn/certificate.crt | grep -q "BEGIN" || ! head -n 1 ~/.vpn/private.key | grep -q "BEGIN"; then
+            echo "Error: Certificate format verification failed"
+            exit 1
+          fi
+          
+          # Update OpenVPN config to use extracted files
+          echo "cert ~/.vpn/certificate.crt" >> ~/.vpn/config.ovpn
+          echo "key ~/.vpn/private.key" >> ~/.vpn/config.ovpn
+          
+          # Debug: Show config file content (without sensitive data)
+          echo "=== OpenVPN Config ==="
+          grep -v "certificate\|key\|password" ~/.vpn/config.ovpn
+          
+          # Debug: Verify certificate files
+          echo "=== Certificate Files ==="
+          ls -l ~/.vpn/
+          
+          # Debug: Show certificate format
+          echo "=== Certificate Format ==="
+          head -n 1 ~/.vpn/certificate.crt
+          head -n 1 ~/.vpn/private.key
+          
+          # Connect to VPN with reduced security for testing
+          sudo openvpn --config ~/.vpn/config.ovpn --daemon --auth none
+          
+          # Wait for VPN connection
+          sleep 10
+          
+          # Verify VPN connection
+          if ! ping -c 1 ${{ secrets.SERVER_HOST }} > /dev/null 2>&1; then
+            echo "Failed to connect to VPN"
+            exit 1
+          fi
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Stop existing containers
+            docker-compose down || true
+            
+            # Create docker-compose.yml if it doesn't exist
+            cat > docker-compose.yml << 'EOL'
+            version: '3.8'
+            services:
+              carla-server:
+                image: carlasim/carla:0.10.0
+                privileged: true
+                runtime: nvidia
+                environment:
+                  - NVIDIA_VISIBLE_DEVICES=all
+                  - NVIDIA_DRIVER_CAPABILITIES=all
+                  - CUDA_VISIBLE_DEVICES=0
+                  - NVIDIA_GPU_MEMORY_ALLOCATION=65536
+                  - NVIDIA_GPU_MEMORY_ALLOCATION_PERCENT=80
+                ports:
+                  - "2000-2002:2000-2002"
+                command: ./CarlaUnreal.sh -opengl -RenderOffScreen -nosound -quality-level=low -benchmark -fps=30 -ResX=1920 -ResY=1080
+                volumes:
+                  - /tmp/.X11-unix:/tmp/.X11-unix
+                shm_size: 32g
+                ipc: host
+                ulimits:
+                  memlock: -1
+                  stack: 67108864
+            EOL
+            
+            # Start containers
+            docker-compose up -d
+            
+            # Wait for CARLA server to be ready
+            timeout=300
+            while [ $timeout -gt 0 ]; do
+              if curl -s http://localhost:2000/ > /dev/null; then
+                echo "CARLA server is ready!"
+                exit 0
+              fi
+              sleep 5
+              timeout=$((timeout-5))
+            done
+            echo "Timeout waiting for CARLA server"
+            exit 1
+
+      - name: Cleanup VPN
+        if: always()
+        run: |
+          sudo killall openvpn || true
+          rm -rf ~/.vpn 

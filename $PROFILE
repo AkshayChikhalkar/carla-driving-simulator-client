@@ -1,0 +1,4 @@
+function prompt {
+    $currentDir = Split-Path -Leaf (Get-Location)
+    return "PS $currentDir> "
+} 

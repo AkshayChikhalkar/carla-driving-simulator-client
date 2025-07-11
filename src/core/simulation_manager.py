@@ -2,24 +2,31 @@
 Manages the simulation state, events, and metrics.
 """
 
+from logging import Logger
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 from enum import Enum, auto
 import carla
+from src.control.controller import VehicleController
 from src.core.interfaces import (
     ISimulationManager,
     IScenario,
     IWorldManager,
     IVehicleController,
     ISensorManager,
-    ILogger
+    ILogger,
 )
-from src.utils.settings import DEBUG_MODE
+from src.core.sensors import SensorManager
+from src.core.world_manager import WorldManager
+from src.utils.config import load_config
 from ..visualization.display_manager import VehicleState
+import math
+
 
 class SimulationEvent(Enum):
     """Possible simulation events"""
+
     SPEED_CHANGE = auto()
     POSITION_CHANGE = auto()
     HEADING_CHANGE = auto()
@@ -28,9 +35,11 @@ class SimulationEvent(Enum):
     SPEED_LIMIT = auto()
     NONE = auto()
 
+
 @dataclass
 class SimulationState:
     """Current state of the simulation"""
+
     elapsed_time: float
     speed: float
     position: tuple[float, float, float]
@@ -39,213 +48,86 @@ class SimulationState:
     is_finished: bool
     collision_intensity: float = 0.0
 
+
 class SimulationManager(ISimulationManager):
-    """Manages the simulation lifecycle and coordinates between components"""
-    
-    def __init__(self,
-                 world_manager: IWorldManager,
-                 vehicle_controller: IVehicleController,
-                 sensor_manager: ISensorManager,
-                 logger: ILogger):
-        self.world_manager = world_manager
-        self.vehicle_controller = vehicle_controller
-        self.sensor_manager = sensor_manager
-        self.logger = logger
-        self._scenario: Optional[IScenario] = None
-        self._is_running = False
-        # Pre-allocate vehicle state dictionary
-        self._vehicle_state = {
-            'location': None,
-            'velocity': None,
-            'acceleration': None,
-            'transform': None,
-            'sensor_data': None
-        }
+    """Manages the simulation lifecycle"""
+
+    def __init__(self, config_path: str):
+        """Initialize simulation manager"""
+        self.config = load_config(config_path)
+        self.world_manager = None
+        self.sensor_manager = None
+        self.vehicle = None
+        self.vehicle_bp = None
+        self.map_name = self.config.world_config.map_name
+        self.logger = Logger()
+        self._state = SimulationState()
 
     def connect(self) -> bool:
-        """Connect to the CARLA server"""
+        """Connect to the simulation server"""
         try:
-            self.world_manager.get_world()
-            self.logger.log_info("Successfully connected to CARLA server")
+            self.world_manager = WorldManager(
+                self.config.server_config,
+                self.config.world_config,
+                self.config.vehicle_config,
+            )
             return True
         except Exception as e:
-            self.logger.log_error(f"Failed to connect to CARLA server: {str(e)}")
+            self.logger.error("Error connecting to simulation server", exc_info=e)
             return False
 
-    def setup(self) -> None:
-        """Setup the simulation environment"""
+    def setup(self) -> bool:
+        """Setup simulation components"""
         try:
+            # Initialize components
+            self.world_manager = WorldManager(
+                self.client, self.config.world, self.config.vehicle
+            )
+            self.vehicle_controller = VehicleController(
+                self.world_manager, self.config.vehicle
+            )
+            self.sensor_manager = SensorManager(self.world_manager, self.config.sensors)
+
             # Setup sensors
             self.sensor_manager.setup_sensors()
-            
-            # Get initial vehicle state
-            vehicle = self.vehicle_controller.get_vehicle()
-            if not vehicle:
-                raise RuntimeError("Vehicle not available")
-                
-            self.logger.log_info("Simulation environment setup completed")
-        except Exception as e:
-            self.logger.log_error(f"Failed to setup simulation: {str(e)}")
-            raise
 
-    def set_scenario(self, scenario: IScenario) -> None:
-        """Set the current scenario"""
-        self._scenario = scenario
-        self._scenario.setup()
+            return True
+        except Exception as e:
+            self.logger.error("Error setting up simulation", exc_info=e)
+            return False
 
     def run(self) -> None:
-        """Run the simulation loop"""
-        if not self._scenario:
-            raise RuntimeError("No scenario set")
-            
-        self._is_running = True
-        self.logger.log_info("Starting simulation loop")
-        
+        """Run the simulation"""
         try:
-            vehicle = self.vehicle_controller.get_vehicle()
-            
-            while self._is_running and not self._scenario.is_completed():
-                # Update vehicle state in-place
-                self._vehicle_state['location'] = vehicle.get_location()
-                self._vehicle_state['velocity'] = vehicle.get_velocity()
-                self._vehicle_state['acceleration'] = vehicle.get_acceleration()
-                self._vehicle_state['transform'] = vehicle.get_transform()
-                self._vehicle_state['sensor_data'] = self.sensor_manager.get_sensor_data()
-                
-                # Update scenario
-                self._scenario.update()
-                
-                # Get and apply control commands
-                control = self.vehicle_controller.get_control(self._vehicle_state)
-                vehicle.apply_control(control)
-                
-                # Convert vehicle state to display format
-                display_state = VehicleState(
-                    speed=self._vehicle_state['velocity'].length(),
-                    position=(
-                        self._vehicle_state['location'].x,
-                        self._vehicle_state['location'].y,
-                        self._vehicle_state['location'].z
-                    ),
-                    heading=self._vehicle_state['transform'].rotation.yaw,
-                    distance_to_target=0.0,  # This should be updated by the scenario
-                    controls={
-                        'throttle': control.throttle,
-                        'brake': control.brake,
-                        'steer': control.steer,
-                        'gear': control.gear,
-                        'hand_brake': control.hand_brake,
-                        'reverse': control.reverse,
-                        'manual_gear_shift': control.manual_gear_shift
-                    },
-                    speed_kmh=self._vehicle_state['velocity'].length() * 3.6,
-                    scenario_name=self._scenario.__class__.__name__
-                )
-                
-                # Update display with converted state
-                if self.display_manager:
-                    self.display_manager.render(display_state, self._scenario.get_target_position())
-                
-                # Log vehicle state (consider reducing logging frequency)
-                #self.logger.log_vehicle_state(self._vehicle_state)
-                
+            if not self._state.is_running:
+                self._state.is_running = True
+                self.logger.info("Starting simulation")
+
+                # Main simulation loop
+                while self._state.is_running:
+                    # Update vehicle state
+                    if self.vehicle:
+                        self._update_vehicle_state()
+
+                    # Process sensor data
+                    if self.sensor_manager:
+                        self.sensor_manager.process_data()
+
+                    # Tick the world
+                    self.world_manager.world.tick()
+
+            else:
+                self.logger.warning("Simulation is already running")
+
         except Exception as e:
-            self.logger.log_error(f"Error in simulation loop: {str(e)}")
+            self.logger.error("Error in simulation loop", exc_info=e)
+            self._state.is_running = False
             raise
-        finally:
-            self._is_running = False
-            if self._scenario:
-                self._scenario.cleanup()
 
     def stop(self) -> None:
         """Stop the simulation"""
-        self._is_running = False
-
-    def cleanup(self) -> None:
-        """Clean up simulation resources"""
-        try:
-            if DEBUG_MODE:
-                self.logger.debug("Starting simulation cleanup...")
-            
-            # First stop any ongoing simulation
-            self.stop()
-            
-            # Clean up world and all actors
-            if self.world_manager:
-                if DEBUG_MODE:
-                    self.logger.debug("Cleaning up world manager...")
-                self.world_manager.cleanup()
-            
-            # Clean up sensors
-            if self.sensor_manager:
-                if DEBUG_MODE:
-                    self.logger.debug("Cleaning up sensor manager...")
-                self.sensor_manager.cleanup()
-            
-            # Reset simulation state
-            self._state = None
-            self.last_speed = 0.0
-            self.last_position = (0.0, 0.0, 0.0)
-            self.last_heading = 0.0
-            self.is_finished = False
-            self.start_time = None
-            
-            # Clear any remaining references
-            self._scenario = None
-            self._vehicle_state = {
-                'location': None,
-                'velocity': None,
-                'acceleration': None,
-                'transform': None,
-                'sensor_data': None
-            }
-            
-            # Force garbage collection
-            import gc
-            gc.collect()
-            
-            if DEBUG_MODE:
-                self.logger.debug("Simulation cleanup completed")
-            self.logger.info("Simulation cleanup completed")
-            
-        except Exception as e:
-            self.logger.error("Error during cleanup", exc_info=e)
-            raise
-
-    def check_events(self) -> tuple[SimulationEvent, str]:
-        """Check for significant events based on current state"""
-        event = SimulationEvent.NONE
-        details = ""
-        
-        # Check speed changes
-        if abs(self._state.speed - self.last_speed) > self.config['speed_change_threshold']:
-            event = SimulationEvent.SPEED_CHANGE
-            details = f"Speed change: {self.last_speed:.1f} -> {self._state.speed:.1f} km/h"
-        
-        # Check target reached
-        elif (self._state.distance_to_target < self.config['target_tolerance'] 
-              and not self.is_finished):
-            event = SimulationEvent.TARGET_REACHED
-            details = f"Target reached at distance: {self._state.distance_to_target:.1f}m"
-            self.is_finished = True
-        
-        # Check speed limit
-        elif self._state.speed > self.config['max_speed']:
-            event = SimulationEvent.SPEED_LIMIT
-            details = f"Speed limit reached: {self._state.speed:.1f} km/h"
-        
-        # Update last values
-        self.last_speed = self._state.speed
-        self.last_position = self._state.position
-        self.last_heading = self._state.heading
-        
-        return event, details
-    
-    def should_continue(self) -> bool:
-        """Check if simulation should continue"""
-        elapsed_time = time.time() - self.start_time
-        return (elapsed_time < self.config['simulation_time'] 
-                and not self.is_finished)
+        self._state.is_running = False
+        self.logger.info("Stopping simulation")
 
     def initialize(self) -> bool:
         """Initialize the simulation"""
@@ -254,22 +136,107 @@ class SimulationManager(ISimulationManager):
             if not self.world_manager.connect():
                 self.logger.error("Failed to connect to CARLA server")
                 return False
-                
+
             # Load map
             self.world_manager.load_map(self.map_name)
             self.logger.info(f"Loaded map: {self.map_name}")
-            
-            # Spawn vehicle
-            if not self.spawn_vehicle():
-                self.logger.error("Failed to spawn vehicle")
+
+            # Create vehicle
+            self.vehicle = self.world_manager.create_vehicle()
+            if not self.vehicle:
+                self.logger.error("Failed to create vehicle")
                 return False
-                
+
             self.logger.info("Simulation initialized successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error("Error initializing simulation", exc_info=e)
             return False
+
+    def _update_vehicle_state(self) -> None:
+        """Update vehicle state"""
+        try:
+            if self.vehicle:
+                # Get vehicle transform
+                transform = self.vehicle.get_transform()
+
+                # Get vehicle velocity
+                velocity = self.vehicle.get_velocity()
+                speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+
+                # Update state
+                self._state.vehicle_state = VehicleState(
+                    speed=speed,
+                    position=(
+                        transform.location.x,
+                        transform.location.y,
+                        transform.location.z,
+                    ),
+                    rotation=(
+                        transform.rotation.pitch,
+                        transform.rotation.yaw,
+                        transform.rotation.roll,
+                    ),
+                    acceleration=0.0,  # TODO: Calculate acceleration
+                    angular_velocity=0.0,  # TODO: Calculate angular velocity
+                    collision_intensity=0.0,  # TODO: Get collision data
+                    distance_to_target=float(
+                        "inf"
+                    ),  # TODO: Calculate distance to target
+                    heading_to_target=0.0,  # TODO: Calculate heading to target
+                    heading_difference=0.0,  # TODO: Calculate heading difference
+                )
+
+        except Exception as e:
+            self.logger.error("Error updating vehicle state", exc_info=e)
+
+    def check_events(self) -> tuple[SimulationEvent, str]:
+        """Check for significant events based on current state"""
+        event = SimulationEvent.NONE
+        details = ""
+
+        # Check speed changes
+        if (
+            abs(self._state.speed - self.last_speed)
+            > self.config["speed_change_threshold"]
+        ):
+            event = SimulationEvent.SPEED_CHANGE
+            details = (
+                f"Speed change: {self.last_speed:.1f} -> {self._state.speed:.1f} km/h"
+            )
+
+        # Check target reached
+        elif (
+            self._state.distance_to_target < self.config["target_tolerance"]
+            and not self.is_finished
+        ):
+            event = SimulationEvent.TARGET_REACHED
+            details = (
+                f"Target reached at distance: {self._state.distance_to_target:.1f}m"
+            )
+            self.is_finished = True
+
+        # Check speed limit
+        elif self._state.speed > self.config["max_speed"]:
+            event = SimulationEvent.SPEED_LIMIT
+            details = f"Speed limit reached: {self._state.speed:.1f} km/h"
+
+        # Update last values
+        self.last_speed = self._state.speed
+        self.last_position = self._state.position
+        self.last_heading = self._state.heading
+
+        return event, details
+
+    def should_continue(self) -> bool:
+        """Check if simulation should continue"""
+        elapsed_time = time.time() - self.start_time
+        return elapsed_time < self.config["simulation_time"] and not self.is_finished
+
+    def set_scenario(self, scenario: IScenario) -> None:
+        """Set the current scenario"""
+        self._scenario = scenario
 
     def spawn_vehicle(self) -> bool:
         """Spawn the ego vehicle"""
@@ -279,20 +246,19 @@ class SimulationManager(ISimulationManager):
             if not spawn_points:
                 self.logger.error("No spawn points found in map")
                 return False
-                
+
             # Spawn vehicle
             self.vehicle = self.world_manager.spawn_actor(
-                self.vehicle_bp,
-                spawn_points[0]
+                self.vehicle_bp, spawn_points[0]
             )
-            
+
             if not self.vehicle:
                 self.logger.error("Failed to spawn vehicle")
                 return False
-                
+
             self.logger.info("Vehicle spawned successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error("Error spawning vehicle", exc_info=e)
-            return False 
+            return False

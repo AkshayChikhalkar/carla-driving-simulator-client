@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import pytest
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -13,137 +14,157 @@ from datetime import datetime
 from src.core.simulation_application import SimulationApplication
 from src.core.world_manager import WorldManager
 from src.core.sensors import SensorManager
-from src.control.controller import VehicleController, KeyboardController, AutopilotController
+from src.control.controller import (
+    VehicleController,
+    KeyboardController,
+    AutopilotController,
+)
 from src.utils.logging import Logger
 from src.scenarios.scenario_registry import ScenarioRegistry
 from src.utils.paths import get_config_path
 from src.utils.default_config import SIMULATION_CONFIG
 from src.utils.config import load_config
 
+
 class SimulationRunner:
     """Class to handle simulation execution and management"""
-    
-    def __init__(self, config_file: str = None):
+
+    def __init__(self, config_file: str = None, session_id: uuid.UUID = None):
         self.config_file = config_file or get_config_path()
         self.config = load_config(self.config_file)
         self.logger = Logger()
-        
+        self.session_id = session_id or uuid.uuid4()
+
     def setup_logger(self, debug: bool = False) -> None:
         """Setup logger with debug mode"""
         # Use debug from config if available, otherwise use provided value
-        debug_mode = getattr(self.config, 'debug', debug)
+        debug_mode = getattr(self.config, "debug", debug)
         self.logger.set_debug_mode(debug_mode)
-        
+
     def register_scenarios(self) -> None:
         """Register all available scenarios"""
         ScenarioRegistry.register_all()
-        
-    def create_application(self, scenario: str) -> SimulationApplication:
+
+    def create_application(
+        self, scenario: str, session_id=None
+    ) -> SimulationApplication:
         """Create a new simulation application instance"""
-        return SimulationApplication(self.config_file, scenario)
-        
+        return SimulationApplication(
+            self.config_file,
+            scenario=scenario,
+            logger=self.logger,
+            session_id=session_id or self.session_id,
+        )
+
     def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
         """Setup simulation components and return them"""
         # Create and setup components with required arguments
         world_manager = WorldManager(
             client=app.connection.client,
             config=app.world_config,
-            vehicle_config=app._config.vehicle
+            vehicle_config=app._config.vehicle,
+            logger=self.logger,
         )
-        
+
         # Create vehicle first
         vehicle = world_manager.create_vehicle()
         if not vehicle:
             raise RuntimeError("Failed to create vehicle")
-            
+
         # Create sensor manager with vehicle
-        sensor_manager = SensorManager(
-            config=app.sensor_config,
-            vehicle=vehicle
-        )
-        
+        sensor_manager = SensorManager(config=app.sensor_config, vehicle=vehicle)
+
         # Create controller based on config type
-        controller_type = getattr(app.controller_config, 'type', 'autopilot')
+        controller_type = getattr(app.controller_config, "type", "autopilot")
         self.logger.debug(f"Creating controller with type: {controller_type}")
-        vehicle_controller = VehicleController(app.controller_config)
-        
-        if controller_type == 'keyboard':
+
+        # Check if we're in web mode
+        is_web_mode = getattr(app._config, "web_mode", False)
+        vehicle_controller = VehicleController(
+            app.controller_config, headless=is_web_mode
+        )
+
+        if controller_type == "keyboard" and not is_web_mode:
             self.logger.debug("Initializing keyboard controller")
             controller = KeyboardController(app.controller_config)
-        elif controller_type == 'autopilot':
+        elif controller_type == "autopilot":
             self.logger.debug("Initializing autopilot controller")
-            controller = AutopilotController(vehicle, app.controller_config, app.connection.client)
+            controller = AutopilotController(
+                vehicle, app.controller_config, app.connection.client, world_manager
+            )
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
-            
+
         self.logger.debug(f"Setting controller strategy: {type(controller).__name__}")
         vehicle_controller.set_strategy(controller)
         self.logger.debug("Setting vehicle for controller")
         vehicle_controller.set_vehicle(vehicle)
-        
+
         return {
-            'world_manager': world_manager,
-            'vehicle_controller': vehicle_controller,
-            'sensor_manager': sensor_manager
+            "world_manager": world_manager,
+            "vehicle_controller": vehicle_controller,
+            "sensor_manager": sensor_manager,
         }
-        
+
     def run_single_scenario(self, scenario: str) -> tuple[bool, str]:
         """
         Run a single scenario
-        
+
         Args:
             scenario: Name of the scenario to run
-            
+
         Returns:
             tuple[bool, str]: (success status, result message)
         """
         try:
             # Create application instance for current scenario
-            app = self.create_application(scenario)
-            
+            app = self.create_application(scenario, session_id=self.session_id)
+
             # Connect to CARLA server
             if not app.connection.connect():
                 return False, "Failed to connect to CARLA server"
-            
+
             try:
                 # Setup components
                 components = self.setup_components(app)
-                
+
                 # Setup application
                 app.setup(
-                    world_manager=components['world_manager'],
-                    vehicle_controller=components['vehicle_controller'],
-                    sensor_manager=components['sensor_manager'],
-                    logger=self.logger
+                    world_manager=components["world_manager"],
+                    vehicle_controller=components["vehicle_controller"],
+                    sensor_manager=components["sensor_manager"],
+                    logger=self.logger,
                 )
-                
+
                 # Run simulation
                 app.run()
-                
+
                 # Get scenario result from cleanup
-                if hasattr(app, 'cleanup'):
+                if hasattr(app, "cleanup"):
                     completed, success = app.cleanup()
                     if completed:
-                        message = "Scenario completed successfully" if success else "Scenario failed to meet success criteria"
+                        message = (
+                            "Scenario completed successfully"
+                            if success
+                            else "Scenario failed to meet success criteria"
+                        )
                         return success, message
                     else:
                         return False, "Scenario did not complete"
                 return True, "Scenario completed"
-                
+
             finally:
-                # Disconnect from CARLA server
-                if hasattr(app, 'connection') and app.connection:
-                    app.connection.disconnect()
-                    
+                # Cleanup is handled by app.cleanup()
+                pass
+
         except Exception as e:
-            error_msg = f"Error running scenario {scenario}: {str(e)}"
-            self.logger.error(error_msg)
-            return False, error_msg
-            
+            self.logger.error(f"Error running scenario: {str(e)}")
+            return False, f"Error: {str(e)}"
+
     def run_scenarios(self, scenarios: List[str]) -> None:
         """
         Run multiple scenarios in sequence
-        
+
         Args:
             scenarios: List of scenario names to run
         """
@@ -152,15 +173,15 @@ class SimulationRunner:
             self.logger.info(f"================================")
             self.logger.info(f"Running scenario {index}/{total_scenarios}: {scenario}")
             self.logger.info(f"================================")
-            
+
             success, message = self.run_single_scenario(scenario)
             if not success:
                 self.logger.error(f"Scenario {scenario} failed: {message}")
-                
+
     def run_with_report(self, scenarios: List[str], debug: bool = False) -> None:
         """
         Run scenarios as tests and generate HTML report
-        
+
         Args:
             scenarios: List of scenarios to run
             debug: Whether to enable debug logging
@@ -168,15 +189,15 @@ class SimulationRunner:
         # Create reports directory
         reports_dir = Path("reports")
         reports_dir.mkdir(exist_ok=True)
-        
+
         # Configure pytest arguments
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_report = reports_dir / f"scenario_report_{timestamp}.html"
-        
+
         # Create temporary test file
         test_file = Path("tests/temp_test_scenarios.py")
         test_file.parent.mkdir(exist_ok=True)
-        
+
         # Generate test file content
         test_content = f'''import pytest
 from src.core.simulation_runner import SimulationRunner
@@ -196,7 +217,7 @@ class TestScenario:
         success, message = self.runner.run_single_scenario(scenario_name)
         return success, message
 '''
-        
+
         # Add test methods for each scenario
         for scenario in scenarios:
             test_content += f'''
@@ -205,127 +226,139 @@ class TestScenario:
         success, message = self.run_scenario("{scenario}")
         assert success, message
 '''
-        
+
         # Write test file
         test_file.write_text(test_content)
-        
+
         try:
             # Run pytest with proper argument handling
             import sys
+
             # Save original sys.argv
             original_argv = sys.argv.copy()
-            
+
             # Set up pytest arguments
             sys.argv = [
-                'pytest',
+                "pytest",
                 str(test_file),
-                '-v',
-                f'--html={html_report}',
-                '--self-contained-html'
+                "-v",
+                f"--html={html_report}",
+                "--self-contained-html",
             ]
-            
+
             if debug:
-                sys.argv.append('--log-cli-level=DEBUG')
-                
+                sys.argv.append("--log-cli-level=DEBUG")
+
             # Run pytest
             pytest.main()
-            
+
         finally:
             # Restore original sys.argv
             sys.argv = original_argv
             # Clean up temporary test file
             if test_file.exists():
                 test_file.unlink()
-            
+
     def parse_args(self, argv: Optional[List[str]] = None) -> argparse.Namespace:
         """
         Parse command line arguments
-        
+
         Args:
             argv: Optional list of command line arguments
-            
+
         Returns:
             argparse.Namespace: Parsed arguments
         """
         parser = argparse.ArgumentParser(
-            description='CARLA Driving Simulator',
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter
+            description="CARLA Driving Simulator",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
-        
+
         # Get debug setting from config or use default
-        debug_default = getattr(self.config, 'debug', SIMULATION_CONFIG['debug'])
-        
+        debug_default = getattr(self.config, "debug", SIMULATION_CONFIG["debug"])
+
         # Add arguments with defaults from config
         parser.add_argument(
-            '--debug',
-            action='store_true',
+            "--debug",
+            action="store_true",
             default=debug_default,
-            help='Enable debug mode for detailed logging'
+            help="Enable debug mode for detailed logging",
         )
-        
+
         parser.add_argument(
-            '--report',
-            action='store_true',
-            help='Run scenarios as tests and generate HTML report'
+            "--report",
+            action="store_true",
+            help="Run scenarios as tests and generate HTML report",
         )
-        
+
         # Register scenarios first to get available scenarios
         self.register_scenarios()
         available_scenarios = ScenarioRegistry.get_available_scenarios()
-        
+
         # Get default scenario from config or use default
-        default_scenario = getattr(self.config, 'scenario', SIMULATION_CONFIG['scenario'])
-        
+        default_scenario = getattr(
+            self.config, "scenario", SIMULATION_CONFIG["scenario"]
+        )
+
         parser.add_argument(
-            '--scenario',
+            "--scenario",
             type=str,
             default=default_scenario,
-            help='Type of scenario to run. Can be "all" or comma-separated list of scenarios: ' + ', '.join(available_scenarios)
+            help='Type of scenario to run. Can be "all" or comma-separated list of scenarios: '
+            + ", ".join(available_scenarios),
         )
-        
+
         # Parse arguments
         args = parser.parse_args(argv)
-        
+
         # Validate config file exists
         if not os.path.exists(self.config_file):
             parser.error(f"Default configuration file not found: {self.config_file}")
-        
+
         return args
-        
+
     def run(self, argv: Optional[List[str]] = None) -> None:
         """
         Main entry point for running simulations
-        
+
         Args:
             argv: Optional list of command line arguments
         """
         try:
             # Parse command line arguments
             args = self.parse_args(argv)
-            
+
             # Setup logger
             self.setup_logger(args.debug)
-            
+
             # Log startup configuration
             self.logger.info(f"Starting CARLA Driving Simulator")
-            self.logger.info(f"Configuration: scenario={args.scenario}, debug={args.debug}")
-            
+            self.logger.info(
+                f"Configuration: scenario={args.scenario}, debug={args.debug}"
+            )
+
             # Determine which scenarios to run
-            if args.scenario.lower() == 'all':
+            if args.scenario.lower() == "all":
                 scenarios_to_run = ScenarioRegistry.get_available_scenarios()
             else:
-                scenarios_to_run = [s.strip() for s in args.scenario.split(',')]
+                scenarios_to_run = [s.strip() for s in args.scenario.split(",")]
                 # Validate scenarios
-                invalid_scenarios = [s for s in scenarios_to_run if s not in ScenarioRegistry.get_available_scenarios()]
+                invalid_scenarios = [
+                    s
+                    for s in scenarios_to_run
+                    if s not in ScenarioRegistry.get_available_scenarios()
+                ]
                 if invalid_scenarios:
-                    raise ValueError(f"Invalid scenario(s): {', '.join(invalid_scenarios)}. Available scenarios: {', '.join(ScenarioRegistry.get_available_scenarios())}")
-            
+                    raise ValueError(
+                        f"Invalid scenario(s): {', '.join(invalid_scenarios)}. Available scenarios: {', '.join(ScenarioRegistry.get_available_scenarios())}"
+                    )
+
             # Run scenarios with or without report
             if args.report:
                 self.run_with_report(scenarios_to_run, args.debug)
             else:
                 self.run_scenarios(scenarios_to_run)
-            
+
         except KeyboardInterrupt:
             self.logger.info("Simulation stopped by user")
         except Exception as e:
@@ -333,4 +366,4 @@ class TestScenario:
             sys.exit(1)
         finally:
             self.logger.info("Simulation completed")
-            self.logger.close() 
+            self.logger.close()

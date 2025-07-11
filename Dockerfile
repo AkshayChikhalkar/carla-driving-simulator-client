@@ -1,0 +1,76 @@
+FROM python:3.11-slim
+
+# Install system and Node.js dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential libpq-dev curl \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgl1-mesa-dev \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get update && apt-get install -y \
+        lsof \
+        procps \
+        libstdc++6 \
+        libgcc1 \
+        libx11-6 \
+        libpthread-stubs0-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+WORKDIR /app
+
+# Create necessary directories
+RUN mkdir -p /app/config /app/logs /app/reports
+
+# Copy requirements and wheels first for better layer caching
+COPY requirements-docker.txt ./
+COPY wheels/ ./wheels/
+RUN pip install --no-cache-dir -r requirements-docker.txt \
+    && pip install --no-cache-dir ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
+
+# Copy essential configuration
+COPY config/simulation.yaml /app/config/
+
+# Copy backend and source code
+COPY src/ ./src/
+COPY web/backend/ ./web/backend/
+COPY setup.py run.py VERSION README.md ./
+RUN pip install -e .
+
+# Copy frontend source
+COPY web/frontend/package*.json web/frontend/craco.config.js ./web/frontend/
+COPY web/frontend/src/ ./web/frontend/src/
+COPY web/frontend/public/ ./web/frontend/public/
+
+# Install frontend dependencies
+WORKDIR /app/web/frontend
+RUN npm install --production=false
+
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONPATH=/app \
+    HOST=0.0.0.0 \
+    REACT_APP_API_URL=http://localhost:8000 \
+    WDS_SOCKET_HOST=0.0.0.0 \
+    WDS_SOCKET_PORT=3000 \
+    DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator \
+    CARLA_HOST=carla-server \
+    CARLA_PORT=2000 \
+    WEB_HOST=0.0.0.0 \
+    WEB_PORT=8000 \
+    FRONTEND_PORT=3000 \
+    LOG_LEVEL=INFO \
+    DEBUG=true \
+    TESTING=false \
+    # Container-specific environment variables for vehicle spawning fixes
+    CONTAINER_ENV=true \
+    WEB_MODE=true
+# Copy start script (better than inline)
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+ENTRYPOINT ["/app/start.sh"]

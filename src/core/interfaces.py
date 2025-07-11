@@ -2,8 +2,10 @@ from abc import ABC, abstractmethod
 from typing import Protocol, Any, Dict
 import carla
 
+
 class ISimulationManager(ABC):
     """Interface for managing the simulation lifecycle"""
+
     @abstractmethod
     def connect(self) -> bool:
         """Connect to the simulation server"""
@@ -24,8 +26,10 @@ class ISimulationManager(ABC):
         """Clean up simulation resources"""
         pass
 
+
 class IScenario(ABC):
     """Interface for simulation scenarios"""
+
     @abstractmethod
     def setup(self) -> None:
         """Setup the scenario"""
@@ -51,8 +55,10 @@ class IScenario(ABC):
         """Check if scenario was successful"""
         pass
 
+
 class IVehicleController(ABC):
     """Interface for vehicle control"""
+
     @abstractmethod
     def get_control(self, vehicle_state: Dict[str, Any]) -> carla.VehicleControl:
         """Get control commands based on vehicle state"""
@@ -63,8 +69,15 @@ class IVehicleController(ABC):
         """Get the controlled vehicle instance"""
         pass
 
+    @abstractmethod
+    def set_target(self, target: carla.Location) -> None:
+        """Set the target location for the vehicle"""
+        pass
+
+
 class ISensorManager(ABC):
     """Interface for managing vehicle sensors"""
+
     @abstractmethod
     def setup_sensors(self) -> None:
         """Setup vehicle sensors"""
@@ -80,8 +93,10 @@ class ISensorManager(ABC):
         """Clean up sensor resources"""
         pass
 
+
 class IWorldManager(ABC):
     """Interface for managing the simulation world"""
+
     @abstractmethod
     def get_world(self) -> carla.World:
         """Get the CARLA world instance"""
@@ -93,7 +108,9 @@ class IWorldManager(ABC):
         pass
 
     @abstractmethod
-    def spawn_actor(self, blueprint: carla.ActorBlueprint, transform: carla.Transform) -> carla.Actor:
+    def spawn_actor(
+        self, blueprint: carla.ActorBlueprint, transform: carla.Transform
+    ) -> carla.Actor:
         """Spawn an actor in the world"""
         pass
 
@@ -102,24 +119,25 @@ class IWorldManager(ABC):
         """Destroy an actor from the world"""
         pass
 
+
 class ILogger(ABC):
     """Interface for logging functionality"""
-    
+
     @abstractmethod
     def info(self, message: str) -> None:
         """Log informational message"""
         pass
-    
+
     @abstractmethod
     def error(self, message: str) -> None:
         """Log error message"""
         pass
-    
+
     @abstractmethod
     def debug(self, message: str) -> None:
         """Log debug message"""
         pass
-    
+
     @abstractmethod
     def warning(self, message: str) -> None:
         """Log warning message"""
@@ -128,4 +146,4 @@ class ILogger(ABC):
     @abstractmethod
     def log_vehicle_state(self, state: Dict[str, Any]) -> None:
         """Log vehicle state data"""
-        pass 
+        pass

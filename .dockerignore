@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+
+# Node modules and build
+web/frontend/node_modules/
+web/frontend/build/
+*.log
+
+# Editor & system files
+.vscode/
+.DS_Store
+
+# Git
+.git/
+.github/
+
+# Local scripts and tests
+local_scripts/
+tests/
