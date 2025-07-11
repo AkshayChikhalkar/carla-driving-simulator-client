@@ -2,7 +2,7 @@ name: Run tests, build, publish and release
 
 on: 
   push:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch:
     inputs:
       run_tests:
@@ -47,7 +47,7 @@ jobs:
   version-bump:
     name: Bump version and create tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     outputs:
       version: ${{ steps.bump_version.outputs.newTag }}
     steps:
@@ -313,7 +313,7 @@ jobs:
 
   docker-publish:
     needs: [build, docker-build-test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -419,7 +419,7 @@ jobs:
 
   pypi-publish:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -491,7 +491,7 @@ jobs:
 
   github-release:
     needs: [build, docker-publish, pypi-publish]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
