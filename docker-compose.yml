@@ -15,7 +15,7 @@ services:
       - ./reports:/app/reports
     environment:
       # Environment variables with defaults (no .env file required)
-      - DATABASE_URL=${DATABASE_URL:-postgresql://carla_user:carla_password@localhost:5432/carla_simulator}
+      - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
       - CARLA_HOST=${CARLA_HOST:-localhost}
       - CARLA_PORT=${CARLA_PORT:-2000}
       - WEB_HOST=${WEB_HOST:-0.0.0.0}
