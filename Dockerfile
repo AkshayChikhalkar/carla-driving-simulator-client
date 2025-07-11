@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # Install system and Node.js dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential libpq-dev curl \
+    build-essential libpq-dev curl dos2unix \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgl1-mesa-dev \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
@@ -65,9 +65,10 @@ ENV PYTHONPATH=/app \
     # Container-specific environment variables for vehicle spawning fixes
     CONTAINER_ENV=true \
     WEB_MODE=true
-# Copy start script (better than inline)
+# Copy start script and fix line endings
 COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN dos2unix /app/start.sh 2>/dev/null || sed -i 's/\r$//' /app/start.sh \
+    && chmod +x /app/start.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
