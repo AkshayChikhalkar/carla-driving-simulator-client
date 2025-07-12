@@ -1,4 +1,5 @@
 import os
+import logging
 
 if "XDG_RUNTIME_DIR" not in os.environ:
     os.environ["XDG_RUNTIME_DIR"] = "/tmp/xdg"
@@ -28,6 +29,14 @@ import queue
 import time
 import uuid  # Added import for UUID generation
 
+# Custom logging filter to suppress WebSocket connection messages
+class WebSocketConnectionFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress "connection closed" messages
+        if "connection closed" in record.getMessage().lower():
+            return False
+        return True
+
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
@@ -50,6 +59,13 @@ class SimulationRequest(BaseModel):
 
 class LogWriteRequest(BaseModel):
     content: str
+
+
+class FrontendLogRequest(BaseModel):
+    message: str
+    data: Optional[dict] = None
+    timestamp: str
+    component: str
 
 
 class LogFileRequest(BaseModel):
@@ -157,7 +173,7 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
 
             # Check cleanup status
             if hasattr(app, "is_cleanup_complete") and app.is_cleanup_complete:
-                logger.info("Cleanup completed successfully")
+                logger.debug("Cleanup completed successfully")
                 break
             
             # Check for timeout
@@ -192,7 +208,7 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
         except Exception as e:
             logger.error(f"Error verifying world cleanup: {str(e)}")
 
-    logger.info("Cleanup wait process completed")
+    logger.debug("Cleanup wait process completed")
 
 
 def cleanup_resources():
@@ -227,7 +243,7 @@ def cleanup_resources():
         # Clear the app instance
         runner.app = None
 
-        logger.info("Cleanup completed successfully")
+        logger.debug("Cleanup completed successfully")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")
 
@@ -240,7 +256,6 @@ signal.signal(signal.SIGTERM, lambda s, f: cleanup_resources())
 
 def setup_simulation_components(runner, app, max_retries=3):
     """Setup simulation components and application with retry logic"""
-    logger.info("Setting up simulation components...")
 
     for attempt in range(max_retries):
         try:
@@ -376,7 +391,7 @@ def transition_to_next_scenario(runner, next_scenario):
         new_app._config.web_mode = True
 
         # Connect to CARLA server
-        logger.info("Connecting to CARLA server...")
+        logger.debug("Connecting to CARLA server...")
         if not new_app.connection.connect():
             logger.error("Failed to connect to CARLA server")
             return False
@@ -554,7 +569,7 @@ async def skip_scenario():
                 # Transition to next scenario
                 if transition_to_next_scenario(runner, next_scenario):
                     # Start simulation in background
-                    logger.info("Starting simulation thread...")
+                    logger.debug("Starting simulation thread...")
                     simulation_thread = threading.Thread(
                         target=run_simulation_thread,
                         args=(runner, next_scenario),
@@ -653,7 +668,7 @@ async def start_simulation(request: SimulationRequest):
 
         try:
             # Create and store the app instance
-            logger.info("Creating application instance...")
+            logger.debug("Creating application instance...")
             # If "all" is selected, use all available scenarios
             scenarios_to_run = (
                 ScenarioRegistry.get_available_scenarios()
@@ -692,7 +707,7 @@ async def start_simulation(request: SimulationRequest):
                 setattr(runner.app._config, "report", True)
 
             # Connect to CARLA server
-            logger.info("Connecting to CARLA server...")
+            logger.debug("Connecting to CARLA server...")
             if not runner.app.connection.connect():
                 logger.error("Failed to connect to CARLA server")
                 runner.state["is_running"] = False
@@ -723,7 +738,6 @@ async def start_simulation(request: SimulationRequest):
 
             # Setup components using utility function with retry logic
             try:
-                logger.info("Setting up simulation components...")
                 setup_simulation_components(runner, runner.app)
                 logger.info("Simulation components setup completed")
             except RuntimeError as e:
@@ -835,9 +849,9 @@ async def stop_simulation():
             # Clear the app instance
             runner.app = None
             
-            logger.info("Simulation state reset completed")
+            logger.debug("Simulation state reset completed")
 
-        logger.info("Simulation stopped successfully")
+        logger.info("Simulation stopped")
         return {"success": True, "message": "Simulation stopped successfully"}
         
     except Exception as e:
@@ -854,6 +868,83 @@ async def stop_simulation():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection established")
+    
+    # Track last sent state to avoid sending identical updates
+    last_sent_state = None
+    
+    async def send_video_frames():
+        """Send video frames at 60 FPS when simulation is running"""
+        while True:
+            try:
+                # Check if we should send video frames
+                if (hasattr(runner, 'app') and runner.app and 
+                    runner.app.display_manager and 
+                    hasattr(runner, 'state') and runner.state and
+                    runner.state["is_running"] and 
+                    not runner.state["is_transitioning"] and
+                    not runner.state["is_stopping"] and
+                    not runner.state["is_skipping"] and
+                    not runner.state["is_starting"]):
+                    
+                    frame = runner.app.display_manager.get_current_frame()
+                    if frame is not None:
+                        # Convert frame to JPEG
+                        _, buffer = cv2.imencode('.jpg', frame)
+                        # Convert to base64
+                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                        # Send to client
+                        try:
+                            await websocket.send_text(frame_base64)
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            # Don't log normal WebSocket disconnection errors
+                            error_str = str(e).lower()
+                            if (any(pattern in error_str for pattern in [
+                                "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                                "going away", "no status code", "no close frame received or sent",
+                                "connection closed", "connection reset", "connection aborted",
+                                "connection refused", "connection timed out", "broken pipe",
+                                "websocket is closed", "websocket connection is closed",
+                                "remote end closed connection", "connection lost",
+                                "peer closed connection", "socket is not connected"
+                            ])):
+                                break
+                            else:
+                                logger.error(f"Error sending video frame: {str(e)}")
+                                break
+                
+                # Wait for next frame (60 FPS)
+                try:
+                    await asyncio.sleep(0.0167)  # ~60 FPS
+                except asyncio.CancelledError:
+                    # Normal cancellation when connection closes
+                    break
+                
+            except asyncio.CancelledError:
+                # Normal cancellation when connection closes
+                break
+            except Exception as e:
+                # Don't log normal WebSocket disconnection errors
+                error_str = str(e).lower()
+                if (any(pattern in error_str for pattern in [
+                    "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                    "going away", "no status code", "no close frame received or sent",
+                    "connection closed", "connection reset", "connection aborted",
+                    "connection refused", "connection timed out", "broken pipe",
+                    "websocket is closed", "websocket connection is closed",
+                    "remote end closed connection", "connection lost",
+                    "peer closed connection", "socket is not connected"
+                ])):
+                    break
+                else:
+                    logger.error(f"Error sending video frame: {str(e)}")
+                    if "WebSocketDisconnect" in str(e):
+                        break
+    
+    # Start video frame task
+    video_task = asyncio.create_task(send_video_frames())
+    
     try:
         while True:
             # Get comprehensive state information with improved reliability
@@ -906,98 +997,123 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status_message": status_message,
                     })
                     
-                    # Debug: Log the state being sent (only when state changes)
-                    current_state = f"is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_stopping={runner.state['is_stopping']}, is_skipping={runner.state['is_skipping']}, is_transitioning={runner.state['is_transitioning']}"
+                    # Check if state has actually changed
+                    current_state_key = (
+                        state_info["is_running"],
+                        state_info["is_starting"],
+                        state_info["is_stopping"],
+                        state_info["is_skipping"],
+                        state_info["is_transitioning"],
+                        state_info["status_message"],
+                        state_info["current_scenario"],
+                        state_info["scenario_index"],
+                        state_info["total_scenarios"]
+                    )
                     
-                    # Only log when is_starting changes to avoid spam
-                    if runner.state['is_starting']:
-                        logger.info(f"WebSocket: is_starting=True, is_running={runner.state['is_running']}")
-                    elif not hasattr(websocket, '_last_logged_state') or websocket._last_logged_state != current_state:
-                        logger.debug(f"WebSocket sending state: {current_state}, status_message={status_message}")
-                        websocket._last_logged_state = current_state
+                    # Only send status update if state has changed
+                    if last_sent_state != current_state_key:
+                        try:
+                            await websocket.send_json(state_info)
+                            last_sent_state = current_state_key
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            # Don't log normal WebSocket disconnection errors
+                            error_str = str(e).lower()
+                            if (any(pattern in error_str for pattern in [
+                                "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                                "going away", "no status code", "no close frame received or sent",
+                                "connection closed", "connection reset", "connection aborted",
+                                "connection refused", "connection timed out", "broken pipe",
+                                "websocket is closed", "websocket connection is closed",
+                                "remote end closed connection", "connection lost",
+                                "peer closed connection", "socket is not connected"
+                            ])):
+                                break
+                            else:
+                                logger.error(f"Error sending status update: {str(e)}")
+                                break
                     
-                except Exception as e:
-                    logger.error(f"Error getting state info: {str(e)}")
-                    # Use default values on error
-
-            try:
-                # Send state update
-                await websocket.send_json(state_info)
-
-                # Send video frame if available and simulation is running
-                if (hasattr(runner, 'app') and runner.app and 
-                    runner.app.display_manager and 
-                    state_info["is_running"] and 
-                    not state_info["is_transitioning"] and
-                    not state_info["is_stopping"] and
-                    not state_info["is_skipping"] and
-                    not state_info["is_starting"]):
-                    
-                    # Debug: Check if display manager exists and has frames
-                    frame = runner.app.display_manager.get_current_frame()
-                    if frame is not None:
-                        logger.debug(f"Got frame with shape: {frame.shape}")
-                        # Convert frame to JPEG
-                        _, buffer = cv2.imencode('.jpg', frame)
-                        # Convert to base64
-                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
-                        # Send to client
-                        await websocket.send_text(frame_base64)
-                        logger.debug("Frame sent successfully")
-                    else:
-                        logger.debug("No frame available from display manager")
-                        # Check if display manager is properly initialized
-                        if hasattr(runner.app.display_manager, 'last_frame'):
-                            logger.debug(f"Display manager last_frame: {runner.app.display_manager.last_frame is not None}")
-                        if hasattr(runner.app.display_manager, 'camera_view'):
-                            logger.debug(f"Camera view exists: {runner.app.display_manager.camera_view is not None}")
-                else:
-                    # Debug: Log why frames are not being sent
-                    if not hasattr(runner, "app"):
-                        logger.debug("No app instance")
-                    elif not runner.app:
-                        logger.debug("App instance is None")
-                    elif not runner.app.display_manager:
-                        logger.debug("No display manager")
-                    elif not state_info["is_running"]:
-                        logger.debug("Simulation not running")
-                    elif state_info["is_transitioning"]:
-                        logger.debug("Simulation is transitioning")
-                    elif state_info["is_stopping"]:
-                        logger.debug("Simulation is stopping")
-                    elif state_info["is_skipping"]:
-                        logger.debug("Simulation is skipping - not sending frames")
-                    elif state_info["is_starting"]:
-                        logger.debug("Simulation is starting - not sending frames")
-                        
-            except WebSocketDisconnect:
-                logger.info("WebSocket disconnected")
-                break
-            except Exception as e:
-                # Don't log normal WebSocket disconnection errors
-                error_str = str(e).lower()
-                if (any(pattern in error_str for pattern in [
-                    "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
-                    "going away", "no status code", "no close frame received or sent",
-                    "connection closed", "connection reset", "connection aborted",
-                    "connection refused", "connection timed out", "broken pipe",
-                    "websocket is closed", "websocket connection is closed",
-                    "remote end closed connection", "connection lost",
-                    "peer closed connection", "socket is not connected"
-                ])):
-                    # These are normal disconnection errors, just break the loop
+                except asyncio.CancelledError:
+                    # Normal cancellation when connection closes
                     break
-                else:
-                    logger.error(f"Error sending WebSocket data: {str(e)}")
-                    # Don't break on frame errors, just log them
-                    if "WebSocketDisconnect" in str(e):
+                except Exception as e:
+                    # Don't log normal WebSocket disconnection errors
+                    error_str = str(e).lower()
+                    if (any(pattern in error_str for pattern in [
+                        "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                        "going away", "no status code", "no close frame received or sent",
+                        "connection closed", "connection reset", "connection aborted",
+                        "connection refused", "connection timed out", "broken pipe",
+                        "websocket is closed", "websocket connection is closed",
+                        "remote end closed connection", "connection lost",
+                        "peer closed connection", "socket is not connected"
+                    ])):
                         break
+                    else:
+                        logger.error(f"Error getting state info: {str(e)}")
+                        # Use default values on error
+                                            # Send initial state even on error
+                    if last_sent_state is None:
+                        try:
+                            await websocket.send_json(state_info)
+                            last_sent_state = (False, False, False, False, False, "Ready to Start", None, 0, 0)
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            # Don't log normal WebSocket disconnection errors
+                            error_str = str(e).lower()
+                            if (any(pattern in error_str for pattern in [
+                                "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                                "going away", "no status code", "no close frame received or sent",
+                                "connection closed", "connection reset", "connection aborted",
+                                "connection refused", "connection timed out", "broken pipe",
+                                "websocket is closed", "websocket connection is closed",
+                                "remote end closed connection", "connection lost",
+                                "peer closed connection", "socket is not connected"
+                            ])):
+                                break
+                            else:
+                                logger.error(f"Error sending initial state: {str(e)}")
+                                break
+            else:
+                # No runner, send initial state
+                if last_sent_state is None:
+                    try:
+                        await websocket.send_json(state_info)
+                        last_sent_state = (False, False, False, False, False, "Ready to Start", None, 0, 0)
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        # Don't log normal WebSocket disconnection errors
+                        error_str = str(e).lower()
+                        if (any(pattern in error_str for pattern in [
+                            "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                            "going away", "no status code", "no close frame received or sent",
+                            "connection closed", "connection reset", "connection aborted",
+                            "connection refused", "connection timed out", "broken pipe",
+                            "websocket is closed", "websocket connection is closed",
+                            "remote end closed connection", "connection lost",
+                            "peer closed connection", "socket is not connected"
+                        ])):
+                            break
+                        else:
+                            logger.error(f"Error sending initial state (no runner): {str(e)}")
+                            break
 
-            # High frame rate for smooth video streaming
-            await asyncio.sleep(0.0167)  # ~60 FPS for status updates and video frames
+            # Status updates at 10 FPS - only send when state changes
+            try:
+                await asyncio.sleep(0.1)  # 10 FPS for status updates
+            except asyncio.CancelledError:
+                # Normal cancellation when connection closes
+                break
             
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        # Normal disconnection, no need to log
+        pass
+    except asyncio.CancelledError:
+        # Normal cancellation when connection closes
+        pass
     except Exception as e:
         # Don't log normal WebSocket disconnection errors
         error_str = str(e).lower()
@@ -1014,7 +1130,15 @@ async def websocket_endpoint(websocket: WebSocket):
         else:
             logger.error(f"Error in websocket: {str(e)}")
     finally:
-        logger.info("WebSocket connection closed")
+        # Cancel the video task when the connection closes
+        if 'video_task' in locals():
+            video_task.cancel()
+            try:
+                await video_task
+            except asyncio.CancelledError:
+                # Normal cancellation, don't log
+                pass
+        # Normal cleanup, no need to log
 
 
 @app.get("/api/reports")
@@ -1154,6 +1278,21 @@ async def close_log():
     return {"message": "Log file closed"}
 
 
+@app.post("/api/logs/frontend")
+async def frontend_log(request: FrontendLogRequest):
+    """Receive and log frontend messages"""
+    try:
+        log_message = f"FRONTEND [{request.component}] {request.message}"
+        if request.data:
+            log_message += f" - Data: {request.data}"
+        
+        logger.info(log_message)
+        return {"message": "Frontend log received"}
+    except Exception as e:
+        logger.error(f"Error logging frontend message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/simulation/status")
 async def get_simulation_status():
     """Get detailed simulation status for debugging"""
@@ -1207,6 +1346,25 @@ async def get_simulation_status():
 
 if __name__ == "__main__":
     import uvicorn
+    import logging
+
+    # Configure uvicorn logging to reduce WebSocket error spam
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.protocols.websockets.websockets_impl").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.protocols.http.h11_impl").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.lifespan.on").setLevel(logging.WARNING)
+    
+    # Suppress specific WebSocket connection messages
+    websocket_filter = WebSocketConnectionFilter()
+    logging.getLogger("uvicorn.protocols.websockets.websockets_impl").setLevel(logging.ERROR)
+    logging.getLogger("websockets").setLevel(logging.ERROR)
+    logging.getLogger("websockets.protocol").setLevel(logging.ERROR)
+    
+    # Apply filter to suppress "connection closed" messages
+    for logger_name in ["uvicorn.error", "uvicorn.access", "uvicorn.protocols.websockets.websockets_impl"]:
+        logger_instance = logging.getLogger(logger_name)
+        logger_instance.addFilter(websocket_filter)
 
     logger.info("Starting FastAPI server on 0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
