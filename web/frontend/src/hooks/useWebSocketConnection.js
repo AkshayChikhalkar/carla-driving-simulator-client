@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
+import logger from '../utils/logger';
 
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
 const WS_BASE_URL = window.location.hostname === 'localhost'
@@ -22,7 +23,6 @@ export const useWebSocketConnection = ({
   setIsSkipping,
   isSkipping,
   backendState,
-  canvasRef
 }) => {
   const wsRef = useRef(null);
   const backendStateRef = useRef(backendState);
@@ -37,20 +37,6 @@ export const useWebSocketConnection = ({
   useEffect(() => {
     isSkippingRef.current = isSkipping;
   }, [isSkipping]);
-
-  const logToBackend = useCallback((message, data = null) => {
-    const logData = {
-      message: message,
-      data: data,
-      timestamp: new Date().toISOString(),
-      component: 'Dashboard'
-    };
-    
-    axios.post(`${API_BASE_URL}/logs/frontend`, logData)
-      .catch(err => {
-        // Silently fail if backend doesn't support this endpoint
-      });
-  }, []);
 
   const handleStatusMessage = useCallback((data) => {
     // Update backend state for sync
@@ -75,14 +61,13 @@ export const useWebSocketConnection = ({
       (data.is_stopping && !currentBackendState.is_stopping) ||
       (data.is_skipping && !currentBackendState.is_skipping);
     
+    // Only log significant state changes to reduce log flood
     if (hasMajorStateChange) {
-      logToBackend('State transition', {
-        is_running: data.is_running,
-        is_starting: data.is_starting,
-        is_stopping: data.is_stopping,
-        is_skipping: data.is_skipping,
-        status_message: data.status_message
-      });
+      // Only log start/stop events, not every minor transition
+      if ((data.is_running && !currentBackendState.is_running) || 
+          (!data.is_running && currentBackendState.is_running)) {
+        logger.info(`Simulation state change: is_running=${data.is_running}, is_starting=${data.is_starting}, is_stopping=${data.is_stopping}, is_skipping=${data.is_skipping}, status_message=${data.status_message}`);
+      }
     }
 
     // Always reset UI if backend says simulation is stopped
@@ -141,7 +126,7 @@ export const useWebSocketConnection = ({
 
     // Update isRunning based on backend state
     setIsRunning(data.is_running || false);
-  }, [setBackendState, logToBackend, setIsStopping, setIsStarting, setIsSkipping, setIsRunning, setHasReceivedFrame, setStatus, canvasRef]);
+  }, [setBackendState, setIsStopping, setIsStarting, setIsSkipping, setIsRunning, setHasReceivedFrame, setStatus]);
 
   const handleVideoFrame = useCallback((frameData) => {
     // Don't block drawing during transitions - let frames come through for smoother experience
@@ -158,12 +143,13 @@ export const useWebSocketConnection = ({
     // Always draw frames during transitions to keep canvas updated
     const img = new Image();
     img.onload = () => {
-      const canvas = canvasRef.current;
+      const canvas = document.getElementById('simulationCanvas'); // Get canvas by ID
       if (canvas) {
         const ctx = canvas.getContext('2d');
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
+        // logger.debug('Frame drawn on canvas', { width: img.width, height: img.height }); // Uncomment for debug
       }
     };
     img.src = `data:image/jpeg;base64,${frameData}`;
@@ -195,7 +181,7 @@ export const useWebSocketConnection = ({
       
       // Prevent excessive reconnection attempts
       if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.warn('Max WebSocket reconnection attempts reached');
+        logger.warn('Max WebSocket reconnection attempts reached');
         return;
       }
       
@@ -206,64 +192,62 @@ export const useWebSocketConnection = ({
       
       setupCompleted = true; // Mark setup as completed
       connectionAttempts++;
-      ws = new WebSocket(WS_BASE_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        connectionAttempts = 0; // Reset on successful connection
-        connectionEstablishedRef.current = true; // Mark as established
-        globalWebSocketInitialized = true; // Mark as globally initialized
-        // Only show connected message if simulation is not running
-        if (!backendStateRef.current.is_running) {
-          setStatus('Connected to simulation server');
-        }
-      };
-
-      ws.onclose = () => {
-        connectionEstablishedRef.current = false; // Mark as disconnected
-        globalWebSocketInitialized = false; // Reset global flag
-        // Only show disconnected message if simulation is not running
-        if (!backendStateRef.current.is_running) {
-          setStatus('Disconnected from simulation server');
-        }
-        // Attempt to reconnect after 2 seconds, but only if not unmounted
-        if (!isUnmounted && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
-          setTimeout(() => {
-            if (!isUnmounted) {
-              setupWebSocket();
-            }
-          }, 2000);
-        }
-      };
-
-      ws.onerror = (e) => {
-        if (e && e.code && (e.code === 1001 || e.code === 1005)) {
-          // Suppress normal disconnect errors
-          return;
-        }
-        // Only log errors if not unmounted and not excessive
-        if (!isUnmounted && connectionAttempts <= 3) {
-          logToBackend('WebSocket error', { error: e.message, code: e.code });
-        }
-        setStatus('Error in simulation connection');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          // If it's a status message (JSON)
-          if (event.data.startsWith('{')) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'status') {
-              handleStatusMessage(data);
-            }
-          } else {
-            // It's a video frame (base64 string)
-            handleVideoFrame(event.data);
+      try {
+        ws = new WebSocket(WS_BASE_URL);
+        wsRef.current = ws;
+        logger.info('WebSocket connection attempt started');
+        ws.onopen = () => {
+          connectionAttempts = 0; // Reset on successful connection
+          connectionEstablishedRef.current = true; // Mark as established
+          globalWebSocketInitialized = true; // Mark as globally initialized
+          // Only show connected message if simulation is not running
+          if (!backendStateRef.current.is_running) {
+            setStatus('Connected to simulation server');
           }
-        } catch (e) {
-          console.error('Error parsing WebSocket message:', e);
-        }
-      };
+        };
+
+        ws.onclose = (e) => {
+          connectionEstablishedRef.current = false; // Mark as disconnected
+          globalWebSocketInitialized = false; // Reset global flag
+          logger.info('WebSocket connection closed', e);
+          // Only show disconnected message if simulation is not running
+          if (!backendStateRef.current.is_running) {
+            setStatus('Disconnected from simulation server');
+          }
+          // Attempt to reconnect after 2 seconds, but only if not unmounted
+          if (!isUnmounted && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+            setTimeout(() => {
+              if (!isUnmounted) {
+                setupWebSocket();
+              }
+            }, 2000);
+          }
+        };
+
+        ws.onerror = (e) => {
+          logger.error('WebSocket error', e);
+          setStatus('Error in simulation connection');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            // If it's a status message (JSON)
+            if (event.data.startsWith('{')) {
+              const data = JSON.parse(event.data);
+              if (data.type === 'status') {
+                handleStatusMessage(data);
+              }
+            } else {
+              // It's a video frame (base64 string)
+              handleVideoFrame(event.data);
+            }
+          } catch (e) {
+            logger.error('Error parsing WebSocket message', e);
+          }
+        };
+      } catch (err) {
+        logger.error('WebSocket setup failed', err);
+      }
     };
 
     setupWebSocket();
@@ -274,11 +258,11 @@ export const useWebSocketConnection = ({
       globalWebSocketInitialized = false; // Reset global flag
       if (wsRef.current) {
         wsRef.current.close();
-        wsRef.current = null;
+        logger.info('WebSocket connection closed by component unmount');
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - only run once on mount
+  }, [handleStatusMessage, handleVideoFrame, setStatus]); // Empty dependency array - only run once on mount
 
   return { wsRef };
 }; 
