@@ -28,6 +28,12 @@ services:
       timeout: 30s
       retries: 3
       start_period: 140s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     volumes:
       - ./logs:/app/logs
       - ./reports:/app/reports
@@ -39,6 +45,7 @@ services:
       - carla-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.healthcheck=true"
       - "prometheus.scrape=true"
       - "prometheus.port=8000"
     logging:
@@ -97,6 +104,7 @@ services:
       - WATCHTOWER_INCLUDE_RESTARTING=true
       - WATCHTOWER_ROLLING_RESTART=true
       - WATCHTOWER_NOTIFICATIONS_LEVEL=info
+      - WATCHTOWER_HEALTH_CHECK=true   # Enable health check monitoring
       - TZ=UTC
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
