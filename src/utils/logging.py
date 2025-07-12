@@ -5,9 +5,8 @@ Logging system for the CARLA Driving Simulator.
 import os
 import logging
 import traceback
-import csv
 from datetime import datetime
-from typing import Optional, Any, Dict, TextIO
+from typing import Optional, Any, Dict
 from pathlib import Path
 
 from src.models.metrics import SimulationMetricsData
@@ -17,7 +16,7 @@ from .paths import get_project_root
 from .types import SimulationData
 from src.database.config import SessionLocal
 from src.database.models import SimulationMetrics
-import uuid  # ensure this is at the top if not already
+import uuid
 
 
 class Logger:
@@ -44,13 +43,8 @@ class Logger:
         self.log_date_format = getattr(
             SIMULATION_CONFIG, "log_date_format", "%Y-%m-%d %H:%M:%S"
         )
-        self.log_to_file = True  # Disable CSV logging
+        self.log_to_file = True
         self.log_to_console = getattr(SIMULATION_CONFIG, "log_to_console", True)
-
-        # Initialize CSV logging attributes
-        self.csv_file = None
-        self.csv_writer = None
-        self._row_count = 0
 
         self._setup_logging()
         self._initialized = True
@@ -93,19 +87,6 @@ class Logger:
 
             # Create logger instance
             self.logger = logging.getLogger(__name__)
-            # self.logger.info("Logging system initialized")
-
-            # Setup CSV logging if enabled
-            if self.log_to_file:
-                csv_file = log_file.with_suffix(".csv")
-                # Check if CSV file exists to determine if we need to write header
-                file_exists = os.path.exists(csv_file)
-                # Use buffered I/O with 8KB buffer
-                self.csv_file = open(csv_file, "a", newline="", buffering=8192)
-                self.csv_writer = csv.writer(self.csv_file)
-                if not file_exists:
-                    self._write_csv_header()
-                    self.csv_file.flush()
 
         except Exception as e:
             print(f"Error setting up logging: {str(e)}")
@@ -126,44 +107,6 @@ class Logger:
         except Exception as e:
             self.logger.error(f"Error setting log level: {str(e)}")
             raise
-
-    def _write_csv_header(self) -> None:
-        """Write CSV header"""
-        if not self.csv_writer:
-            return
-
-        header = [
-            "elapsed_time",
-            "speed",
-            "position_x",
-            "position_y",
-            "position_z",
-            "throttle",
-            "brake",
-            "steer",
-            "target_distance",
-            "target_heading",
-            "vehicle_heading",
-            "heading_diff",
-            "acceleration",
-            "angular_velocity",
-            "gear",
-            "hand_brake",
-            "reverse",
-            "manual_gear_shift",
-            "collision_intensity",
-            "cloudiness",
-            "precipitation",
-            "traffic_count",
-            "fps",
-            "event",
-            "event_details",
-            "rotation_x",
-            "rotation_y",
-            "rotation_z",
-        ]
-        self.csv_writer.writerow(header)
-        self.csv_file.flush()
 
     def set_debug_mode(self, enabled: bool):
         """Set debug mode"""
@@ -191,6 +134,13 @@ class Logger:
         if DEBUG_MODE:
             self.logger.debug(message)
 
+    def critical(self, message: str, exc_info: Optional[Exception] = None):
+        """Log critical message with optional exception info"""
+        if exc_info and DEBUG_MODE:
+            self.logger.critical(f"{message}\n{traceback.format_exc()}")
+        else:
+            self.logger.critical(message)
+
     def log_vehicle_state(self, state: Dict[str, Any]):
         """Log vehicle state (only shown in debug mode)"""
         if DEBUG_MODE:
@@ -208,6 +158,7 @@ class Logger:
         self.logger.info(f"Session ID set to: {session_id}")
 
     def log_data(self, data: SimulationData) -> None:
+        """Log simulation data to PostgreSQL database"""
         try:
             db = SessionLocal()
             metrics_data = SimulationMetricsData.from_simulation_data(
@@ -227,18 +178,8 @@ class Logger:
         self.logger.info(f"[{elapsed_time:.1f}s] {event}: {details}")
 
     def close(self) -> None:
-        """Close all log files"""
+        """Close logging system"""
         self.logger.info("")  # Empty line for readability
         self.logger.info(
             f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        if self.csv_file:
-            try:
-                # Flush any remaining data
-                self.csv_file.flush()
-                # Close the file
-                self.csv_file.close()
-                self.csv_file = None
-                self.csv_writer = None
-            except Exception as e:
-                self.logger.error(f"Error closing CSV file: {str(e)}")
