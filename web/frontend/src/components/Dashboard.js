@@ -359,6 +359,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           }}
         >
           <canvas
+            id="simulationCanvas"
             ref={canvasRef}
             style={canvasStyle}
           />
