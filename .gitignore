@@ -140,3 +140,5 @@ docs/*.rst
 !docs/license.rst
 !docs/support.rst
 !docs/tutorials.rst
+material-theme.json
+carla_schema.dbml
