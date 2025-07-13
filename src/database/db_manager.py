@@ -46,6 +46,9 @@ class DatabaseManager:
                 with self.get_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute(query, params or {})
+                        # Commit if not a SELECT
+                        if not query.strip().lower().startswith("select"):
+                            conn.commit()
                         if cur.description:  # If query returns results
                             return cur.fetchall()
                         return []

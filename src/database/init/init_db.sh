@@ -21,6 +21,10 @@ psql -U $PGUSER -d $DB -f 02_create_schema.sql
 echo "Creating tables..."
 psql -U $PGUSER -d $DB -f 03_create_tables.sql
 
+# 4. Create auth tables (run on the new DB)
+echo "Creating auth tables..."
+psql -U $PGUSER -d $DB -f 04_create_auth_tables.sql
+
 echo "Database setup complete!"
 echo "Database: $DB"
 echo "Schema: $SCHEMA"
