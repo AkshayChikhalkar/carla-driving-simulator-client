@@ -458,6 +458,18 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
+@app.get("/api/version")
+async def get_version():
+    """Get version information"""
+    version = os.getenv("VERSION", "latest")
+    build_time = os.getenv("BUILD_TIME", datetime.now().isoformat())
+    return {
+        "version": version,
+        "build_time": build_time,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 @app.get("/api/scenarios")
 async def get_scenarios():
     """Get list of available scenarios"""
