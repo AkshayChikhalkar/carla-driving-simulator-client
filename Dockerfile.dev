@@ -22,9 +22,9 @@ ENV DOCKER_IMAGE_TAG=$IMAGE_TAG
 ENV VERSION=$VERSION
 
 # Create version file for application access
-RUN echo "$VERSION" > /app/version.txt
-
 WORKDIR /app
+
+RUN echo "$VERSION" > /app/version.txt
 
 # Create necessary directories
 RUN mkdir -p /app/config /app/logs /app/reports
