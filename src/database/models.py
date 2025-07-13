@@ -29,6 +29,148 @@ def log_error(message: str, error: Exception) -> None:
     Logger().error(f"{message}: {error}")
 
 
+class User(Base):
+    """Model for storing user authentication data"""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    first_name = Column(String(100))
+    last_name = Column(String(100))
+    is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = Column(DateTime)
+
+    # Relationships
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+
+    @classmethod
+    def create(cls, db: DatabaseManager, **kwargs) -> Optional["User"]:
+        """Create a new user"""
+        try:
+            query = """
+                INSERT INTO users (username, email, password_hash, first_name, last_name, is_active, is_admin)
+                VALUES (%(username)s, %(email)s, %(password_hash)s, %(first_name)s, %(last_name)s, %(is_active)s, %(is_admin)s)
+                RETURNING *
+            """
+            result = db.execute_query(query, kwargs)
+            return result[0] if result else None
+        except Exception as e:
+            log_error("Error creating user", e)
+            return None
+
+    @classmethod
+    def get_by_username(cls, db: DatabaseManager, username: str) -> Optional["User"]:
+        """Get user by username"""
+        try:
+            query = "SELECT * FROM users WHERE username = %(username)s AND is_active = TRUE"
+            result = db.execute_query(query, {"username": username})
+            return result[0] if result else None
+        except Exception as e:
+            log_error("Error getting user by username", e)
+            return None
+
+    @classmethod
+    def get_by_email(cls, db: DatabaseManager, email: str) -> Optional["User"]:
+        """Get user by email"""
+        try:
+            query = "SELECT * FROM users WHERE email = %(email)s AND is_active = TRUE"
+            result = db.execute_query(query, {"email": email})
+            return result[0] if result else None
+        except Exception as e:
+            log_error("Error getting user by email", e)
+            return None
+
+    def update_last_login(self, db: DatabaseManager) -> bool:
+        """Update user's last login timestamp"""
+        try:
+            query = """
+                UPDATE users 
+                SET last_login = CURRENT_TIMESTAMP
+                WHERE id = %(user_id)s
+                RETURNING *
+            """
+            result = db.execute_query(query, {"user_id": self.id})
+            return bool(result)
+        except Exception as e:
+            log_error("Error updating last login", e)
+            return False
+
+
+class UserSession(Base):
+    """Model for storing user session data"""
+
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    session_token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    ip_address = Column(String(45))
+    user_agent = Column(String)
+
+    # Relationship
+    user = relationship("User", back_populates="sessions")
+
+    @classmethod
+    def create(cls, db: DatabaseManager, **kwargs) -> Optional["UserSession"]:
+        """Create a new user session"""
+        try:
+            query = """
+                INSERT INTO user_sessions (user_id, session_token, expires_at, ip_address, user_agent)
+                VALUES (%(user_id)s, %(session_token)s, %(expires_at)s, %(ip_address)s, %(user_agent)s)
+                RETURNING *
+            """
+            result = db.execute_query(query, kwargs)
+            return result[0] if result else None
+        except Exception as e:
+            log_error("Error creating user session", e)
+            return None
+
+    @classmethod
+    def get_by_token(cls, db: DatabaseManager, session_token: str) -> Optional["UserSession"]:
+        """Get session by token"""
+        try:
+            query = """
+                SELECT us.*, u.* FROM user_sessions us
+                JOIN users u ON us.user_id = u.id
+                WHERE us.session_token = %(session_token)s AND us.expires_at > CURRENT_TIMESTAMP
+            """
+            result = db.execute_query(query, {"session_token": session_token})
+            return result[0] if result else None
+        except Exception as e:
+            log_error("Error getting session by token", e)
+            return None
+
+    @classmethod
+    def delete_expired_sessions(cls, db: DatabaseManager) -> bool:
+        """Delete expired sessions"""
+        try:
+            query = "DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP"
+            db.execute_query(query)
+            return True
+        except Exception as e:
+            log_error("Error deleting expired sessions", e)
+            return False
+
+    @classmethod
+    def delete_user_sessions(cls, db: DatabaseManager, user_id: int) -> bool:
+        """Delete all sessions for a user"""
+        try:
+            query = "DELETE FROM user_sessions WHERE user_id = %(user_id)s"
+            db.execute_query(query, {"user_id": user_id})
+            return True
+        except Exception as e:
+            log_error("Error deleting user sessions", e)
+            return False
+
+
 class Scenario(Base):
     """Model for storing scenario executions (was Simulation)"""
 

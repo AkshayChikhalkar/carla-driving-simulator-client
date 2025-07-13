@@ -30,6 +30,61 @@ class Logger {
     // Initialize console methods
     this._setupConsoleMethods();
     this._initialized = true;
+
+    // Initialize file logging
+    this._initializeFileLogging();
+  }
+
+  async _initializeFileLogging() {
+    try {
+      // Create logs directory if it doesn't exist
+      const response = await fetch(`${this.apiBaseUrl}/api/logs/directory`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create logs directory');
+      }
+
+      // Create a new file for today's logs
+      const today = new Date().toISOString().split('T')[0];
+      const logFileName = `web_simulation_${today}.log`;
+      
+      // Get the log file handle from the backend
+      const fileResponse = await fetch(`${this.apiBaseUrl}/api/logs/file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ filename: logFileName })
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error('Failed to create log file');
+      }
+
+      // Write header
+      const header = `=== Web Simulation Log - ${today} ===\n`;
+      const writeResponse = await fetch(`${this.apiBaseUrl}/api/logs/write`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content: header })
+      });
+
+      if (!writeResponse.ok) {
+        throw new Error('Failed to write log header');
+      }
+      
+      //console.log('File logging initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize file logging:', error);
+      this.config.logToFile = false;
+    }
   }
 
   _setupConsoleMethods() {
@@ -53,8 +108,7 @@ class Logger {
 
       if (this.config.logToFile) {
         try {
-          // Only send the raw message to the backend (no timestamp/level)
-          const logEntry = `${message}\n`;
+          const logEntry = `${formattedMessage}\n`;
           const response = await fetch(`${this.apiBaseUrl}/api/logs/write`, {
             method: 'POST',
             headers: {
@@ -116,7 +170,7 @@ class Logger {
     if (this.config.logToFile) {
       try {
         await fetch(`${this.apiBaseUrl}/api/logs/close`, { method: 'POST' });
-        console.log('Log file closed successfully');
+        //('Log file closed successfully');
       } catch (error) {
         console.error('Error closing log file:', error);
       }

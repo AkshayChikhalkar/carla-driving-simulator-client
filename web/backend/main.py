@@ -1,33 +1,33 @@
 import os
-import logging
+
+if "XDG_RUNTIME_DIR" not in os.environ:
+    os.environ["XDG_RUNTIME_DIR"] = "/tmp/xdg"
+    if not os.path.exists("/tmp/xdg"):
+        os.makedirs("/tmp/xdg", exist_ok=True)
+
+from fastapi import FastAPI, HTTPException, WebSocket, Depends, status, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel
+from typing import List, Optional
 import sys
+import os
 from pathlib import Path
 import base64
 import cv2
 import numpy as np
 import asyncio
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-import yaml
-import threading
-from threading import Lock, Event
-import queue
-import time
-import uuid
+from fastapi import WebSocketDisconnect
 import atexit
 import signal
 from fastapi.responses import FileResponse
-
-# Custom logging filter to suppress WebSocket connection messages
-class WebSocketConnectionFilter(logging.Filter):
-    def filter(self, record):
-        # Suppress "connection closed" messages
-        if "connection closed" in record.getMessage().lower():
-            return False
-        return True
+from datetime import datetime, timedelta
+import yaml
+import threading
+from threading import Lock, Event, Condition
+import queue
+import time
+import uuid  # Added import for UUID generation
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -40,6 +40,14 @@ from src.visualization.display_manager import DisplayManager
 from src.utils.logging import Logger
 from src.utils.paths import get_project_root
 from src.core.scenario_results_manager import ScenarioResultsManager
+from src.database.db_manager import DatabaseManager
+from src.database.models import User, UserSession
+from src.utils.auth import (
+    LoginRequest, RegisterRequest, UserResponse,
+    hash_password, verify_password, generate_session_token,
+    create_jwt_token, verify_jwt_token, validate_password,
+    validate_email, validate_username, get_current_user, require_admin
+)
 
 
 # Request/Response Models
@@ -51,13 +59,6 @@ class SimulationRequest(BaseModel):
 
 class LogWriteRequest(BaseModel):
     content: str
-
-
-class FrontendLogRequest(BaseModel):
-    message: str
-    data: Optional[dict] = None
-    timestamp: str
-    component: str
 
 
 class LogFileRequest(BaseModel):
@@ -151,7 +152,7 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
     cleanup_started = False
     last_progress_time = start_time
 
-    logger.debug(f"Starting cleanup wait with timeout: {max_wait_time}s")
+    logger.info(f"Starting cleanup wait with timeout: {max_wait_time}s")
 
     while True:
         try:
@@ -161,11 +162,11 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
             # Check if cleanup has started
             if not cleanup_started and hasattr(app, "is_cleanup_complete"):
                 cleanup_started = True
-                logger.debug("Cleanup process detected, waiting for completion...")
+                logger.info("Cleanup process detected, waiting for completion...")
 
             # Check cleanup status
             if hasattr(app, "is_cleanup_complete") and app.is_cleanup_complete:
-                logger.debug("Cleanup completed successfully")
+                logger.info("Cleanup completed successfully")
                 break
             
             # Check for timeout
@@ -173,9 +174,9 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
                 logger.warning(f"Cleanup wait timeout reached after {elapsed_time:.1f}s")
                 break
 
-            # Log progress every 5 seconds to reduce spam
-            if (current_time - last_progress_time).total_seconds() > 5:
-                logger.debug(f"Still waiting for cleanup... ({elapsed_time:.1f}s elapsed)")
+            # Log progress every 2 seconds
+            if (current_time - last_progress_time).total_seconds() > 2:
+                logger.info(f"Still waiting for cleanup... ({elapsed_time:.1f}s elapsed)")
                 last_progress_time = current_time
 
             await asyncio.sleep(wait_interval)
@@ -200,13 +201,13 @@ async def wait_for_cleanup(app, max_wait_time=15, wait_interval=0.1):
         except Exception as e:
             logger.error(f"Error verifying world cleanup: {str(e)}")
 
-    logger.debug("Cleanup wait process completed")
+    logger.info("Cleanup wait process completed")
 
 
 def cleanup_resources():
     """Clean up resources when shutting down"""
     try:
-        logger.debug("Cleaning up resources...")
+        logger.info("Cleaning up resources...")
 
         # Only clean up if we have an app instance
         if hasattr(runner, "app") and runner.app:
@@ -235,7 +236,7 @@ def cleanup_resources():
         # Clear the app instance
         runner.app = None
 
-        logger.debug("Cleanup completed successfully")
+        logger.info("Cleanup completed successfully")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")
 
@@ -248,12 +249,13 @@ signal.signal(signal.SIGTERM, lambda s, f: cleanup_resources())
 
 def setup_simulation_components(runner, app, max_retries=3):
     """Setup simulation components and application with retry logic"""
+    logger.info("Setting up simulation components...")
 
     for attempt in range(max_retries):
         try:
             components = runner.setup_components(app)
 
-            logger.debug("Setting up application...")
+            logger.info("Setting up application...")
             app.setup(
                 world_manager=components["world_manager"],
                 vehicle_controller=components["vehicle_controller"],
@@ -316,14 +318,14 @@ def run_simulation_thread(runner, scenario):
     global setup_event, simulation_ready
     
     try:
-        logger.debug("Simulation thread started, waiting for setup completion...")
+        logger.info("Simulation thread started, waiting for setup completion...")
         
         # Signal that simulation thread is ready
         simulation_ready.set()
         
         # Wait for setup to complete before starting simulation
         if setup_event.wait(timeout=600):  # 120 second timeout (2 minutes)
-            logger.debug("Setup completed, starting simulation loop")
+            logger.info("Setup completed, starting simulation loop")
         else:
             logger.error("Setup timeout - simulation thread exiting")
             return
@@ -333,15 +335,15 @@ def run_simulation_thread(runner, scenario):
         
         # Clear the starting flag now that simulation is actually running
         runner.state["is_starting"] = False
-        logger.debug("Cleared is_starting flag - simulation is now running")
-        logger.debug(f"State after clearing is_starting: is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
+        logger.info("Cleared is_starting flag - simulation is now running")
+        logger.info(f"State after clearing is_starting: is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
         
-        logger.debug("Simulation loop started")
+        logger.info("Simulation loop started")
         
         try:
             # Start the simulation
             runner.app.run()
-            logger.debug("Simulation app.run() completed normally")
+            logger.info("Simulation app.run() completed normally")
         except Exception as e:
             logger.error(f"Exception in runner.app.run(): {str(e)}")
             logger.error(f"Exception type: {type(e).__name__}")
@@ -365,7 +367,7 @@ def run_simulation_thread(runner, scenario):
         if hasattr(runner, "app") and runner.app and hasattr(runner.app, "state"):
             runner.app.state.is_running = False
     finally:
-        logger.debug("Simulation thread ending")
+        logger.info("Simulation thread ending")
         # Reset setup complete flag
         runner.state["setup_complete"] = False
         # Clear starting flag when thread ends
@@ -383,7 +385,7 @@ def transition_to_next_scenario(runner, next_scenario):
         new_app._config.web_mode = True
 
         # Connect to CARLA server
-        logger.debug("Connecting to CARLA server...")
+        logger.info("Connecting to CARLA server...")
         if not new_app.connection.connect():
             logger.error("Failed to connect to CARLA server")
             return False
@@ -436,16 +438,6 @@ runner.state = ThreadSafeState()
 web_log_file = None
 
 
-# --- Global exception handler to prevent container crash ---
-def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-
-sys.excepthook = handle_uncaught_exception
-
-
 @app.get("/")
 async def root():
     """Root endpoint for health check"""
@@ -454,31 +446,19 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint - always returns 200 if process is alive"""
+    """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/api/version")
-async def get_version():
-    """Get version information"""
-    version = os.getenv("VERSION", "latest")
-    build_time = os.getenv("BUILD_TIME", datetime.now().isoformat())
-    return {
-        "version": version,
-        "build_time": build_time,
-        "timestamp": datetime.now().isoformat()
-    }
 
 
 @app.get("/api/scenarios")
 async def get_scenarios():
     """Get list of available scenarios"""
     try:
-        logger.debug("Fetching available scenarios")
+        logger.info("Fetching available scenarios")
         # Ensure scenarios are registered
         ScenarioRegistry.register_all()
         scenarios = ScenarioRegistry.get_available_scenarios()
-        logger.debug(f"Found {len(scenarios)} scenarios: {scenarios}")
+        logger.info(f"Found {len(scenarios)} scenarios: {scenarios}")
         return {"scenarios": scenarios}
     except Exception as e:
         logger.error(f"Error fetching scenarios: {str(e)}")
@@ -488,7 +468,7 @@ async def get_scenarios():
 @app.get("/api/config")
 async def get_config():
     """Get current configuration"""
-    logger.debug("Fetching current configuration")
+    logger.info("Fetching current configuration")
     return runner.config
 
 
@@ -496,7 +476,7 @@ async def get_config():
 async def update_config(config_update: ConfigUpdate):
     """Update configuration"""
     try:
-        logger.debug("Updating configuration")
+        logger.info("Updating configuration")
 
         # Validate the config data
         if not isinstance(config_update.config_data, dict):
@@ -516,7 +496,7 @@ async def update_config(config_update: ConfigUpdate):
         # Reload the configuration
         runner.config = load_config(runner.config_file)
 
-        logger.debug("Configuration updated successfully")
+        logger.info("Configuration updated successfully")
         return {
             "message": "Configuration updated successfully",
             "config": runner.config,
@@ -574,16 +554,16 @@ async def skip_scenario():
                 # Stop current scenario but keep is_running true during transition
                 if hasattr(runner.app, "state"):
                     runner.app.state.is_running = False
-                    logger.debug("Set app.state.is_running = False for transition")
+                    logger.info("Set app.state.is_running = False for transition")
 
                 # Wait for cleanup using utility function with increased timeout
-                logger.debug("Waiting for cleanup before scenario transition...")
+                logger.info("Waiting for cleanup before scenario transition...")
                 await wait_for_cleanup(runner.app, max_wait_time=20)
 
                 # Transition to next scenario
                 if transition_to_next_scenario(runner, next_scenario):
                     # Start simulation in background
-                    logger.debug("Starting simulation thread...")
+                    logger.info("Starting simulation thread...")
                     simulation_thread = threading.Thread(
                         target=run_simulation_thread,
                         args=(runner, next_scenario),
@@ -668,6 +648,7 @@ async def start_simulation(request: SimulationRequest):
         logger.info(
             f"Starting simulation with scenarios: {request.scenarios}, debug: {request.debug}, report: {request.report}"
         )
+        logger.info(f"Set is_starting=True, is_transitioning=True")
 
         # Reset synchronization events
         setup_event.clear()
@@ -681,7 +662,7 @@ async def start_simulation(request: SimulationRequest):
 
         try:
             # Create and store the app instance
-            logger.debug("Creating application instance...")
+            logger.info("Creating application instance...")
             # If "all" is selected, use all available scenarios
             scenarios_to_run = (
                 ScenarioRegistry.get_available_scenarios()
@@ -706,7 +687,7 @@ async def start_simulation(request: SimulationRequest):
                     "setup_complete": False,  # Reset setup flag
                 }
             )
-            logger.debug(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
+            logger.info(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
             runner.state["scenario_results"].clear_results()
 
             runner.app = runner.create_application(
@@ -720,7 +701,7 @@ async def start_simulation(request: SimulationRequest):
                 setattr(runner.app._config, "report", True)
 
             # Connect to CARLA server
-            logger.debug("Connecting to CARLA server...")
+            logger.info("Connecting to CARLA server...")
             if not runner.app.connection.connect():
                 logger.error("Failed to connect to CARLA server")
                 runner.state["is_running"] = False
@@ -731,7 +712,7 @@ async def start_simulation(request: SimulationRequest):
                 }
 
             # Start simulation thread FIRST (it will wait for setup completion)
-            logger.debug("Starting simulation thread (will wait for setup completion)...")
+            logger.info("Starting simulation thread (will wait for setup completion)...")
             simulation_thread = threading.Thread(
                 target=run_simulation_thread,
                 args=(runner, scenarios_to_run[0]),
@@ -751,8 +732,9 @@ async def start_simulation(request: SimulationRequest):
 
             # Setup components using utility function with retry logic
             try:
+                logger.info("Setting up simulation components...")
                 setup_simulation_components(runner, runner.app)
-                logger.debug("Simulation components setup completed")
+                logger.info("Simulation components setup completed")
             except RuntimeError as e:
                 if "Failed to create vehicle" in str(e):
                     runner.state["is_running"] = False
@@ -762,18 +744,18 @@ async def start_simulation(request: SimulationRequest):
                 raise
 
             # Wait a moment to ensure all setup is stable
-            logger.debug("Waiting for setup to stabilize...")
+            logger.info("Waiting for setup to stabilize...")
             time.sleep(0.5)
 
             # Signal that setup is complete - simulation thread can now start
-            logger.debug("Signaling setup completion to simulation thread...")
+            logger.info("Signaling setup completion to simulation thread...")
             setup_event.set()
 
             # Reset transition flag after successful start
             runner.state["is_transitioning"] = False
             # Don't clear is_starting flag here - let the simulation thread clear it when actually running
 
-            logger.debug(f"Reset is_transitioning=False, is_starting={runner.state['is_starting']}")
+            logger.info(f"Reset is_transitioning=False, is_starting={runner.state['is_starting']}")
             logger.info("Simulation started successfully")
             return {
                 "success": True,
@@ -812,7 +794,7 @@ async def stop_simulation():
 
         # Check if simulation is actually running
         if not runner.state["is_running"]:
-            logger.debug("Simulation is not running, returning success")
+            logger.info("Simulation is not running, returning success")
             return {"success": True, "message": "Simulation is not running"}
         
         # Synchronize the two state objects immediately
@@ -862,9 +844,9 @@ async def stop_simulation():
             # Clear the app instance
             runner.app = None
             
-            logger.debug("Simulation state reset completed")
+            logger.info("Simulation state reset completed")
 
-        logger.info("Simulation stopped")
+        logger.info("Simulation stopped successfully")
         return {"success": True, "message": "Simulation stopped successfully"}
         
     except Exception as e:
@@ -877,160 +859,171 @@ async def stop_simulation():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- OPTIMIZATION: WebSocket video frame sending, only send if frame is new ---
 @app.websocket("/ws/simulation-view")
 async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("WebSocket connection established")
     try:
-        await websocket.accept()
-        logger.debug("WebSocket connection established")
-        last_sent_state = None
-        last_frame_hash = [None]
-        async def send_video_frames():
-            while True:
+        while True:
+            # Get comprehensive state information with improved reliability
+            state_info = {
+                "type": "status",
+                "is_running": False,
+                "is_starting": False,  # New starting flag
+                "is_stopping": False,  # Stopping flag
+                "is_skipping": False,  # New skipping flag
+                "current_scenario": None,
+                "scenario_index": 0,
+                "total_scenarios": 0,
+                "is_transitioning": False,
+                "status_message": "Ready to Start",
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Update state information if runner exists
+            if hasattr(runner, 'state'):
                 try:
-                    state = runner.state if hasattr(runner, 'state') else None
-                    app = runner.app if hasattr(runner, 'app') else None
-                    if (app and getattr(app, 'display_manager', None) and state and
-                        state["is_running"] and not state["is_transitioning"] and
-                        not state["is_stopping"] and not state["is_skipping"] and not state["is_starting"]):
-                        frame = app.display_manager.get_current_frame()
-                        if frame is not None:
-                            frame_bytes = frame.tobytes()
-                            frame_hash = hash(frame_bytes)
-                            if frame_hash != last_frame_hash[0]:
-                                _, buffer = cv2.imencode('.jpg', frame)
-                                frame_base64 = base64.b64encode(buffer).decode('utf-8')
-                                try:
-                                    await websocket.send_text(frame_base64)
-                                    last_frame_hash[0] = frame_hash
-                                except asyncio.CancelledError:
-                                    break
-                                except Exception as e:
-                                    error_str = str(e).lower()
-                                    if any(pattern in error_str for pattern in [
-                                        "1001", "1005", "1006", "1011", "1012",
-                                        "going away", "no status code", "no close frame received or sent",
-                                        "connection closed", "connection reset", "connection aborted",
-                                        "connection refused", "connection timed out", "broken pipe",
-                                        "websocket is closed", "websocket connection is closed",
-                                        "remote end closed connection", "connection lost",
-                                        "peer closed connection", "socket is not connected"
-                                    ]):
-                                        break
-                                    else:
-                                        logger.error(f"Error sending video frame: {str(e)}")
-                                        break
-                    await asyncio.sleep(0.0167)
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.critical(f"Uncaught exception in send_video_frames: {e}", exc_info=True)
-                    break
-        video_task = asyncio.create_task(send_video_frames())
-        try:
-            while True:
-                state = runner.state if hasattr(runner, 'state') else None
-                state_info = {
-                    "type": "status",
-                    "is_running": False,
-                    "is_starting": False,
-                    "is_stopping": False,
-                    "is_skipping": False,
-                    "current_scenario": None,
-                    "scenario_index": 0,
-                    "total_scenarios": 0,
-                    "is_transitioning": False,
-                    "status_message": "Ready to Start",
-                    "timestamp": datetime.now().isoformat(),
-                }
-                if state:
-                    try:
-                        status_message = "Ready to Start"
-                        if state["is_starting"]:
-                            status_message = "Hang on,\nLoading Simulation..."
-                        elif state["is_stopping"]:
+                    # Determine status message based on backend state
+                    status_message = "Ready to Start"
+                    if runner.state["is_starting"]:
+                        status_message = "Hang on,\nLoading Simulation..."
+                    elif runner.state["is_stopping"]:
+                        status_message = "Stopping simulation..."
+                    elif runner.state["is_skipping"]:
+                        # Check if this is the last scenario being skipped
+                        current_index = runner.state["current_scenario_index"]
+                        total_scenarios = len(runner.state["scenarios_to_run"])
+                        if current_index >= total_scenarios - 1:
                             status_message = "Stopping simulation..."
-                        elif state["is_skipping"]:
-                            current_index = state["current_scenario_index"]
-                            total_scenarios = len(state["scenarios_to_run"])
-                            if current_index >= total_scenarios - 1:
-                                status_message = "Stopping simulation..."
-                            else:
-                                status_message = "Skipping scenario..."
-                        elif state["is_running"]:
-                            if state["is_transitioning"]:
-                                status_message = "Transitioning between scenarios..."
-                            else:
-                                status_message = "Simulation running"
-                        state_info.update({
-                            "is_running": state["is_running"],
-                            "is_starting": state["is_starting"],
-                            "is_stopping": state["is_stopping"],
-                            "is_skipping": state["is_skipping"],
-                            "current_scenario": state["current_scenario"],
-                            "scenario_index": state["current_scenario_index"] + 1,
-                            "total_scenarios": len(state["scenarios_to_run"]),
-                            "is_transitioning": state["is_transitioning"],
-                            "status_message": status_message,
-                        })
-                        current_state_key = (
-                            state_info["is_running"],
-                            state_info["is_starting"],
-                            state_info["is_stopping"],
-                            state_info["is_skipping"],
-                            state_info["is_transitioning"],
-                            state_info["status_message"],
-                            state_info["current_scenario"],
-                            state_info["scenario_index"],
-                            state_info["total_scenarios"]
-                        )
-                        if last_sent_state != current_state_key:
-                            try:
-                                await websocket.send_json(state_info)
-                                last_sent_state = current_state_key
-                            except asyncio.CancelledError:
-                                break
-                            except Exception as e:
-                                error_str = str(e).lower()
-                                if any(pattern in error_str for pattern in [
-                                    "1001", "1005", "1006", "1011", "1012",
-                                    "going away", "no status code", "no close frame received or sent",
-                                    "connection closed", "connection reset", "connection aborted",
-                                    "connection refused", "connection timed out", "broken pipe",
-                                    "websocket is closed", "websocket connection is closed",
-                                    "remote end closed connection", "connection lost",
-                                    "peer closed connection", "socket is not connected"
-                                ]):
-                                    break
-                                else:
-                                    logger.error(f"Error sending status update: {str(e)}")
-                                    break
-                    except asyncio.CancelledError:
-                        break
-                    except Exception as e:
-                        logger.critical(f"Uncaught exception in websocket main loop: {e}", exc_info=True)
-                        break
+                        else:
+                            status_message = "Skipping scenario..."
+                    elif runner.state["is_running"]:
+                        if runner.state["is_transitioning"]:
+                            status_message = "Transitioning between scenarios..."
+                        else:
+                            status_message = "Simulation running"
+                    
+                    state_info.update({
+                        "is_running": runner.state["is_running"],
+                        "is_starting": runner.state["is_starting"],
+                        "is_stopping": runner.state["is_stopping"],  # Include stopping flag
+                        "is_skipping": runner.state["is_skipping"],
+                        "current_scenario": runner.state["current_scenario"],
+                        "scenario_index": runner.state["current_scenario_index"] + 1,
+                        "total_scenarios": len(runner.state["scenarios_to_run"]),
+                        "is_transitioning": runner.state["is_transitioning"],
+                        "status_message": status_message,
+                    })
+                    
+                    # Debug: Log the state being sent (only when state changes)
+                    current_state = f"is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_stopping={runner.state['is_stopping']}, is_skipping={runner.state['is_skipping']}, is_transitioning={runner.state['is_transitioning']}"
+                    
+                    # Only log when is_starting changes to avoid spam
+                    if runner.state['is_starting']:
+                        logger.info(f"WebSocket: is_starting=True, is_running={runner.state['is_running']}")
+                    elif not hasattr(websocket, '_last_logged_state') or websocket._last_logged_state != current_state:
+                        logger.debug(f"WebSocket sending state: {current_state}, status_message={status_message}")
+                        websocket._last_logged_state = current_state
+                    
+                except Exception as e:
+                    logger.error(f"Error getting state info: {str(e)}")
+                    # Use default values on error
+
+            try:
+                # Send state update
+                await websocket.send_json(state_info)
+
+                # Send video frame if available and simulation is running
+                if (hasattr(runner, 'app') and runner.app and 
+                    runner.app.display_manager and 
+                    state_info["is_running"] and 
+                    not state_info["is_transitioning"] and
+                    not state_info["is_stopping"] and
+                    not state_info["is_skipping"] and
+                    not state_info["is_starting"]):
+                    
+                    # Debug: Check if display manager exists and has frames
+                    frame = runner.app.display_manager.get_current_frame()
+                    if frame is not None:
+                        logger.debug(f"Got frame with shape: {frame.shape}")
+                        # Convert frame to JPEG
+                        _, buffer = cv2.imencode('.jpg', frame)
+                        # Convert to base64
+                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                        # Send to client
+                        await websocket.send_text(frame_base64)
+                        logger.debug("Frame sent successfully")
+                    else:
+                        logger.debug("No frame available from display manager")
+                        # Check if display manager is properly initialized
+                        if hasattr(runner.app.display_manager, 'last_frame'):
+                            logger.debug(f"Display manager last_frame: {runner.app.display_manager.last_frame is not None}")
+                        if hasattr(runner.app.display_manager, 'camera_view'):
+                            logger.debug(f"Camera view exists: {runner.app.display_manager.camera_view is not None}")
                 else:
-                    if last_sent_state is None:
-                        try:
-                            await websocket.send_json(state_info)
-                            last_sent_state = (False, False, False, False, False, "Ready to Start", None, 0, 0)
-                        except asyncio.CancelledError:
-                            break
-                        except Exception as e:
-                            logger.critical(f"Uncaught exception in websocket main loop: {e}", exc_info=True)
-                            break
-                await asyncio.sleep(0.1)
-        finally:
-            if 'video_task' in locals():
-                video_task.cancel()
-                try:
-                    await video_task
-                except asyncio.CancelledError:
-                    pass
+                    # Debug: Log why frames are not being sent
+                    if not hasattr(runner, "app"):
+                        logger.debug("No app instance")
+                    elif not runner.app:
+                        logger.debug("App instance is None")
+                    elif not runner.app.display_manager:
+                        logger.debug("No display manager")
+                    elif not state_info["is_running"]:
+                        logger.debug("Simulation not running")
+                    elif state_info["is_transitioning"]:
+                        logger.debug("Simulation is transitioning")
+                    elif state_info["is_stopping"]:
+                        logger.debug("Simulation is stopping")
+                    elif state_info["is_skipping"]:
+                        logger.debug("Simulation is skipping - not sending frames")
+                    elif state_info["is_starting"]:
+                        logger.debug("Simulation is starting - not sending frames")
+                        
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
+                break
+            except Exception as e:
+                # Don't log normal WebSocket disconnection errors
+                error_str = str(e).lower()
+                if (any(pattern in error_str for pattern in [
+                    "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+                    "going away", "no status code", "no close frame received or sent",
+                    "connection closed", "connection reset", "connection aborted",
+                    "connection refused", "connection timed out", "broken pipe",
+                    "websocket is closed", "websocket connection is closed",
+                    "remote end closed connection", "connection lost",
+                    "peer closed connection", "socket is not connected"
+                ])):
+                    # These are normal disconnection errors, just break the loop
+                    break
+                else:
+                    logger.error(f"Error sending WebSocket data: {str(e)}")
+                    # Don't break on frame errors, just log them
+                    if "WebSocketDisconnect" in str(e):
+                        break
+
+            # High frame rate for smooth video streaming
+            await asyncio.sleep(0.0167)  # ~60 FPS for status updates and video frames
+            
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        logger.critical(f"Uncaught exception in websocket endpoint: {e}", exc_info=True)
-        # Never crash the process
+        # Don't log normal WebSocket disconnection errors
+        error_str = str(e).lower()
+        if (any(pattern in error_str for pattern in [
+            "1001", "1005", "1006", "1011", "1012",  # WebSocket close codes
+            "going away", "no status code", "no close frame received or sent",
+            "connection closed", "connection reset", "connection aborted",
+            "connection refused", "connection timed out", "broken pipe",
+            "websocket is closed", "websocket connection is closed",
+            "remote end closed connection", "connection lost",
+            "peer closed connection", "socket is not connected"
+        ])):
+            logger.info("WebSocket connection closed normally")
+        else:
+            logger.error(f"Error in websocket: {str(e)}")
+    finally:
+        logger.info("WebSocket connection closed")
 
 
 @app.get("/api/reports")
@@ -1146,19 +1139,21 @@ async def create_log_file(request: LogFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- Unified Logging: All logs go to logs/app.log ---
-
 @app.post("/api/logs/write")
-async def write_log(request: LogWriteRequest):
+async def write_to_log(request: LogWriteRequest):
+    """Write content to the current log file"""
     try:
-        logs_dir = Path("logs")
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        app_log_file = logs_dir / "app.log"
-        log_entry = f"FRONTEND: {request.content}"
-        logger.info(log_entry)
-        return {"success": True, "file": str(app_log_file)}
+        logs_dir = Path(get_project_root()) / "logs"
+        # Get the most recent log file
+        log_files = sorted(logs_dir.glob("web_simulation_*.log"), reverse=True)
+        if not log_files:
+            raise HTTPException(status_code=404, detail="No log file found")
+        
+        current_log = log_files[0]
+        with open(current_log, "a") as f:
+            f.write(request.content)
+        return {"message": "Log entry written"}
     except Exception as e:
-        logger.warning(f"Failed to write frontend log: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1166,22 +1161,6 @@ async def write_log(request: LogWriteRequest):
 async def close_log():
     """Close the current log file (no-op since files are closed after each write)"""
     return {"message": "Log file closed"}
-
-
-@app.post("/api/logs/frontend")
-async def frontend_log(request: FrontendLogRequest):
-    try:
-        logs_dir = Path("logs")
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        log_message = f"[{request.component}] {request.message}"
-        if request.data:
-            log_message += f" - Data: {request.data}"
-        log_message += "\n"
-        logger.info(log_message)
-        return {"message": "Frontend log received"}
-    except Exception as e:
-        logger.error(f"Error logging frontend message: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/simulation/status")
@@ -1235,37 +1214,299 @@ async def get_simulation_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Authentication endpoints
+@app.post("/api/auth/login")
+async def login(request: Request, login_request: LoginRequest):
+    """User login endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Login attempt: username={login_request.username}")
+        # Get user by username
+        user = User.get_by_username(db, login_request.username)
+        if not user:
+            logger.warning(f"Login failed: username={login_request.username} (user not found)")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        # Verify password
+        if not verify_password(login_request.password, user["password_hash"]):
+            logger.warning(f"Login failed: username={login_request.username} (wrong password)")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        # Update last login
+        user_obj = User()
+        user_obj.id = user["id"]
+        user_obj.update_last_login(db)
+        # Create JWT token
+        token_data = {
+            "sub": str(user["id"]),
+            "username": user["username"],
+            "email": user["email"],
+            "is_admin": user["is_admin"]
+        }
+        access_token = create_jwt_token(token_data)
+        # Create session token for additional security
+        session_token = generate_session_token()
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        # Get IP address and user agent from request
+        ip_address = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        UserSession.create(
+            db,
+            user_id=user["id"],
+            session_token=session_token,
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        return {
+            "access_token": access_token,
+            "session_token": session_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "email": user["email"],
+                "first_name": user["first_name"],
+                "last_name": user["last_name"],
+                "is_admin": user["is_admin"]
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/register")
+async def register(request: RegisterRequest):
+    """User registration endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Register attempt: username={request.username}, email={request.email}")
+        # Validate input
+        if not validate_username(request.username):
+            logger.warning(f"Register failed: invalid username={request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username must be 3-50 characters and contain only letters, numbers, and underscores"
+            )
+        
+        if not validate_email(request.email):
+            logger.warning(f"Register failed: invalid email={request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email format"
+            )
+        
+        if not validate_password(request.password):
+            logger.warning(f"Register failed: weak password for username={request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters with uppercase, lowercase, and digit"
+            )
+        
+        # Check if username already exists
+        existing_user = User.get_by_username(db, request.username)
+        if existing_user:
+            logger.warning(f"Register failed: username already exists: {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists"
+            )
+        
+        # Check if email already exists
+        existing_email = User.get_by_email(db, request.email)
+        if existing_email:
+            logger.warning(f"Register failed: email already exists: {request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already exists"
+            )
+        
+        # Hash password
+        password_hash = hash_password(request.password)
+        
+        # Create user
+        user_data = {
+            "username": request.username,
+            "email": request.email,
+            "password_hash": password_hash,
+            "first_name": request.first_name,
+            "last_name": request.last_name,
+            "is_active": True,
+            "is_admin": False
+        }
+        
+        new_user = User.create(db, **user_data)
+        if not new_user:
+            logger.error(f"Register failed: could not create user {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user"
+            )
+        logger.info(f"Register success: username={request.username}, id={new_user['id']}")
+        
+        return {
+            "message": "User registered successfully",
+            "user": {
+                "id": new_user["id"],
+                "username": new_user["username"],
+                "email": new_user["email"],
+                "first_name": new_user["first_name"],
+                "last_name": new_user["last_name"],
+                "is_admin": new_user["is_admin"]
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """User logout endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Logout: user_id={current_user['sub']}, username={current_user['username']}")
+        # Delete user sessions
+        UserSession.delete_user_sessions(db, current_user["sub"])
+        
+        return {"message": "Logged out successfully"}
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.get("/api/auth/me")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """Get current user information"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Get current user info: user_id={current_user['sub']}, username={current_user['username']}")
+        user = User.get_by_username(db, current_user["username"])
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "first_name": user["first_name"],
+            "last_name": user["last_name"],
+            "is_admin": user["is_admin"],
+            "created_at": user["created_at"],
+            "last_login": user["last_login"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get user info error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.get("/api/auth/users")
+async def get_users(current_user: dict = Depends(get_current_user)):
+    """Get all users (admin only)"""
+    try:
+        require_admin(current_user)
+        
+        db = DatabaseManager()
+        query = "SELECT id, username, email, first_name, last_name, is_active, is_admin, created_at, last_login FROM users ORDER BY created_at DESC"
+        users = db.execute_query(query)
+        
+        return {"users": users}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get users error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/check-username")
+async def check_username(payload: dict):
+    db = DatabaseManager()
+    username = payload.get("username")
+    user = User.get_by_username(db, username)
+    return {"exists": bool(user)}
+
+@app.post("/api/auth/reset-password")
+async def reset_password(payload: dict):
+    db = DatabaseManager()
+    username = payload.get("username")
+    new_password = payload.get("new_password")
+    user = User.get_by_username(db, username)
+    if not user:
+        return {"success": False, "message": "User not found"}
+    password_hash = hash_password(new_password)
+    query = "UPDATE users SET password_hash = %(password_hash)s WHERE username = %(username)s"
+    db.execute_query(query, {"password_hash": password_hash, "username": username})
+    return {"success": True, "message": "Password updated"}
+
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: dict, current_user: dict = Depends(get_current_user)):
+    db = DatabaseManager()
+    user = User.get_by_username(db, current_user["username"])
+    current_password = payload.get("current_password")
+    new_password = payload.get("new_password")
+    if not user or not verify_password(current_password, user["password_hash"]):
+        return {"success": False, "message": "Current password is incorrect."}
+    password_hash = hash_password(new_password)
+    query = "UPDATE users SET password_hash = %(password_hash)s WHERE username = %(username)s"
+    db.execute_query(query, {"password_hash": password_hash, "username": user["username"]})
+    return {"success": True, "message": "Password changed successfully."}
+
+
+@app.get("/api/version")
+async def get_version():
+    # Primary source: Docker image tag from environment variables
+    # Check multiple common Docker environment variables
+    version = (
+        os.environ.get("DOCKER_IMAGE_TAG") or
+        os.environ.get("IMAGE_TAG") or
+        os.environ.get("VERSION") or
+        os.environ.get("APP_VERSION")
+    )
+    
+    if not version:
+        # Fallback to VERSION file
+        version_file = Path(__file__).parent.parent.parent / "VERSION"
+        if version_file.exists():
+            version = version_file.read_text().strip()
+        else:
+            version = "dev"
+    
+    return {"version": version}
+
+
 if __name__ == "__main__":
     import uvicorn
-    import logging
-
-    # Configure logging to use separate backend logs directory
-    logs_dir = Path("logs")
-    backend_logs_dir = logs_dir / "backend"
-    backend_logs_dir.mkdir(parents=True, exist_ok=True)
-
-    # Configure backend logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(backend_logs_dir / "app.log"),
-            logging.StreamHandler()
-        ]
-    )
-
-    # Suppress specific WebSocket connection messages
-    websocket_filter = WebSocketConnectionFilter()
-    logging.getLogger("uvicorn.protocols.websockets.websockets_impl").setLevel(logging.ERROR)
-    logging.getLogger("websockets").setLevel(logging.ERROR)
-    logging.getLogger("websockets.protocol").setLevel(logging.ERROR)
-    logging.getLogger("websockets.server").setLevel(logging.ERROR)
-    logging.getLogger("websockets.client").setLevel(logging.ERROR)
-    
-    # Apply filter to suppress "connection closed" messages
-    for logger_name in ["uvicorn.error", "uvicorn.access", "uvicorn.protocols.websockets.websockets_impl"]:
-        logger_instance = logging.getLogger(logger_name)
-        logger_instance.addFilter(websocket_filter)
 
     logger.info("Starting FastAPI server on 0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

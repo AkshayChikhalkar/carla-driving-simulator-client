@@ -1,3 +1,4 @@
+
 #!/bin/bash
 set -e
 
@@ -11,12 +12,6 @@ if [ ! -f /app/config/simulation.yaml ]; then
     echo "ERROR: Config file not found at /app/config/simulation.yaml!"
     exit 1
 fi
-
-echo "Waiting for PostgreSQL to be ready..."
-sleep 10
-
-echo "Initializing database..."
-cd /app && python -c "from src.database.init_db import init_db; init_db()" || echo "Database initialization failed, continuing..."
 
 echo "Starting backend service..."
 cd /app/web/backend && uvicorn main:app --host 0.0.0.0 --port 8000 &
