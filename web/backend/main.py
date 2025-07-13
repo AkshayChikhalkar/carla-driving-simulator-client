@@ -5,8 +5,9 @@ if "XDG_RUNTIME_DIR" not in os.environ:
     if not os.path.exists("/tmp/xdg"):
         os.makedirs("/tmp/xdg", exist_ok=True)
 
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from typing import List, Optional
 import sys
@@ -20,7 +21,7 @@ from fastapi import WebSocketDisconnect
 import atexit
 import signal
 from fastapi.responses import FileResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 import yaml
 import threading
 from threading import Lock, Event, Condition
@@ -39,6 +40,14 @@ from src.visualization.display_manager import DisplayManager
 from src.utils.logging import Logger
 from src.utils.paths import get_project_root
 from src.core.scenario_results_manager import ScenarioResultsManager
+from src.database.db_manager import DatabaseManager
+from src.database.models import User, UserSession
+from src.utils.auth import (
+    LoginRequest, RegisterRequest, UserResponse,
+    hash_password, verify_password, generate_session_token,
+    create_jwt_token, verify_jwt_token, validate_password,
+    validate_email, validate_username, get_current_user, require_admin
+)
 
 
 # Request/Response Models
@@ -1203,6 +1212,275 @@ async def get_simulation_status():
     except Exception as e:
         logger.error(f"Error getting simulation status: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Authentication endpoints
+@app.post("/api/auth/login")
+async def login(request: Request, login_request: LoginRequest):
+    """User login endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Login attempt: username={login_request.username}")
+        # Get user by username
+        user = User.get_by_username(db, login_request.username)
+        if not user:
+            logger.warning(f"Login failed: username={login_request.username} (user not found)")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        # Verify password
+        if not verify_password(login_request.password, user["password_hash"]):
+            logger.warning(f"Login failed: username={login_request.username} (wrong password)")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        # Update last login
+        user_obj = User()
+        user_obj.id = user["id"]
+        user_obj.update_last_login(db)
+        # Create JWT token
+        token_data = {
+            "sub": str(user["id"]),
+            "username": user["username"],
+            "email": user["email"],
+            "is_admin": user["is_admin"]
+        }
+        access_token = create_jwt_token(token_data)
+        # Create session token for additional security
+        session_token = generate_session_token()
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        # Get IP address and user agent from request
+        ip_address = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        UserSession.create(
+            db,
+            user_id=user["id"],
+            session_token=session_token,
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        return {
+            "access_token": access_token,
+            "session_token": session_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "email": user["email"],
+                "first_name": user["first_name"],
+                "last_name": user["last_name"],
+                "is_admin": user["is_admin"]
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/register")
+async def register(request: RegisterRequest):
+    """User registration endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Register attempt: username={request.username}, email={request.email}")
+        # Validate input
+        if not validate_username(request.username):
+            logger.warning(f"Register failed: invalid username={request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username must be 3-50 characters and contain only letters, numbers, and underscores"
+            )
+        
+        if not validate_email(request.email):
+            logger.warning(f"Register failed: invalid email={request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email format"
+            )
+        
+        if not validate_password(request.password):
+            logger.warning(f"Register failed: weak password for username={request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters with uppercase, lowercase, and digit"
+            )
+        
+        # Check if username already exists
+        existing_user = User.get_by_username(db, request.username)
+        if existing_user:
+            logger.warning(f"Register failed: username already exists: {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists"
+            )
+        
+        # Check if email already exists
+        existing_email = User.get_by_email(db, request.email)
+        if existing_email:
+            logger.warning(f"Register failed: email already exists: {request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already exists"
+            )
+        
+        # Hash password
+        password_hash = hash_password(request.password)
+        
+        # Create user
+        user_data = {
+            "username": request.username,
+            "email": request.email,
+            "password_hash": password_hash,
+            "first_name": request.first_name,
+            "last_name": request.last_name,
+            "is_active": True,
+            "is_admin": False
+        }
+        
+        new_user = User.create(db, **user_data)
+        if not new_user:
+            logger.error(f"Register failed: could not create user {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user"
+            )
+        logger.info(f"Register success: username={request.username}, id={new_user['id']}")
+        
+        return {
+            "message": "User registered successfully",
+            "user": {
+                "id": new_user["id"],
+                "username": new_user["username"],
+                "email": new_user["email"],
+                "first_name": new_user["first_name"],
+                "last_name": new_user["last_name"],
+                "is_admin": new_user["is_admin"]
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """User logout endpoint"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Logout: user_id={current_user['sub']}, username={current_user['username']}")
+        # Delete user sessions
+        UserSession.delete_user_sessions(db, current_user["sub"])
+        
+        return {"message": "Logged out successfully"}
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.get("/api/auth/me")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """Get current user information"""
+    try:
+        db = DatabaseManager()
+        logger.info(f"Get current user info: user_id={current_user['sub']}, username={current_user['username']}")
+        user = User.get_by_username(db, current_user["username"])
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "first_name": user["first_name"],
+            "last_name": user["last_name"],
+            "is_admin": user["is_admin"],
+            "created_at": user["created_at"],
+            "last_login": user["last_login"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get user info error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.get("/api/auth/users")
+async def get_users(current_user: dict = Depends(get_current_user)):
+    """Get all users (admin only)"""
+    try:
+        require_admin(current_user)
+        
+        db = DatabaseManager()
+        query = "SELECT id, username, email, first_name, last_name, is_active, is_admin, created_at, last_login FROM users ORDER BY created_at DESC"
+        users = db.execute_query(query)
+        
+        return {"users": users}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get users error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@app.post("/api/auth/check-username")
+async def check_username(payload: dict):
+    db = DatabaseManager()
+    username = payload.get("username")
+    user = User.get_by_username(db, username)
+    return {"exists": bool(user)}
+
+@app.post("/api/auth/reset-password")
+async def reset_password(payload: dict):
+    db = DatabaseManager()
+    username = payload.get("username")
+    new_password = payload.get("new_password")
+    user = User.get_by_username(db, username)
+    if not user:
+        return {"success": False, "message": "User not found"}
+    password_hash = hash_password(new_password)
+    query = "UPDATE users SET password_hash = %(password_hash)s WHERE username = %(username)s"
+    db.execute_query(query, {"password_hash": password_hash, "username": username})
+    return {"success": True, "message": "Password updated"}
+
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: dict, current_user: dict = Depends(get_current_user)):
+    db = DatabaseManager()
+    user = User.get_by_username(db, current_user["username"])
+    current_password = payload.get("current_password")
+    new_password = payload.get("new_password")
+    if not user or not verify_password(current_password, user["password_hash"]):
+        return {"success": False, "message": "Current password is incorrect."}
+    password_hash = hash_password(new_password)
+    query = "UPDATE users SET password_hash = %(password_hash)s WHERE username = %(username)s"
+    db.execute_query(query, {"password_hash": password_hash, "username": user["username"]})
+    return {"success": True, "message": "Password changed successfully."}
 
 
 if __name__ == "__main__":
