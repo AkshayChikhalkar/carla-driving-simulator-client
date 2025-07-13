@@ -57,7 +57,7 @@ class ConnectionManager:
         delay = 30
         for attempt in range(1, max_retries + 1):
             try:
-                self.logger.info(
+                self.logger.debug(
                     f"Connecting to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})..."
                 )
                 self.client = carla.Client(self.config.host, self.config.port)
@@ -67,7 +67,7 @@ class ConnectionManager:
                 world = self.client.get_world()
                 if not world:
                     raise RuntimeError("Failed to get CARLA world")
-                self.logger.info("Successfully connected to CARLA server")
+                self.logger.info(f"Connected to CARLA server at {self.config.host}:{self.config.port} (attempt {attempt})")
                 return True
             except Exception as e:
                 self.logger.warning(

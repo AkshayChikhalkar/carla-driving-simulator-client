@@ -531,7 +531,7 @@ class VehicleController:
     def cleanup(self) -> None:
         """Clean up controller resources"""
         try:
-            self.logger.info("Cleaning up controller")
+            self.logger.debug("Cleaning up controller")
             # Clean up the strategy if it exists
             # if self._strategy and hasattr(self._strategy, 'cleanup'):
             #     self._strategy.cleanup()

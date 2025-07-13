@@ -9,6 +9,7 @@ import logger from './utils/logger';
 import Reports from './components/Reports';
 import Logs from './components/Logs';
 import Analytics from './components/Analytics';
+import VersionDisplay from './components/VersionDisplay';
 
 const theme = createTheme({
   palette: {
@@ -73,6 +74,7 @@ function App() {
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
         }}
       />
+      <VersionDisplay />
     </ThemeProvider>
   );
 }

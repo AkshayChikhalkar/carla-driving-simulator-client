@@ -258,7 +258,7 @@ class WorldManager(IWorldManager):
                     self.logger.debug(f"[{spawn_id}] Actor is_alive after tick: {actor.is_alive}")
                     
                     if actor.is_alive:
-                        self.logger.info(
+                        self.logger.debug(
                             f"[{spawn_id}] {actor.type_id} spawned successfully at {spawn_point.location} on attempt {attempt + 1}"
                         )
                         
@@ -326,7 +326,7 @@ class WorldManager(IWorldManager):
     def create_vehicle(self) -> Optional[carla.Vehicle]:
         """Create and spawn a vehicle in the world"""
         try:
-            self.logger.info(f"Starting vehicle creation for model: {self.vehicle_model}")
+            self.logger.debug(f"Starting vehicle creation for model: {self.vehicle_model}")
             
             # Get vehicle blueprint
             vehicle_bp = self.blueprint_library.find(self.vehicle_model)
@@ -337,14 +337,14 @@ class WorldManager(IWorldManager):
                 self.logger.info(f"Available vehicle blueprints: {[bp.id for bp in available_vehicles[:5]]}")
                 return None
 
-            self.logger.info(f"Found vehicle blueprint: {vehicle_bp.id}")
+            self.logger.debug(f"Found vehicle blueprint: {vehicle_bp.id}")
 
             # Check spawn points
             if not self.spawn_points:
                 self.logger.error("No spawn points available")
                 return None
                 
-            self.logger.info(f"Using spawn point: {self.spawn_points[0].location}")
+            self.logger.debug(f"Using spawn point: {self.spawn_points[0].location}")
 
             # Set vehicle attributes with proper CARLA attribute names
             try:
@@ -358,7 +358,7 @@ class WorldManager(IWorldManager):
 
                 # Try to spawn vehicle with retries
                 spawn_point = self.spawn_points[0]  # Use first spawn point
-                self.logger.info(f"Attempting to spawn vehicle at {spawn_point.location}")
+                self.logger.debug(f"Attempting to spawn vehicle at {spawn_point.location}")
                 
                 self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point, spawn_id="main_vehicle")
 
@@ -439,7 +439,7 @@ class WorldManager(IWorldManager):
                     self.logger.error("Vehicle is not alive after setup")
                     return None
                     
-                self.logger.info(f"Vehicle creation completed successfully: {self.vehicle.type_id}")
+                self.logger.debug(f"Vehicle completed: {self.vehicle.type_id}")
                 return self.vehicle
 
             except Exception as e:

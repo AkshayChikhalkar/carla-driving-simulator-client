@@ -433,9 +433,9 @@ class SimulationApplication:
             self.logger.error("Error in simulation loop", exc_info=e)
             raise
         finally:
-            self.logger.info("Simulation loop cleanup starting")
+            self.logger.debug("Simulation loop cleanup starting")
             self.cleanup()
-            self.logger.info("Simulation loop cleanup completed")
+            self.logger.debug("Simulation loop cleanup completed")
 
     def pause(self) -> None:
         """Pause the simulation"""
@@ -573,7 +573,7 @@ class SimulationApplication:
             with self.cleanup_lock:
                 self.is_cleanup_complete = True
 
-            self.logger.info("Cleanup completed successfully")
+            self.logger.info("Cleanup completed")
 
             # Store results
             with self._cleanup_results_lock:
