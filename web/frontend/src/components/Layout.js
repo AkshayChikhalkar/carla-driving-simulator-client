@@ -16,6 +16,8 @@ import {
   MenuItem,
   Divider,
 } from '@mui/material';
+import { Box as MuiBox } from '@mui/material';
+import Chip from '@mui/material/Chip';
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
@@ -443,4 +445,31 @@ function Layout({ children }) {
   );
 }
 
-export default Layout; 
+function VersionLabel() {
+  return (
+    <MuiBox
+      sx={{
+        position: 'fixed',
+        left: 12,
+        bottom: 12,
+        zIndex: 2000,
+        background: 'none',
+        boxShadow: 'none',
+        p: 0,
+      }}
+    >
+      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, fontSize: 14, letterSpacing: 1 }}>
+        Version: dev_v1.4.2
+      </Typography>
+    </MuiBox>
+  );
+}
+
+export default function LayoutWithVersion(props) {
+  return (
+    <>
+      <Layout {...props} />
+      <VersionLabel />
+    </>
+  );
+} 
