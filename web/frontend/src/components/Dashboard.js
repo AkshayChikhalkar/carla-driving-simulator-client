@@ -161,7 +161,6 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     // Setup WebSocket connection for both video and status
     let ws;
     let isUnmounted = false;
-    let lastFrameTime = 0;
     const FRAME_INTERVAL = 1000 / 60; // Target 60 FPS
 
     const setupWebSocket = () => {
@@ -370,7 +369,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         wsRef.current.close();
       }
     };
-  }, []); // Only run on mount/unmount
+  }, [backendState.is_skipping, isRunning, isSkipping, isStarting, isStopping]); // Only run on mount/unmount
 
   // --- Button handlers ---
   const handleStart = async () => {
@@ -389,7 +388,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
     }
     try {
-      const response = await axios.post(`${API_BASE_URL}/simulation/start`, {
+      await axios.post(`${API_BASE_URL}/simulation/start`, {
         scenarios: selectedScenarios,
         debug: debug,
         report: report
@@ -409,7 +408,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setStatus('Stopping simulation...');
     setError(null);
     try {
-      const response = await axios.post(`${API_BASE_URL}/simulation/stop`);
+      await axios.post(`${API_BASE_URL}/simulation/stop`);
       // Do not reset isStopping here; let WebSocket handle it
     } catch (e) {
       setIsStopping(false);
@@ -559,7 +558,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     }, 0);
     
     try {
-      const response = await axios.post(`${API_BASE_URL}/simulation/skip`);
+      await axios.post(`${API_BASE_URL}/simulation/skip`);
       console.log('handleSkipScenario: Skip API call successful');
       // Do not reset isSkipping here; let WebSocket handle it
     } catch (e) {

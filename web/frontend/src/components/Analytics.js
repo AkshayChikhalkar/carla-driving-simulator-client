@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Box,
-  Typography,
   Tabs,
   Tab,
   Paper
@@ -14,7 +13,7 @@ import {
 } from '@mui/icons-material';
 
 const GRAFANA_BASE_URL = 'http://193.16.126.186:3005/d';
-const GRAFANA_PARAMS = '?orgId=1&refresh=10s&kiosk';
+const GRAFANA_PARAMS = '?orgId=1&kiosk';
 
 // Dashboard configurations - Using actual dashboard UIDs from your Grafana setup
 const dashboardConfigs = [
