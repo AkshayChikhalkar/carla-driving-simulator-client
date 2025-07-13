@@ -1,0 +1,86 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs with filtering
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            attrs:
+      - json:
+          source: attrs
+          expressions:
+            tag:
+      - regex:
+          source: tag
+          expression: '^.+/(?P<container_name>.+)-[a-z0-9]{12}$'
+      - timestamp:
+          format: RFC3339Nano
+          source: time
+      # Filter out noisy errors from the output
+      - drop:
+          source: output
+          expression: ".*Error sending WebSocket data: received 1001.*"
+      - drop:
+          source: output
+          expression: ".*Error sending WebSocket data: received 1005.*"
+      - drop:
+          source: output
+          expression: ".*Error sending WebSocket data: no close frame.*"
+      - drop:
+          source: output
+          expression: ".*Error in vehicle controller input processing: std::exception.*"
+      - drop:
+          source: output
+          expression: ".*Error getting vehicle state: std::exception.*"
+      - labels:
+          stream:
+          container_name:
+      - output:
+          source: output
+
+  # Application logs with filtering
+  - job_name: carla-app-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: carla-app
+          service: carla-simulator
+          __path__: /app/logs/*.log
+    pipeline_stages:
+      # Drop noisy WebSocket and controller errors
+      - drop:
+          source: ""
+          expression: ".*Error sending WebSocket data: received 1001.*"
+      - drop:
+          source: ""
+          expression: ".*Error sending WebSocket data: received 1005.*"
+      - drop:
+          source: ""
+          expression: ".*Error sending WebSocket data: no close frame.*"
+      - drop:
+          source: ""
+          expression: ".*Error in vehicle controller input processing: std::exception.*"
+      - drop:
+          source: ""
+          expression: ".*Error getting vehicle state: std::exception.*"
+      - multiline:
+          firstline: '^\d{4}-\d{2}-\d{2}'
+          max_wait_time: 3s 

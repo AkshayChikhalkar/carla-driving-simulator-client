@@ -1,17 +1,12 @@
 # Support
 
-This is a personal project and I do not provide official support. However, if you find any issues or have suggestions, you can:
+If you need help or want to report a bug, please use the following resources:
 
-1. **Documentation**
-   - Check the [README.md](README.md) for installation and usage instructions
-   - Look through the [docs/](docs/) directory for detailed documentation
-
-2. **Issues**
-   - For bug reports, use the [bug report template](.github/ISSUE_TEMPLATE/bug_report.md)
-   - For feature requests, use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md)
-
-3. **Contributing**
-   - If you want to contribute, please read our [Contributing Guidelines](CONTRIBUTING.md)
-   - Check our [Code of Conduct](CODE_OF_CONDUCT.md) for community guidelines
+- Read the [README.md](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/README.md) for an overview of the project.
+- Look through the [docs/](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/tree/main/docs) directory for detailed documentation.
+- To report a bug, open an issue using the [bug report template](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/.github/ISSUE_TEMPLATE/bug_report.md).
+- To request a feature, use the [feature request template](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/.github/ISSUE_TEMPLATE/feature_request.md).
+- For contributing guidelines, see the [CONTRIBUTING.md](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/CONTRIBUTING.md).
+- Please review our [CODE_OF_CONDUCT.md](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/CODE_OF_CONDUCT.md) before participating.
 
 Note: While I appreciate community contributions, I cannot guarantee response times or implementation of suggested features. This project is maintained in my free time.
