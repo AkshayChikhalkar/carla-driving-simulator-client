@@ -19,7 +19,7 @@ echo "Initializing database..."
 cd /app && python -c "from src.database.init_db import init_db; init_db()" || echo "Database initialization failed, continuing..."
 
 echo "Starting backend service..."
-cd /app/web/backend && python main.py &
+cd /app/web/backend && uvicorn main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 echo "Waiting for backend to start..."
