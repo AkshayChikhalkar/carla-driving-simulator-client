@@ -395,6 +395,8 @@ jobs:
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
             ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+          build-args: |
+            IMAGE_TAG=${{ steps.get_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
