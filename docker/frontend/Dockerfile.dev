@@ -1,0 +1,33 @@
+# Frontend Development Dockerfile for CARLA Driving Simulator Client
+FROM node:18-alpine
+
+# Build arguments
+ARG VERSION=latest
+ARG BUILD_TIME
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY web/frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY web/frontend/ ./
+
+# Create version file for display
+RUN echo "${VERSION}" > public/version.txt
+
+# Set environment variables for development
+ENV REACT_APP_API_URL=http://localhost:8000 \
+    WDS_SOCKET_HOST=0.0.0.0 \
+    WDS_SOCKET_PORT=3000 \
+    FRONTEND_PORT=3000
+
+# Expose port
+EXPOSE 3000
+
+# Development command with hot reload
+CMD ["npm", "start"] 

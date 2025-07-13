@@ -66,7 +66,7 @@ ENV PYTHONPATH=/app \
     CONTAINER_ENV=true \
     WEB_MODE=true
 # Copy start script and fix line endings
-COPY start.sh /app/start.sh
+COPY scripts/start.sh /app/start.sh
 RUN dos2unix /app/start.sh 2>/dev/null || sed -i 's/\r$//' /app/start.sh \
     && chmod +x /app/start.sh
 

@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # Backend service (development testing)
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
+      args:
+        - VERSION=${VERSION:-dev}
+    image: ${DOCKER_IMAGE:-carla-simulator-client}/backend:${VERSION:-dev}
+    container_name: carla-backend-dev-test
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../config:/app/config:ro
+      - ../../logs:/app/logs
+      - ../../reports:/app/reports
+      - ../../src:/app/src:ro
+      - ../../web/backend:/app/web/backend:ro
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@database:5432/carla_simulator}
+      - CARLA_HOST=${CARLA_HOST:-localhost}
+      - CARLA_PORT=${CARLA_PORT:-2000}
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - DEBUG=${DEBUG:-true}
+      - TESTING=${TESTING:-true}
+      - VERSION=${VERSION:-dev}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    networks:
+      - carla-network
+    depends_on:
+      - database
+
+  # Database service (development testing)
+  database:
+    image: postgres:15-alpine
+    container_name: carla-database-dev-test
+    environment:
+      POSTGRES_DB: carla_simulator
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data_dev_test:/var/lib/postgresql/data
+      - ../../database/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - carla-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  carla-network:
+    driver: bridge
+
+volumes:
+  postgres_data_dev_test: 

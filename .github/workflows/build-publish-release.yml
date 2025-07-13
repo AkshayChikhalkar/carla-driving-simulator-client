@@ -44,6 +44,78 @@ env:
   DOCKER_IMAGE: akshaychikhalkar/carla-driving-simulator-client
 
 jobs:
+  detect-changes:
+    name: Detect changes and determine what to build
+    runs-on: ubuntu-latest
+    outputs:
+      backend-changed: ${{ steps.changes.outputs.backend }}
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
+      database-changed: ${{ steps.changes.outputs.database }}
+      docs-changed: ${{ steps.changes.outputs.docs }}
+      any-changed: ${{ steps.changes.outputs.any }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: changes
+        run: |
+          # Get the list of changed files
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          
+          # If no previous commit, consider everything changed
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No previous commit found, considering all components changed"
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "database=true" >> $GITHUB_OUTPUT
+            echo "docs=true" >> $GITHUB_OUTPUT
+            echo "any=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check for backend changes
+          if echo "$CHANGED_FILES" | grep -E "(src/|web/backend/|requirements|setup.py|run.py|config/)" > /dev/null; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "Backend changes detected"
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check for frontend changes
+          if echo "$CHANGED_FILES" | grep -E "(web/frontend/|package.json|package-lock.json)" > /dev/null; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "Frontend changes detected"
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check for database changes
+          if echo "$CHANGED_FILES" | grep -E "(database/|db_|sql)" > /dev/null; then
+            echo "database=true" >> $GITHUB_OUTPUT
+            echo "Database changes detected"
+          else
+            echo "database=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check for docs changes
+          if echo "$CHANGED_FILES" | grep -E "(docs/|README|CHANGELOG)" > /dev/null; then
+            echo "docs=true" >> $GITHUB_OUTPUT
+            echo "Documentation changes detected"
+          else
+            echo "docs=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check if any component changed
+          if echo "$CHANGED_FILES" | grep -E "(src/|web/|requirements|setup.py|run.py|config/|database/)" > /dev/null; then
+            echo "any=true" >> $GITHUB_OUTPUT
+            echo "Application changes detected"
+          else
+            echo "any=false" >> $GITHUB_OUTPUT
+          fi
+
   version-bump:
     name: Bump version and create tag
     runs-on: ubuntu-latest
@@ -185,8 +257,11 @@ jobs:
   docker-build-test:
     name: Test Docker Builds and Save Images
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, detect-changes]
     if: github.event_name == 'push' || inputs.run_docker_tests == 'true'
+    outputs:
+      backend-image: ${{ steps.save_backend.outputs.image }}
+      frontend-image: ${{ steps.save_frontend.outputs.image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -194,62 +269,74 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Validate Dockerfile existence
+      - name: Get version
+        id: get_version
         run: |
-          if [ ! -f "Dockerfile" ]; then
-            echo "Error: Dockerfile not found"
-            exit 1
-          fi
-          if [ ! -f "Dockerfile.dev" ]; then
-            echo "Warning: Dockerfile.dev not found, skipping dev build test"
-            echo "skip_dev_build=true" >> $GITHUB_ENV
-          else
-            echo "skip_dev_build=false" >> $GITHUB_ENV
-          fi
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' 2>/dev/null || echo "latest")
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_time=$BUILD_TIME" >> $GITHUB_ENV
 
-      - name: Test Production Dockerfile
+      - name: Update version information
         run: |
-          docker build -t test-prod .
-          echo "Production Dockerfile builds successfully"
+          chmod +x scripts/update_version.sh
+          ./scripts/update_version.sh ${{ steps.get_version.outputs.version }} ${{ env.BUILD_TIME }}
 
-      - name: Test Development Dockerfile
-        if: env.skip_dev_build != 'true'
+      - name: Test Backend Dockerfile
+        if: needs.detect-changes.outputs.backend-changed == 'true'
         run: |
-          docker build -f Dockerfile.dev -t test-dev .
-          echo "Development Dockerfile builds successfully"
+          docker build -f docker/backend/Dockerfile \
+            --build-arg VERSION=${{ steps.get_version.outputs.version }} \
+            --build-arg BUILD_TIME=${{ env.BUILD_TIME }} \
+            -t test-backend .
+          echo "Backend Dockerfile builds successfully"
+
+      - name: Test Frontend Dockerfile
+        if: needs.detect-changes.outputs.frontend-changed == 'true'
+        run: |
+          docker build -f docker/frontend/Dockerfile \
+            --build-arg VERSION=${{ steps.get_version.outputs.version }} \
+            --build-arg BUILD_TIME=${{ env.BUILD_TIME }} \
+            -t test-frontend .
+          echo "Frontend Dockerfile builds successfully"
 
       - name: Test Docker Compose
         run: |
           # Test docker compose build
-          docker compose build
+          docker compose -f docker/compose/docker-compose-full-prod.yml build
           echo "Docker Compose build successful"
           
           # Test docker compose config validation
-          docker compose config
+          docker compose -f docker/compose/docker-compose-full-prod.yml config
           echo "Docker Compose configuration is valid"
 
-      - name: Save production image as artifact
+      - name: Save backend image as artifact
+        id: save_backend
+        if: needs.detect-changes.outputs.backend-changed == 'true'
         run: |
-          docker save test-prod | gzip > production-image.tar.gz
-          echo "Production image saved as artifact"
+          docker save test-backend | gzip > backend-image.tar.gz
+          echo "image=backend-image.tar.gz" >> $GITHUB_OUTPUT
+          echo "Backend image saved as artifact"
 
-      - name: Save development image as artifact
-        if: env.skip_dev_build != 'true'
+      - name: Save frontend image as artifact
+        id: save_frontend
+        if: needs.detect-changes.outputs.frontend-changed == 'true'
         run: |
-          docker save test-dev | gzip > development-image.tar.gz
-          echo "Development image saved as artifact"
+          docker save test-frontend | gzip > frontend-image.tar.gz
+          echo "image=frontend-image.tar.gz" >> $GITHUB_OUTPUT
+          echo "Frontend image saved as artifact"
 
       - name: Upload Docker images as artifacts
         uses: actions/upload-artifact@v4
         with:
           name: docker-images
           path: |
-            production-image.tar.gz
-            development-image.tar.gz
+            backend-image.tar.gz
+            frontend-image.tar.gz
           retention-days: 1
 
   build:
-    needs: [test, docker-build-test, version-bump]
+    needs: [test, docker-build-test, version-bump, detect-changes]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || inputs.run_build == 'true'
     outputs:
@@ -312,9 +399,19 @@ jobs:
           path: dist/
 
   docker-publish:
-    needs: [build, docker-build-test]
+    needs: [build, docker-build-test, detect-changes]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, frontend]
+        include:
+          - component: backend
+            dockerfile: docker/backend/Dockerfile
+            condition: ${{ needs.detect-changes.outputs.backend-changed == 'true' }}
+          - component: frontend
+            dockerfile: docker/frontend/Dockerfile
+            condition: ${{ needs.detect-changes.outputs.frontend-changed == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -343,26 +440,6 @@ jobs:
           name: docker-images
           path: ./
 
-      - name: Load production image
-        run: |
-          if [ -f "production-image.tar.gz" ]; then
-            gunzip -c production-image.tar.gz | docker load
-            echo "Production image loaded successfully"
-          else
-            echo "Production image artifact not found, will build from scratch"
-            echo "build_prod_from_scratch=true" >> $GITHUB_ENV
-          fi
-
-      - name: Load development image
-        run: |
-          if [ -f "development-image.tar.gz" ]; then
-            gunzip -c development-image.tar.gz | docker load
-            echo "Development image loaded successfully"
-          else
-            echo "Development image artifact not found, will build from scratch"
-            echo "build_dev_from_scratch=true" >> $GITHUB_ENV
-          fi
-
       - name: Get version from Git tags
         id: get_version
         run: |
@@ -374,43 +451,68 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
 
+      - name: Get build time
+        id: build_time
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_time=$BUILD_TIME" >> $GITHUB_ENV
+
+      - name: Update version information
+        run: |
+          chmod +x scripts/update_version.sh
+          ./scripts/update_version.sh ${{ steps.get_version.outputs.version }} ${{ env.BUILD_TIME }}
+
+      - name: Load ${{ matrix.component }} image
+        run: |
+          if [ -f "${{ matrix.component }}-image.tar.gz" ]; then
+            gunzip -c ${{ matrix.component }}-image.tar.gz | docker load
+            echo "${{ matrix.component }} image loaded successfully"
+          else
+            echo "${{ matrix.component }} image artifact not found, will build from scratch"
+            echo "build_from_scratch=true" >> $GITHUB_ENV
+          fi
+
       - name: Check if Docker image already exists
         id: check_docker
         run: |
           # Check if the specific version tag already exists
-          if docker manifest inspect ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} >/dev/null 2>&1; then
+          if docker manifest inspect ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }} >/dev/null 2>&1; then
             echo "docker_exists=true" >> $GITHUB_OUTPUT
-            echo "Docker image ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} already exists, skipping publish"
+            echo "Docker image ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }} already exists, skipping publish"
           else
             echo "docker_exists=false" >> $GITHUB_OUTPUT
-            echo "Docker image ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }} does not exist, will publish"
+            echo "Docker image ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }} does not exist, will publish"
           fi
 
-      - name: Build and push production image
-        if: env.build_prod_from_scratch == 'true' && steps.check_docker.outputs.docker_exists != 'true'
+      - name: Build and push ${{ matrix.component }} image
+        if: env.build_from_scratch == 'true' && steps.check_docker.outputs.docker_exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:latest
+            ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.get_version.outputs.version }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           platforms: linux/amd64
 
-      - name: Tag and push production image (reused)
-        if: env.build_prod_from_scratch != 'true' && steps.check_docker.outputs.docker_exists != 'true'
+      - name: Tag and push ${{ matrix.component }} image (reused)
+        if: env.build_from_scratch != 'true' && steps.check_docker.outputs.docker_exists != 'true'
         run: |
-          docker tag test-prod ${{ env.DOCKER_IMAGE }}:latest
-          docker tag test-prod ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+          docker tag test-${{ matrix.component }} ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:latest
+          docker tag test-${{ matrix.component }} ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }}
           
           # Push both tags
-          docker push ${{ env.DOCKER_IMAGE }}:latest
-          docker push ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+          docker push ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:latest
+          docker push ${{ env.DOCKER_IMAGE }}/${{ matrix.component }}:${{ steps.get_version.outputs.version }}
           
-          echo "Production image tagged and pushed successfully"
+          echo "${{ matrix.component }} image tagged and pushed successfully"
 
       - name: Skip Docker publish (already exists)
         if: steps.check_docker.outputs.docker_exists == 'true'
@@ -540,16 +642,22 @@ jobs:
           body: |
             ## Docker Images
             
-            ### Production Image
+            ### Backend Image
             ```bash
-            docker pull ${{ env.DOCKER_IMAGE }}:latest
-            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:latest
+            docker pull ${{ env.DOCKER_IMAGE }}/backend:latest
+            docker run -p 8000:8000 ${{ env.DOCKER_IMAGE }}/backend:latest
+            ```
+            
+            ### Frontend Image
+            ```bash
+            docker pull ${{ env.DOCKER_IMAGE }}/frontend:latest
+            docker run -p 3000:3000 ${{ env.DOCKER_IMAGE }}/frontend:latest
             ```
             
             ### Specific Version
             ```bash
-            docker pull ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
-            docker run -p 3000:3000 -p 8000:8000 ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            docker pull ${{ env.DOCKER_IMAGE }}/backend:${{ steps.get_version.outputs.version }}
+            docker pull ${{ env.DOCKER_IMAGE }}/frontend:${{ steps.get_version.outputs.version }}
             ```
             
             ### Docker Compose (Recommended)
@@ -559,11 +667,11 @@ jobs:
             cd carla-driving-simulator-client
             
             # Run with docker-compose
-            docker-compose up --build
+            docker-compose -f docker/compose/docker-compose-full-prod.yml up --build
             
-            # Or pull the latest image and run
-            docker-compose pull
-            docker-compose up
+            # Or pull the latest images and run
+            docker-compose -f docker/compose/docker-compose-full-prod.yml pull
+            docker-compose -f docker/compose/docker-compose-full-prod.yml up
             ```
             
             ## Python Package
@@ -581,6 +689,8 @@ jobs:
             - 🎯 Scenario-based testing framework
             - 🐳 Docker and Docker Compose support
             - 📦 Multi-platform support (Linux/Windows)
+            - 🔄 Separate container deployment
+            - 📈 Automated version tracking
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -592,7 +702,8 @@ jobs:
   docs:
     name: Build and Check Documentation
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, detect-changes]
+    if: needs.detect-changes.outputs.docs-changed == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

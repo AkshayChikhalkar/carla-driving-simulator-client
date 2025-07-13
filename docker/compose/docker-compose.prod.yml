@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # Backend service (production)
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile.prod
+      args:
+        - VERSION=${VERSION:-latest}
+    image: ${DOCKER_IMAGE:-carla-simulator-client}/backend:${VERSION:-latest}
+    container_name: carla-backend-prod
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../config:/app/config:ro
+      - ../../logs:/app/logs
+      - ../../reports:/app/reports
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@database:5432/carla_simulator}
+      - CARLA_HOST=${CARLA_HOST:-localhost}
+      - CARLA_PORT=${CARLA_PORT:-2000}
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-false}
+      - TESTING=${TESTING:-false}
+      - VERSION=${VERSION:-latest}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    networks:
+      - carla-network
+    depends_on:
+      - database
+
+  # Frontend service (production)
+  frontend:
+    build:
+      context: ../..
+      dockerfile: docker/frontend/Dockerfile.prod
+      args:
+        - VERSION=${VERSION:-latest}
+    image: ${DOCKER_IMAGE:-carla-simulator-client}/frontend:${VERSION:-latest}
+    container_name: carla-frontend-prod
+    ports:
+      - "80:80"
+    environment:
+      - VERSION=${VERSION:-latest}
+      - REACT_APP_API_URL=http://localhost:8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - carla-network
+    depends_on:
+      - backend
+
+  # Database service
+  database:
+    image: postgres:15-alpine
+    container_name: carla-database-prod
+    environment:
+      POSTGRES_DB: carla_simulator
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ../../database/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - carla-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  carla-network:
+    driver: bridge
+
+volumes:
+  postgres_data_prod: 
