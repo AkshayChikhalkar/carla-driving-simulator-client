@@ -253,7 +253,7 @@ class DocumentationAutomator:
     
     def _generate_deployment_mmd(self):
         """Generate deployment diagram from docker-compose files."""
-        docker_compose_file = self.project_root / "docker-compose.yml"
+        docker_compose_file = self.project_root / "docker" / "compose" / "docker-compose-full-prod.yml"
         
         if docker_compose_file.exists():
             mmd_content = [
