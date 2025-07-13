@@ -24,6 +24,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - DEBUG=${DEBUG:-true}
       - TESTING=${TESTING:-false}
+      - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}
+      - VERSION=${DOCKER_IMAGE_TAG}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/scenarios"]

@@ -7,17 +7,22 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get update && apt-get install -y \
-        lsof \
-        procps \
-        libstdc++6 \
-        libgcc1 \
-        libx11-6 \
-        libpthread-stubs0-dev \
+    lsof \
+    procps \
+    libstdc++6 \
+    libgcc1 \
+    libx11-6 \
+    libpthread-stubs0-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 ARG IMAGE_TAG=dev
+ARG VERSION=dev
 ENV DOCKER_IMAGE_TAG=$IMAGE_TAG
+ENV VERSION=$VERSION
+
+# Create version file for application access
+RUN echo "$VERSION" > /app/version.txt
 
 WORKDIR /app
 
