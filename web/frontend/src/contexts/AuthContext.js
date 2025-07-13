@@ -21,20 +21,27 @@ export const AuthProvider = ({ children }) => {
     const userData = localStorage.getItem('user');
     
     if (token && userData) {
-      try {
-        const user = JSON.parse(userData);
-        setUser(user);
-        logger.info(`AuthContext: Loaded user from localStorage: ${user.username}`);
-      } catch (error) {
-        logger.error('AuthContext: Error parsing user data:', error);
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('session_token');
-        localStorage.removeItem('user');
-      }
+      fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Invalid token');
+          return res.json();
+        })
+        .then(user => {
+          setUser(user);
+          logger.info(`AuthContext: Loaded user from backend: ${user.username}`);
+        })
+        .catch(() => {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('session_token');
+          localStorage.removeItem('user');
+          setUser(null);
+        })
+        .finally(() => setLoading(false));
     } else {
-      logger.info('AuthContext: No user found in localStorage');
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const login = (userData) => {

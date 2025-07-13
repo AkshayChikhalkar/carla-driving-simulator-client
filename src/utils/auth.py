@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from jwt import ExpiredSignatureError
 
 # JWT Configuration
 JWT_SECRET_KEY = "your-secret-key-change-in-production"
@@ -79,10 +80,13 @@ def create_jwt_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = 
 
 
 def verify_jwt_token(token: str) -> Optional[Dict[str, Any]]:
-    """Verify and decode a JWT token"""
+    """Verify and decode a JWT token, including expiration check"""
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         return payload
+    except ExpiredSignatureError:
+        # Token is expired
+        return None
     except jwt.PyJWTError:
         return None
 

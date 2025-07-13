@@ -398,6 +398,7 @@ jobs:
             ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
           build-args: |
             IMAGE_TAG=${{ steps.get_version.outputs.version }}
+            DOCKER_IMAGE_TAG=${{ steps.get_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
@@ -414,6 +415,11 @@ jobs:
           docker push ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
           
           echo "Production image tagged and pushed successfully"
+
+      - name: Set DOCKER_IMAGE_TAG environment variable
+        run: |
+          echo "DOCKER_IMAGE_TAG=${{ steps.get_version.outputs.version }}" >> $GITHUB_ENV
+          echo "Set DOCKER_IMAGE_TAG=${{ steps.get_version.outputs.version }}"
 
       - name: Skip Docker publish (already exists)
         if: steps.check_docker.outputs.docker_exists == 'true'

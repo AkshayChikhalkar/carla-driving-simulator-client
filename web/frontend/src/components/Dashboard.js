@@ -215,19 +215,6 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 status_message: data.status_message || 'Ready to Start'
               });
 
-              if (process.env.NODE_ENV !== 'production') {
-                console.log('WebSocket received:', {
-                  is_running: data.is_running,
-                  is_starting: data.is_starting,
-                  is_stopping: data.is_stopping,
-                  is_skipping: data.is_skipping,
-                  status_message: data.status_message,
-                  local_isStarting: isStarting,
-                  local_isStopping: isStopping,
-                  local_isSkipping: isSkipping
-                });
-              }
-
               // Debug: Log when is_starting is true
               if (data.is_starting) {
                 console.log('Backend reports is_starting=True');
