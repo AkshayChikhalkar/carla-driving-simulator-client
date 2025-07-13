@@ -110,7 +110,7 @@ function AppContent() {
           userSelect: 'none',
         }}
       >
-        {typeof version === 'string' ? version : String(version)}
+        {`Version: ${typeof version === 'string' ? version : String(version)}`}
       </Box>
       </ThemeProvider>
     );

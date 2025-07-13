@@ -325,21 +325,6 @@ function Layout({ children }) {
         </Box>
       </Box>
 
-      <Box
-        sx={{
-          position: 'fixed',
-          bottom: 8,
-          left: 16,
-          zIndex: 1300,
-          color: 'rgba(255,255,255,0.5)',
-          fontSize: 13,
-          fontFamily: 'Roboto, sans-serif',
-          letterSpacing: 1,
-          userSelect: 'none',
-        }}
-      >
-        {typeof version === 'string' ? version : String(version)}
-      </Box>
       <Dialog open={changePwdOpen} onClose={handleChangePwdClose} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ pb: 0, pt: 2}}>Change Password</DialogTitle>
         <form onSubmit={handlePwdSubmit} autoComplete="off">
@@ -445,31 +430,4 @@ function Layout({ children }) {
   );
 }
 
-function VersionLabel() {
-  return (
-    <MuiBox
-      sx={{
-        position: 'fixed',
-        left: 12,
-        bottom: 12,
-        zIndex: 2000,
-        background: 'none',
-        boxShadow: 'none',
-        p: 0,
-      }}
-    >
-      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, fontSize: 14, letterSpacing: 1 }}>
-        Version: dev_v1.4.2
-      </Typography>
-    </MuiBox>
-  );
-}
-
-export default function LayoutWithVersion(props) {
-  return (
-    <>
-      <Layout {...props} />
-      <VersionLabel />
-    </>
-  );
-} 
+export default Layout; 
