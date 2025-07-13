@@ -60,6 +60,9 @@ A personal project for experimenting with CARLA client, featuring vehicle contro
 - **Automatic versioning and CI/CD pipeline**
 - **Docker support with zero-configuration setup**
 - **Web-based frontend and backend API**
+- **🆕 Separate container deployment for better scalability**
+- **🆕 Automated change detection and selective builds**
+- **🆕 Version tracking with build information display**
 
 ## Requirements
 
@@ -76,6 +79,24 @@ A personal project for experimenting with CARLA client, featuring vehicle contro
 ## Installation
 
 ### From Docker (Recommended)
+
+#### Separate Containers (New - Recommended)
+```bash
+# Quick start with organized scripts
+./scripts/docker/run-dev.sh          # Development
+./scripts/docker/run-staging.sh      # Staging
+./scripts/docker/run-prod.sh         # Production
+
+# Run specific services only
+./scripts/docker/run-dev.sh backend  # Backend only
+./scripts/docker/run-dev.sh frontend # Frontend only
+./scripts/docker/run-dev.sh full     # Full stack
+
+# Manual deployment with organized compose files
+docker-compose -f docker/compose/docker-compose-full-dev.yml up --build -d
+```
+
+#### Monolithic Container (Legacy)
 ```bash
 # Pull the latest image
 docker pull akshaychikhalkar/carla-driving-simulator-client:latest
@@ -144,27 +165,90 @@ The simulator client can be configured through the `config/simulation_config.yam
 
 ```
 carla-driving-simulator-client/
-├── src/
-│   ├── core/
-│   │   ├── world.py
-│   │   ├── vehicle.py
-│   │   └── sensors.py
-│   ├── visualization/
-│   │   ├── hud.py
-│   │   ├── minimap.py
-│   │   └── camera.py
-│   ├── control/
-│   │   ├── keyboard.py
-│   │   └── autopilot.py
-│   └── utils/
-│       ├── config.py
-│       └── logging.py
+├── src/                          # Backend source code
+│   ├── core/                     # Core simulation components
+│   ├── visualization/            # Visualization modules
+│   ├── control/                  # Vehicle control systems
+│   └── utils/                    # Utility functions
+├── web/
+│   ├── backend/                  # FastAPI backend
+│   └── frontend/                 # React frontend
+├── docker/                       # 🆕 Organized Docker files
+│   ├── backend/                  # Backend Dockerfiles
+│   ├── frontend/                 # Frontend Dockerfiles
+│   ├── nginx/                    # Nginx configuration
+│   └── compose/                  # Docker Compose files
+│       ├── docker-compose-full-dev.yml
+│       ├── docker-compose-full-staging.yml
+│       ├── docker-compose-full-prod.yml
+│       ├── docker-compose-backend-*.yml
+│       └── docker-compose-frontend-*.yml
+├── scripts/
+│   ├── docker/                   # 🆕 Organized Docker scripts
+│   │   ├── run-dev.sh
+│   │   ├── run-staging.sh
+│   │   └── run-prod.sh
+│   ├── deployment/               # 🆕 Deployment scripts
+│   └── start.sh                 # Main startup script
+├── docs/
+│   ├── deployment/               # 🆕 Deployment documentation
+│   └── development/              # 🆕 Development documentation
 ├── tests/
 ├── config/
-├── docs/
 ├── requirements.txt
 └── README.md
 ```
+
+## Container Architecture
+
+The application now supports both monolithic and separate container deployments:
+
+- **Backend Container**: FastAPI application with Python dependencies
+- **Frontend Container**: React application served by Nginx
+- **Database Container**: PostgreSQL database
+- **Monitoring Containers**: Prometheus and Grafana (optional)
+
+See [docs/deployment/SEPARATE_CONTAINERS.md](docs/deployment/SEPARATE_CONTAINERS.md) for detailed documentation.
+
+## 🧪 **Development & Staging Workflow**
+
+For development, staging, and production deployment:
+
+### Development
+1. **Start Development Environment**:
+   ```bash
+   ./scripts/run-separate.sh dev
+   ```
+
+2. **Run Development Tests**:
+   ```bash
+   ./scripts/test-dev-setup.sh
+   ```
+
+3. **Test Features**:
+   ```bash
+   curl http://localhost:8000/api/scenarios
+   curl http://localhost:3000
+   ```
+
+### Staging
+1. **Start Staging Environment**:
+   ```bash
+   ./scripts/run-separate.sh staging
+   ```
+
+2. **Run Staging Tests**:
+   ```bash
+   ./scripts/test-staging-setup.sh
+   ```
+
+3. **Test Staging Features**:
+   ```bash
+   curl http://localhost:8001/api/scenarios
+   curl http://localhost:3001
+   ```
+
+See [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) and [BRANCH_STRATEGY.md](BRANCH_STRATEGY.md) for detailed guidelines.
 
 ## Contributing
 
