@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
@@ -73,6 +73,24 @@ function Layout({ children }) {
   const [showCurrent, setShowCurrent] = React.useState(false);
   const [showNew, setShowNew] = React.useState(false);
   const [showConfirm, setShowConfirm] = React.useState(false);
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    fetch('/api/version')
+      .then(res => res.json())
+      .then(data => {
+        let safeVersion = 'dev';
+        if (data && typeof data === 'object' && data.version) {
+          safeVersion = typeof data.version === 'string' ? data.version : String(data.version);
+        } else if (typeof data === 'string') {
+          safeVersion = data;
+        } else if (data) {
+          safeVersion = String(data);
+        }
+        setVersion(safeVersion);
+      })
+      .catch(() => setVersion('dev'));
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -303,6 +321,22 @@ function Layout({ children }) {
           <Toolbar />
           {children}
         </Box>
+      </Box>
+
+      <Box
+        sx={{
+          position: 'fixed',
+          bottom: 8,
+          left: 16,
+          zIndex: 1300,
+          color: 'rgba(255,255,255,0.5)',
+          fontSize: 13,
+          fontFamily: 'Roboto, sans-serif',
+          letterSpacing: 1,
+          userSelect: 'none',
+        }}
+      >
+        {typeof version === 'string' ? version : String(version)}
       </Box>
       <Dialog open={changePwdOpen} onClose={handleChangePwdClose} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ pb: 0, pt: 2}}>Change Password</DialogTitle>

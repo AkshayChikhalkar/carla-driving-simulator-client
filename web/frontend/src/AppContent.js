@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import { Box } from '@mui/material';
 import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import Layout from './components/Layout';
@@ -31,6 +32,24 @@ const theme = createTheme({
 function AppContent() {
   const { user, login, register } = useAuth();
   const location = useLocation();
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    fetch('/api/version')
+      .then(res => res.json())
+      .then(data => {
+        let safeVersion = 'dev';
+        if (data && typeof data === 'object' && data.version) {
+          safeVersion = typeof data.version === 'string' ? data.version : String(data.version);
+        } else if (typeof data === 'string') {
+          safeVersion = data;
+        } else if (data) {
+          safeVersion = String(data);
+        }
+        setVersion(safeVersion);
+      })
+      .catch(() => setVersion('dev'));
+  }, []);
 
   // Log app start
   useEffect(() => {
@@ -76,26 +95,25 @@ function AppContent() {
         <Route path="/logs" element={<ProtectedRoute><Layout><Logs /></Layout></ProtectedRoute>} />
         <Route path="/logs/:filename" element={<ProtectedRoute><Layout><Logs /></Layout></ProtectedRoute>} />
         <Route path="/analytics" element={<ProtectedRoute><Layout><Analytics /></Layout></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
-      {/* Removed the top-left logo from all pages */}
-      <div
-        style={{
+      <Box
+        sx={{
           position: 'fixed',
-          bottom: 12,
+          bottom: 8,
           left: 16,
-          zIndex: 1200,
+          zIndex: 1300,
           color: 'rgba(255,255,255,0.5)',
           fontSize: 13,
-          fontFamily: 'Roboto, Arial, sans-serif',
-          letterSpacing: 0.5,
+          fontFamily: 'Roboto, sans-serif',
+          letterSpacing: 1,
           userSelect: 'none',
         }}
       >
-        dev_v1.0.7
-      </div>
-    </ThemeProvider>
-  );
+        {typeof version === 'string' ? version : String(version)}
+      </Box>
+      </ThemeProvider>
+    );
 }
 
 export default AppContent; 

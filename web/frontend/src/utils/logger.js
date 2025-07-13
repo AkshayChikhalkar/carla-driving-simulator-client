@@ -80,7 +80,7 @@ class Logger {
         throw new Error('Failed to write log header');
       }
       
-      console.log('File logging initialized successfully');
+      //console.log('File logging initialized successfully');
     } catch (error) {
       console.error('Failed to initialize file logging:', error);
       this.config.logToFile = false;
@@ -170,7 +170,7 @@ class Logger {
     if (this.config.logToFile) {
       try {
         await fetch(`${this.apiBaseUrl}/api/logs/close`, { method: 'POST' });
-        console.log('Log file closed successfully');
+        //('Log file closed successfully');
       } catch (error) {
         console.error('Error closing log file:', error);
       }

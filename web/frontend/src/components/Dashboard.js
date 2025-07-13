@@ -64,7 +64,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   useEffect(() => {
     // Reset isStarting when backend confirms start is complete
     if (isStarting && backendState.is_running && !backendState.is_starting) {
-      console.log('Immediate reset: Backend confirmed start complete');
+      //console.log('Immediate reset: Backend confirmed start complete');
       setIsStarting(false);
     }
   }, [isStarting, backendState.is_running, backendState.is_starting]);
@@ -72,7 +72,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   useEffect(() => {
     // Reset isStopping when backend confirms stop is complete
     if (isStopping && !backendState.is_running && !backendState.is_stopping) {
-      console.log('Immediate reset: Backend confirmed stop complete');
+      //console.log('Immediate reset: Backend confirmed stop complete');
       setIsStopping(false);
     }
   }, [isStopping, backendState.is_running, backendState.is_stopping]);
@@ -80,7 +80,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   useEffect(() => {
     // Reset isSkipping when backend confirms skip is complete
     if (isSkipping && !backendState.is_skipping) {
-      console.log('Immediate reset: Backend confirmed skip complete');
+      //console.log('Immediate reset: Backend confirmed skip complete');
       setIsSkipping(false);
     }
   }, [isSkipping, backendState.is_skipping]);
@@ -91,7 +91,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       // Backend confirmed start is complete but frontend didn't reset
       const timer = setTimeout(() => {
         if (isStarting && backendState.is_running && !backendState.is_starting) {
-          console.log('Fallback: Resetting isStarting flag after timeout');
+          //console.log('Fallback: Resetting isStarting flag after timeout');
           setIsStarting(false);
         }
       }, 5000); // 5 second timeout
@@ -105,7 +105,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       // Backend confirmed stop is complete but frontend didn't reset
       const timer = setTimeout(() => {
         if (isStopping && !backendState.is_running && !backendState.is_stopping) {
-          console.log('Fallback: Resetting isStopping flag after timeout');
+          //console.log('Fallback: Resetting isStopping flag after timeout');
           setIsStopping(false);
         }
       }, 5000); // 5 second timeout
@@ -119,7 +119,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       // Backend confirmed skip is complete but frontend didn't reset
       const timer = setTimeout(() => {
         if (isSkipping && !backendState.is_skipping) {
-          console.log('Fallback: Resetting isSkipping flag after timeout');
+          //console.log('Fallback: Resetting isSkipping flag after timeout');
           setIsSkipping(false);
         }
       }, 5000); // 5 second timeout
@@ -138,7 +138,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         (!backendState.is_running && !backendState.is_starting && !backendState.is_stopping && !backendState.is_skipping) // simulation stopped
       )
     ) {
-      console.log('Refined: Backend confirmed skip complete and new scenario running or stopped');
+      //console.log('Refined: Backend confirmed skip complete and new scenario running or stopped');
       setIsSkipping(false);
     }
   }, [isSkipping, backendState.is_skipping, backendState.is_running, backendState.is_starting, backendState.is_stopping]);
@@ -169,7 +169,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
       ws.onopen = () => {
         if (process.env.NODE_ENV !== 'production') {
-          console.log('WebSocket connection opened');
+          //console.log('WebSocket connection opened');
         }
         setStatus('Connected to simulation server');
       };
@@ -249,7 +249,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 // Backend confirmed start is complete, but wait a bit to ensure UX feedback
                 setTimeout(() => {
                   if (process.env.NODE_ENV !== 'production') {
-                    console.log('Resetting isStarting flag - backend confirmed start complete');
+                    //console.log('Resetting isStarting flag - backend confirmed start complete');
                   }
                   setIsStarting(false);
                 }, 1000); // Wait 1 second to ensure "Starting..." is visible
@@ -257,14 +257,14 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               if (isStopping && !data.is_running && !data.is_stopping) {
                 // Backend confirmed stop is complete
                 if (process.env.NODE_ENV !== 'production') {
-                  console.log('Resetting isStopping flag - backend confirmed stop complete');
+                  //console.log('Resetting isStopping flag - backend confirmed stop complete');
                 }
                 setIsStopping(false);
               }
               if (isSkipping && !data.is_skipping) {
                 // Backend confirmed skip is complete
                 if (process.env.NODE_ENV !== 'production') {
-                  console.log('Resetting isSkipping flag - backend confirmed skip complete');
+                  //console.log('Resetting isSkipping flag - backend confirmed skip complete');
                 }
                 setIsSkipping(false);
               }
@@ -275,7 +275,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 setStatus(data.status_message || 'Hang on,\nLoading Simulation...');
                 
                 if (process.env.NODE_ENV !== 'production') {
-                  console.log('Setting status to "Starting simulation..." (isStarting=', isStarting, ', data.is_starting=', data.is_starting, ')');
+                  //console.log('Setting status to "Starting simulation..." (isStarting=', isStarting, ', data.is_starting=', data.is_starting, ')');
                 }
               } else if (isStopping || data.is_stopping) {
                 // Show stopping message if either frontend or backend thinks we're stopping
@@ -287,7 +287,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 
                 // Clear canvas when skipping to remove old frames
                 if (data.is_skipping) {
-                  console.log('WebSocket: Backend confirmed skipping state, clearing canvas');
+                  //console.log('WebSocket: Backend confirmed skipping state, clearing canvas');
                   const canvas = canvasRef.current;
                   if (canvas) {
                     const ctx = canvas.getContext('2d');
@@ -300,7 +300,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   setHasReceivedFrame(false);
                 } else {
                   // Skipping is complete, restore canvas display
-                  console.log('WebSocket: Skipping complete, restoring canvas display');
+                  //console.log('WebSocket: Skipping complete, restoring canvas display');
                   const canvas = canvasRef.current;
                   if (canvas) {
                     canvas.style.display = '';
@@ -311,7 +311,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 // Trust the backend status message for other states
                 setStatus(data.status_message || 'Ready to Start');
                 if (process.env.NODE_ENV !== 'production') {
-                  console.log('Setting status to backend message:', data.status_message || 'Ready to Start');
+                  //console.log('Setting status to backend message:', data.status_message || 'Ready to Start');
                 }
               }
 
@@ -322,7 +322,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
               if (data.is_running && !isRunning) {
                 setIsRunning(true);
                 if (process.env.NODE_ENV !== 'production') {
-                  console.log('Synced local isRunning state with backend on reconnection');
+                  //console.log('Synced local isRunning state with backend on reconnection');
                 }
               }
             }
@@ -334,13 +334,13 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             // Block drawing if skipping, but still track frame reception
             if (isSkipping || backendState.is_skipping) {
               if (process.env.NODE_ENV !== 'production') {
-                console.log('Skipping: Not drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
+                //console.log('Skipping: Not drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
               }
               return;
             }
             
             if (process.env.NODE_ENV !== 'production') {
-              console.log('Drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
+              //console.log('Drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
             }
             
             const img = new Image();
@@ -385,7 +385,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setError(null);
 
     if (process.env.NODE_ENV !== 'production') {
-      console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
+      //console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
     }
     try {
       await axios.post(`${API_BASE_URL}/simulation/start`, {
@@ -429,7 +429,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     // All buttons should be disabled if any transition state is active
     const disabled = isStarting || isStopping || isSkipping;
     if (process.env.NODE_ENV !== 'production') {
-      console.log('isAnyButtonDisabled:', { isStarting, isStopping, isSkipping, disabled });
+      //console.log('isAnyButtonDisabled:', { isStarting, isStopping, isSkipping, disabled });
     }
     return disabled;
   };
@@ -529,7 +529,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
 
   // Add skip scenario handler
   const handleSkipScenario = async () => {
-    console.log('handleSkipScenario: Starting skip process');
+    //console.log('handleSkipScenario: Starting skip process');
     
     // Set states immediately for instant visual feedback
     setIsSkipping(true);
@@ -547,22 +547,22 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
       // Force hide canvas immediately
       canvas.style.display = 'none';
       canvas.style.opacity = '0';
-      console.log('handleSkipScenario: Canvas cleared and hidden');
+      //console.log('handleSkipScenario: Canvas cleared and hidden');
     }
     
     // Force a re-render to ensure overlay appears immediately
     setTimeout(() => {
       if (isSkipping) {
-        console.log('handleSkipScenario: Ensuring overlay is visible');
+        //console.log('handleSkipScenario: Ensuring overlay is visible');
       }
     }, 0);
     
     try {
       await axios.post(`${API_BASE_URL}/simulation/skip`);
-      console.log('handleSkipScenario: Skip API call successful');
+      //console.log('handleSkipScenario: Skip API call successful');
       // Do not reset isSkipping here; let WebSocket handle it
     } catch (e) {
-      console.log('handleSkipScenario: Skip API call failed', e);
+      //console.log('handleSkipScenario: Skip API call failed', e);
       setIsSkipping(false);
       setStatus('Ready to Start');
       setError('Failed to skip scenario');
