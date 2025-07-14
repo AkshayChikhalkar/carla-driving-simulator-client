@@ -37,8 +37,6 @@ const VersionDisplay = () => {
     fetchVersion();
   }, []);
 
-  console.log('VersionDisplay rendering with version:', version); // Debug log
-
   return (
     <Box
       sx={{
