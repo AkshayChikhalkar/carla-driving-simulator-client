@@ -188,6 +188,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: akshaychikhalkar/carla-driving-simulator-client
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   docker-build-test:
     name: Test Docker Builds and Save Images
@@ -224,6 +226,8 @@ jobs:
         run: |
           docker build -f Dockerfile.dev -t test-dev .
           echo "Development Dockerfile builds successfully"
+        env:
+          skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Test Docker Compose
         run: |
@@ -245,6 +249,8 @@ jobs:
         run: |
           docker save test-dev | gzip > development-image.tar.gz
           echo "Development image saved as artifact"
+        env:
+          skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Upload Docker images as artifacts
         uses: actions/upload-artifact@v4
@@ -254,6 +260,8 @@ jobs:
             production-image.tar.gz
             development-image.tar.gz
           retention-days: 1
+        env:
+          skip_dev_build: ${{ env.skip_dev_build }}
 
   build:
     needs: [test, docker-build-test, version-bump]
@@ -303,6 +311,8 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
+        env:
+          build_time: ${{ needs.version-bump.outputs.build_time }}
 
       - name: Build Python package
         run: |
@@ -338,6 +348,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -360,6 +373,8 @@ jobs:
             echo "Production image artifact not found, will build from scratch"
             echo "build_prod_from_scratch=true" >> $GITHUB_ENV
           fi
+        env:
+          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
 
       - name: Load development image
         run: |
@@ -413,6 +428,9 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           platforms: linux/amd64
+        env:
+          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
+          build_time: ${{ steps.get_version.outputs.build_time }}
 
       - name: Tag and push production image (reused)
         if: env.build_prod_from_scratch != 'true' && steps.check_docker.outputs.docker_exists != 'true'
@@ -425,6 +443,8 @@ jobs:
           docker push ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
           
           echo "Production image tagged and pushed successfully"
+        env:
+          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
 
       - name: Set DOCKER_IMAGE_TAG environment variable
         run: |
@@ -477,6 +497,8 @@ jobs:
             exit 1
           fi
           echo "PyPI token is set"
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
       - name: List files to upload
         run: ls -la dist/
@@ -513,6 +535,7 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
   github-release:
     needs: [build, docker-publish, pypi-publish]

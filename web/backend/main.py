@@ -45,8 +45,32 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 frontend_build_dir = os.path.join(os.path.dirname(__file__), "../../web/frontend/build")
-if os.path.exists(frontend_build_dir):
-    app.mount("/app", StaticFiles(directory=frontend_build_dir, html=True), name="static")
+
+# Custom middleware to handle React routing
+@app.middleware("http")
+async def react_routing_middleware(request: Request, call_next):
+    # Let API routes pass through
+    if request.url.path.startswith("/api/") or request.url.path.startswith("/health") or request.url.path.startswith("/metrics"):
+        return await call_next(request)
+    
+    # Check if the request is for a static file (CSS, JS, images)
+    if os.path.exists(frontend_build_dir):
+        static_file_path = os.path.join(frontend_build_dir, request.url.path.lstrip("/"))
+        if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
+            return FileResponse(static_file_path)
+    
+    # For all other routes, serve the React app
+    if os.path.exists(frontend_build_dir):
+        index_path = os.path.join(frontend_build_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type="text/html")
+    
+    # If React build doesn't exist, continue with normal processing
+    return await call_next(request)
+
+# Remove the StaticFiles mount since we're handling it in middleware
+# if os.path.exists(frontend_build_dir):
+#     app.mount("/", StaticFiles(directory=frontend_build_dir, html=False), name="static")
 
 # Prometheus metrics
 # Counters
@@ -521,10 +545,33 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_uncaught_exception
 
 
-@app.get("/")
-async def root():
-    """Root endpoint for health check"""
-    return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
+# Remove the custom root and catch-all routes since StaticFiles will handle them
+# @app.get("/")
+# async def root():
+#     """Serve React app index.html for root and non-API routes"""
+#     if os.path.exists(frontend_build_dir):
+#         index_path = os.path.join(frontend_build_dir, "index.html")
+#         if os.path.exists(index_path):
+#             return FileResponse(index_path, media_type="text/html")
+#     
+#     # Fallback if React build doesn't exist
+#     return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
+
+# # Catch-all route for React client-side routing
+# @app.get("/{full_path:path}")
+# async def catch_all(full_path: str):
+#     """Serve React app for all non-API routes to support client-side routing"""
+#     # Don't serve React app for API routes
+#     if full_path.startswith("api/") or full_path.startswith("health") or full_path.startswith("metrics"):
+#         raise HTTPException(status_code=404, detail="Not found")
+#     
+#     # Serve React app for all other routes
+#     if os.path.exists(frontend_build_dir):
+#         index_path = os.path.join(frontend_build_dir, "index.html")
+#         if os.path.exists(index_path):
+#             return FileResponse(index_path, media_type="text/html")
+#     
+#     raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/health")
