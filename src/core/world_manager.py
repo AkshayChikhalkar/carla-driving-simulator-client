@@ -49,6 +49,7 @@ class WorldManager(IWorldManager):
         self.target: Optional[TargetPoint] = None
         self._traffic_actors: List[carla.Actor] = []
         self._scenario_actors: List[carla.Actor] = []  # Track scenario-specific actors
+        self._sensor_actors: List[carla.Actor] = []  # Track sensor actors
         self.traffic_manager = None
         self.traffic_manager_port = 8001  # Default port for traffic manager
         self.max_reconnect_attempts = 3
@@ -528,6 +529,15 @@ class WorldManager(IWorldManager):
         """Get the traffic manager port"""
         return self.traffic_manager_port
 
+    def get_all_tracked_actors(self) -> Dict[str, List[carla.Actor]]:
+        """Get all tracked actors for debugging purposes"""
+        return {
+            "traffic": self._traffic_actors.copy(),
+            "scenario": self._scenario_actors.copy(),
+            "sensors": self._sensor_actors.copy(),
+            "vehicle": [self.vehicle] if self.vehicle else []
+        }
+
     def generate_target_point(self, spawn_point: carla.Transform) -> TargetPoint:
         """Generate a target point at specified distance from spawn point"""
         target_dist = self.config.target_distance
@@ -619,32 +629,97 @@ class WorldManager(IWorldManager):
             self.logger.error(f"Error spawning scenario actor {blueprint_id}: {str(e)}")
             return None
 
+    def track_sensor_actor(self, sensor_actor: carla.Actor) -> None:
+        """Track a sensor actor for cleanup"""
+        if sensor_actor:
+            self._sensor_actors.append(sensor_actor)
+            self.logger.debug(f"Tracking sensor actor: {sensor_actor.type_id} (ID: {sensor_actor.id})")
+
     def cleanup(self) -> None:
         """Clean up resources"""
         try:
+            self.logger.info("Starting world manager cleanup...")
+            
+            # Track cleanup statistics
+            destroyed_actors = 0
+            failed_destroy_actors = 0
+            
             # Destroy all actors
             if self.vehicle and self.vehicle.is_alive:
                 try:
+                    self.logger.debug(f"Destroying vehicle: {self.vehicle.type_id} (ID: {self.vehicle.id})")
                     self.vehicle.destroy()
+                    destroyed_actors += 1
                 except Exception as e:
                     self.logger.warning(f"Error destroying vehicle: {str(e)}")
+                    failed_destroy_actors += 1
 
             # Safely destroy traffic and scenario actors
-            for actor in self._traffic_actors + self._scenario_actors:
+            all_actors = self._traffic_actors + self._scenario_actors + self._sensor_actors
+            self.logger.debug(f"Found {len(all_actors)} actors to destroy: {len(self._traffic_actors)} traffic, {len(self._scenario_actors)} scenario, {len(self._sensor_actors)} sensors")
+            
+            for actor in all_actors:
                 try:
                     if actor and actor.is_alive:
+                        self.logger.debug(f"Destroying actor: {actor.type_id} (ID: {actor.id})")
                         actor.destroy()
+                        destroyed_actors += 1
+                    elif actor:
+                        self.logger.debug(f"Actor already destroyed: {actor.type_id} (ID: {actor.id})")
                 except Exception as e:
-                    self.logger.warning(f"Error destroying actor: {str(e)}")
+                    self.logger.warning(f"Error destroying actor {actor.type_id if actor else 'Unknown'} (ID: {actor.id if actor else 'Unknown'}): {str(e)}")
+                    failed_destroy_actors += 1
 
+            # Clear the lists
             self._traffic_actors.clear()
             self._scenario_actors.clear()
+            self._sensor_actors.clear()
+            
+            # Add a small delay to ensure actors are destroyed
+            time.sleep(0.2)
+            
+            # Verify cleanup by checking if any actors are still alive
+            remaining_alive = 0
+            for actor in all_actors:
+                if actor and hasattr(actor, 'is_alive') and actor.is_alive:
+                    remaining_alive += 1
+                    self.logger.warning(f"Actor still alive after destroy: {actor.type_id} (ID: {actor.id})")
+            
+            self.logger.info(f"World manager cleanup completed: {destroyed_actors} actors destroyed, {failed_destroy_actors} failed, {remaining_alive} still alive")
 
             # Reset world reference
             self.world = None
 
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")
+            raise
+
+    def force_cleanup_all_actors(self) -> None:
+        """Force cleanup of all actors in the world, including untracked ones"""
+        try:
+            if not self.world:
+                return
+                
+            self.logger.info("Force cleaning up all actors in world...")
+            
+            # Get all actors in the world
+            all_world_actors = self.world.get_actors()
+            self.logger.debug(f"Found {len(all_world_actors)} total actors in world")
+            
+            destroyed_count = 0
+            for actor in all_world_actors:
+                try:
+                    if actor and actor.is_alive:
+                        self.logger.debug(f"Force destroying actor: {actor.type_id} (ID: {actor.id})")
+                        actor.destroy()
+                        destroyed_count += 1
+                except Exception as e:
+                    self.logger.warning(f"Error force destroying actor {actor.type_id if actor else 'Unknown'} (ID: {actor.id if actor else 'Unknown'}): {str(e)}")
+            
+            self.logger.info(f"Force cleanup completed: {destroyed_count} actors destroyed")
+            
+        except Exception as e:
+            self.logger.error(f"Error during force cleanup: {str(e)}")
             raise
 
     def get_blueprint_library(self) -> carla.BlueprintLibrary:

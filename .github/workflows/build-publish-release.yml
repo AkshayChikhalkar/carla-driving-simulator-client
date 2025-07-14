@@ -141,6 +141,13 @@ jobs:
             echo "Pushed tag: $TAG_NAME"
           fi
 
+      - name: Set build time
+        id: build_time
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "Build time: $BUILD_TIME"
+
   test:
     name: Run tests and collect coverage
     runs-on: ubuntu-latest
@@ -254,6 +261,7 @@ jobs:
     if: github.event_name == 'push' || inputs.run_build == 'true'
     outputs:
       version: ${{ steps.get_version.outputs.version }}
+      build_time: ${{ needs.version-bump.outputs.build_time }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -400,6 +408,7 @@ jobs:
             IMAGE_TAG=${{ steps.get_version.outputs.version }}
             DOCKER_IMAGE_TAG=${{ steps.get_version.outputs.version }}
             VERSION=${{ steps.get_version.outputs.version }}
+            BUILD_TIME=${{ steps.get_version.outputs.build_time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true

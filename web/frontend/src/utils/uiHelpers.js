@@ -174,16 +174,32 @@ export const getInstructionMessage = ({
     return '';
   }
   
+  // Helper function to get progress text
+  const getProgressText = () => {
+    if (backendState.scenario_index && backendState.total_scenarios) {
+      return ` (${backendState.scenario_index}/${backendState.total_scenarios})`;
+    }
+    return '';
+  };
+  
+  // Helper function to get current scenario name
+  const getCurrentScenarioName = () => {
+    if (backendState.current_scenario) {
+      return `\nCurrent: ${backendState.current_scenario}`;
+    }
+    return '';
+  };
+  
   if (isStarting || backendState.is_starting) {
-    return 'Starting simulation...\nPlease wait while the system initializes';
+    return `Please wait while the system initializes`;
   }
   
   if (isStopping || backendState.is_stopping) {
-    return 'Stopping simulation...\nPlease wait while the system shuts down';
+    return `\nPlease wait while the system shuts down`;
   }
   
   if (isSkipping || backendState.is_skipping) {
-    return 'Skipping scenario...\nPlease wait while transitioning';
+    return `Skipping scenario...${getProgressText()}${getCurrentScenarioName()}`;
   }
   
   return 'Click Start button to start the simulation';
