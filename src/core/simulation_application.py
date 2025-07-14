@@ -533,10 +533,19 @@ class SimulationApplication:
             if self.world_manager:
                 self.logger.debug("Cleaning up world manager...")
                 try:
+                    # Debug: Show tracked actors before cleanup
+                    if hasattr(self.world_manager, 'get_all_tracked_actors'):
+                        tracked_actors = self.world_manager.get_all_tracked_actors()
+                        self.logger.debug(f"Tracked actors before cleanup: {tracked_actors}")
+                    
                     # First destroy all actors including the vehicle
                     self.world_manager.cleanup()
                     # Add a small delay to ensure actors are destroyed
                     time.sleep(0.5)
+                    
+                    # Force cleanup as fallback to ensure all actors are destroyed
+                    if hasattr(self.world_manager, 'force_cleanup_all_actors'):
+                        self.world_manager.force_cleanup_all_actors()
                 except Exception as e:
                     self.logger.error(f"Error cleaning up world manager: {str(e)}")
 

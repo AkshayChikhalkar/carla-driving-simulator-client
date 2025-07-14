@@ -89,15 +89,20 @@ class SensorSubject(ABC):
 class CollisionSensor(SensorSubject):
     """Collision detection sensor"""
 
-    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any]):
+    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any], world_manager=None):
         super().__init__()
         self.vehicle = vehicle
         self.config = config
+        self.world_manager = world_manager
         world = self.vehicle.get_world()
 
         # Create collision sensor
         bp = world.get_blueprint_library().find("sensor.other.collision")
         self.sensor = world.spawn_actor(bp, carla.Transform(), attach_to=vehicle)
+        
+        # Track the sensor actor if world manager is available
+        if self.world_manager and hasattr(self.world_manager, 'track_sensor_actor'):
+            self.world_manager.track_sensor_actor(self.sensor)
 
         # Weak reference to avoid circular reference
         weak_self = weakref.ref(self)
@@ -140,10 +145,11 @@ class CollisionSensor(SensorSubject):
 class CameraSensor(SensorSubject):
     """Camera sensor"""
 
-    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any]):
+    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any], world_manager=None):
         super().__init__()
         self.vehicle = vehicle
         self.config = config
+        self.world_manager = world_manager
         world = self.vehicle.get_world()
 
         # Create camera sensor
@@ -161,6 +167,10 @@ class CameraSensor(SensorSubject):
         )
 
         self.sensor = world.spawn_actor(bp, spawn_point, attach_to=vehicle)
+        
+        # Track the sensor actor if world manager is available
+        if self.world_manager and hasattr(self.world_manager, 'track_sensor_actor'):
+            self.world_manager.track_sensor_actor(self.sensor)
 
         if self.sensor is not None:
             weak_self = weakref.ref(self)
@@ -196,10 +206,11 @@ class CameraSensor(SensorSubject):
 class GNSSSensor(SensorSubject):
     """GNSS (GPS) sensor"""
 
-    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any]):
+    def __init__(self, vehicle: carla.Vehicle, config: Dict[str, Any], world_manager=None):
         super().__init__()
         self.vehicle = vehicle
         self.config = config
+        self.world_manager = world_manager
         world = self.vehicle.get_world()
 
         # Create GNSS sensor
@@ -207,6 +218,10 @@ class GNSSSensor(SensorSubject):
         self.sensor = world.spawn_actor(
             bp, carla.Transform(carla.Location(x=0.0, z=0.0)), attach_to=vehicle
         )
+        
+        # Track the sensor actor if world manager is available
+        if self.world_manager and hasattr(self.world_manager, 'track_sensor_actor'):
+            self.world_manager.track_sensor_actor(self.sensor)
 
         # Weak reference to avoid circular reference
         weak_self = weakref.ref(self)
@@ -243,16 +258,17 @@ class GNSSSensor(SensorSubject):
 class SensorManager:
     """Manages all vehicle sensors"""
 
-    def __init__(self, vehicle: carla.Vehicle, config: SensorConfig):
+    def __init__(self, vehicle: carla.Vehicle, config: SensorConfig, world_manager=None):
         self.vehicle = vehicle
         self.config = config
+        self.world_manager = world_manager
         self.sensors: Dict[str, SensorSubject] = {}
         if config.collision.enabled:
-            self.sensors["collision"] = CollisionSensor(vehicle, {"enabled": True})
+            self.sensors["collision"] = CollisionSensor(vehicle, {"enabled": True}, world_manager)
         if config.camera.enabled:
-            self.sensors["camera"] = CameraSensor(vehicle, {"enabled": True})
+            self.sensors["camera"] = CameraSensor(vehicle, {"enabled": True}, world_manager)
         if config.gnss.enabled:
-            self.sensors["gnss"] = GNSSSensor(vehicle, {"enabled": True})
+            self.sensors["gnss"] = GNSSSensor(vehicle, {"enabled": True}, world_manager)
 
     def add_observer(self, sensor_type: str, observer: SensorObserver) -> None:
         if sensor_type in self.sensors:

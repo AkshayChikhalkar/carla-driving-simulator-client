@@ -20,16 +20,13 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 import logger from '../utils/logger';
+import { useWebSocketConnection } from '../hooks/useWebSocketConnection';
 
 const API_BASE_URL =
   window.location.hostname === 'localhost'
     ? '/api'
     : `http://${window.location.hostname}:8081/api`;
-const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE_URL =
-  window.location.hostname === 'localhost'
-    ? `${WS_PROTOCOL}://localhost:8000/ws/simulation-view`
-    : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
+// Removed WS_PROTOCOL and WS_BASE_URL as they are not used directly in the component
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
   const [scenarios, setScenarios] = useState([]);
@@ -40,12 +37,25 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   const [isPaused, setIsPaused] = useState(false);
   const [status, setStatus] = useState('');
   const [isStarting, setIsStarting] = useState(false);
+  const isStartingRef = useRef(isStarting);
   const [isStopping, setIsStopping] = useState(false);
   const [hasReceivedFrame, setHasReceivedFrame] = useState(false);
   const [error, setError] = useState(null);
   const [isSkipping, setIsSkipping] = useState(false);
   const wsRef = useRef(null);
   const canvasRef = useRef(null);
+  
+  // Debug flag to control logging
+  const DEBUG_LOGS = true; // Set to true when debugging
+  
+  // Track previous state to detect changes
+  const previousStateRef = useRef({
+    is_running: false,
+    is_starting: false,
+    is_stopping: false,
+    is_skipping: false,
+    status_message: ''
+  });
 
   // Backend state tracking for sync
   const [backendState, setBackendState] = useState({
@@ -144,6 +154,25 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
   }, [isSkipping, backendState.is_skipping, backendState.is_running, backendState.is_starting, backendState.is_stopping]);
 
   useEffect(() => {
+    isStartingRef.current = isStarting;
+  }, [isStarting]);
+
+  useWebSocketConnection({
+    setStatus,
+    setIsRunning,
+    setIsPaused,
+    setBackendState,
+    setHasReceivedFrame,
+    setIsStarting,
+    setIsStopping,
+    setIsSkipping,
+    isSkipping,
+    backendState,
+  });
+
+  useEffect(() => {
+    logger.info('Dashboard useEffect triggered - setting up WebSocket connection');
+    
     // Fetch available scenarios
     axios.get(`${API_BASE_URL}/scenarios`)
       .then(response => {
@@ -157,206 +186,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           logger.error('Error fetching scenarios:', error);
         }
       });
-
-    // Setup WebSocket connection for both video and status
-    let ws;
-    let isUnmounted = false;
-    const FRAME_INTERVAL = 1000 / 60; // Target 60 FPS
-
-    const setupWebSocket = () => {
-      ws = new WebSocket(WS_BASE_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (process.env.NODE_ENV !== 'production') {
-          //console.log('WebSocket connection opened');
-        }
-        setStatus('Connected to simulation server');
-      };
-
-      ws.onclose = () => {
-        if (!isRunning) {
-          setStatus('Ready to Start');
-        }
-        setIsRunning(false);
-        setIsPaused(false);
-        setStatus('Disconnected from simulation server');
-        // Attempt to reconnect after 2 seconds, but only if not unmounted
-        if (!isUnmounted) setTimeout(setupWebSocket, 2000);
-      };
-
-      ws.onerror = (e) => {
-        if (e && e.code && (e.code === 1001 || e.code === 1005)) {
-          // Suppress normal disconnect errors
-          return;
-        }
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('WebSocket error', e);
-        }
-        setStatus('Error in simulation connection');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          // If it's a status message (JSON)
-          if (event.data.startsWith('{')) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'status') {
-              // Update backend state for sync
-              setBackendState({
-                is_running: data.is_running || false,
-                is_starting: data.is_starting || false,
-                is_stopping: data.is_stopping || false,
-                is_skipping: data.is_skipping || false,
-                is_transitioning: data.is_transitioning || false,
-                current_scenario: data.current_scenario,
-                scenario_index: data.scenario_index || 0,
-                total_scenarios: data.total_scenarios || 0,
-                status_message: data.status_message || 'Ready to Start'
-              });
-
-              // Debug: Log when is_starting is true
-              if (data.is_starting) {
-                console.log('Backend reports is_starting=True');
-              }
-
-              // Always reset UI if backend says simulation is stopped
-              if (!data.is_running && !data.is_starting && !data.is_stopping && !data.is_skipping) {
-                setIsStopping(false);
-                setIsStarting(false);
-                setIsSkipping(false);
-                setIsRunning(false);
-                setHasReceivedFrame(false);
-                setStatus('Ready to Start');
-                return;
-              }
-
-              // Reset transition flags when backend confirms operations are complete
-              if (isStarting && data.is_running && !data.is_starting) {
-                // Backend confirmed start is complete, but wait a bit to ensure UX feedback
-                setTimeout(() => {
-                  if (process.env.NODE_ENV !== 'production') {
-                    //console.log('Resetting isStarting flag - backend confirmed start complete');
-                  }
-                  setIsStarting(false);
-                }, 1000); // Wait 1 second to ensure "Starting..." is visible
-              }
-              if (isStopping && !data.is_running && !data.is_stopping) {
-                // Backend confirmed stop is complete
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Resetting isStopping flag - backend confirmed stop complete');
-                }
-                setIsStopping(false);
-              }
-              if (isSkipping && !data.is_skipping) {
-                // Backend confirmed skip is complete
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Resetting isSkipping flag - backend confirmed skip complete');
-                }
-                setIsSkipping(false);
-              }
-
-              // Use backend status message - only override with local transition states for immediate UX feedback
-              if (isStarting || data.is_starting) {
-                // Show starting message if either frontend or backend thinks we're starting
-                setStatus(data.status_message || 'Hang on,\nLoading Simulation...');
-                
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Setting status to "Starting simulation..." (isStarting=', isStarting, ', data.is_starting=', data.is_starting, ')');
-                }
-              } else if (isStopping || data.is_stopping) {
-                // Show stopping message if either frontend or backend thinks we're stopping
-                setStatus(data.status_message || 'Stopping simulation...');
-              } else if (isSkipping || data.is_skipping) {
-                // Show skipping message if either frontend or backend thinks we're skipping
-                // Use backend status message to handle "Stopping simulation..." for last scenario
-                setStatus(data.status_message || 'Skipping scenario...');
-                
-                // Clear canvas when skipping to remove old frames
-                if (data.is_skipping) {
-                  //console.log('WebSocket: Backend confirmed skipping state, clearing canvas');
-                  const canvas = canvasRef.current;
-                  if (canvas) {
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    // Force hide canvas during skipping
-                    canvas.style.display = 'none';
-                    canvas.style.opacity = '0';
-                  }
-                  // Reset hasReceivedFrame to ensure canvas is hidden
-                  setHasReceivedFrame(false);
-                } else {
-                  // Skipping is complete, restore canvas display
-                  //console.log('WebSocket: Skipping complete, restoring canvas display');
-                  const canvas = canvasRef.current;
-                  if (canvas) {
-                    canvas.style.display = '';
-                    canvas.style.opacity = '';
-                  }
-                }
-              } else {
-                // Trust the backend status message for other states
-                setStatus(data.status_message || 'Ready to Start');
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Setting status to backend message:', data.status_message || 'Ready to Start');
-                }
-              }
-
-              // Update isRunning based on backend state
-              setIsRunning(data.is_running || false);
-              
-              // Sync local state with backend state on first connection or after refresh
-              if (data.is_running && !isRunning) {
-                setIsRunning(true);
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Synced local isRunning state with backend on reconnection');
-                }
-              }
-            }
-          } else {
-            // It's a video frame (base64 string)
-            // Always mark that we've received a frame for proper canvas display logic
-            setHasReceivedFrame(true);
-            
-            // Block drawing if skipping, but still track frame reception
-            if (isSkipping || backendState.is_skipping) {
-              if (process.env.NODE_ENV !== 'production') {
-                //console.log('Skipping: Not drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
-              }
-              return;
-            }
-            
-            if (process.env.NODE_ENV !== 'production') {
-              //console.log('Drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
-            }
-            
-            const img = new Image();
-            img.onload = () => {
-              const canvas = canvasRef.current;
-              if (canvas) {
-                const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-              }
-            };
-            img.src = `data:image/jpeg;base64,${event.data}`;
-          }
-        } catch (e) {
-          logger.error('Error parsing WebSocket message:', e);
-        }
-      };
-    };
-
-    setupWebSocket();
-
-    return () => {
-      isUnmounted = true;
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [backendState.is_skipping, isRunning, isSkipping, isStarting, isStopping]); // Only run on mount/unmount
+  }, []);
 
   // --- Button handlers ---
   const handleStart = async () => {
@@ -371,17 +201,22 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setStatus('Hang on,\nLoading Simulation...');
     setError(null);
 
-    if (process.env.NODE_ENV !== 'production') {
-      //console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
-    }
+    if (DEBUG_LOGS) console.log('handleStart: Starting simulation with scenarios:', selectedScenarios);
     try {
-      await axios.post(`${API_BASE_URL}/simulation/start`, {
+      if (DEBUG_LOGS) console.group('🚀 API Call - Start Simulation');
+      const response = await axios.post(`${API_BASE_URL}/simulation/start`, {
         scenarios: selectedScenarios,
         debug: debug,
         report: report
       });
+      if (DEBUG_LOGS) {
+        console.log('API call successful, response:', response.data);
+        console.groupEnd();
+      }
       // Do not reset isStarting here; let WebSocket handle it
     } catch (e) {
+      console.error('handleStart: API call failed:', e);
+      if (DEBUG_LOGS) console.groupEnd();
       setIsStarting(false);
       setStatus('Ready to Start');
       setError('Failed to start simulation');
@@ -759,6 +594,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           }}
         >
           <canvas
+            id="simulationCanvas"
             ref={canvasRef}
             style={{
               width: '100%',
@@ -783,7 +619,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             }}
             onLoad={() => {
               if (process.env.NODE_ENV !== 'production') {
-                console.log('Canvas display state:', {
+                logger.info('Canvas display state:', {
                   isRunning,
                   backendRunning: backendState.is_running,
                   hasReceivedFrame,
@@ -819,6 +655,25 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                       (!(isRunning || backendState.is_running) || !hasReceivedFrame) ? 1 : 0,
               transition: (isSkipping || backendState.is_skipping) ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out', // Faster transition for skipping
               zIndex: 1
+            }}
+            onLoad={() => {
+              if (process.env.NODE_ENV !== 'production') {
+                logger.info('Overlay display state:', {
+                  isStarting,
+                  backendStarting: backendState.is_starting,
+                  isStopping,
+                  backendStopping: backendState.is_stopping,
+                  isSkipping,
+                  backendSkipping: backendState.is_skipping,
+                  isRunning,
+                  backendRunning: backendState.is_running,
+                  hasReceivedFrame,
+                  shouldShowOverlay: isStarting || backendState.is_starting || 
+                                    isStopping || backendState.is_stopping || 
+                                    isSkipping || backendState.is_skipping || 
+                                    (!(isRunning || backendState.is_running) || !hasReceivedFrame)
+                });
+              }
             }}
           >
             <img
