@@ -5,8 +5,10 @@ if "XDG_RUNTIME_DIR" not in os.environ:
     if not os.path.exists("/tmp/xdg"):
         os.makedirs("/tmp/xdg", exist_ok=True)
 
-from fastapi import FastAPI, HTTPException, WebSocket, Depends, status, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from typing import List, Optional
@@ -31,6 +33,61 @@ import uuid
 import atexit
 import signal
 from fastapi.responses import FileResponse
+
+# Add monitoring imports
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram, Gauge, Info
+import prometheus_client
+
+app = FastAPI()
+
+# Serve React production build
+from fastapi.staticfiles import StaticFiles
+import os
+
+frontend_build_dir = os.path.join(os.path.dirname(__file__), "../../web/frontend/build")
+if os.path.exists(frontend_build_dir):
+    app.mount("/app", StaticFiles(directory=frontend_build_dir, html=True), name="static")
+
+# Prometheus metrics
+# Counters
+SIMULATION_START_COUNTER = Counter('carla_simulation_starts_total', 'Total number of simulation starts')
+SIMULATION_STOP_COUNTER = Counter('carla_simulation_stops_total', 'Total number of simulation stops')
+SIMULATION_SKIP_COUNTER = Counter('carla_simulation_skips_total', 'Total number of scenario skips')
+WEBSOCKET_CONNECTIONS_COUNTER = Counter('carla_websocket_connections_total', 'Total number of WebSocket connections')
+API_REQUESTS_COUNTER = Counter('carla_api_requests_total', 'Total number of API requests', ['endpoint', 'method'])
+
+# Histograms
+SIMULATION_DURATION_HISTOGRAM = Histogram('carla_simulation_duration_seconds', 'Simulation duration in seconds')
+API_REQUEST_DURATION_HISTOGRAM = Histogram('carla_api_request_duration_seconds', 'API request duration in seconds', ['endpoint'])
+
+# Gauges
+SIMULATION_STATUS_GAUGE = Gauge('carla_simulation_status', 'Current simulation status (0=stopped, 1=running, 2=paused)')
+ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE = Gauge('carla_active_websocket_connections', 'Number of active WebSocket connections')
+SCENARIO_PROGRESS_GAUGE = Gauge('carla_scenario_progress', 'Current scenario progress (0-100)')
+
+# Info
+APP_INFO = Info('carla_app', 'Application information')
+
+# Middleware for tracking API requests
+@app.middleware("http")
+async def track_api_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    # Extract endpoint and method
+    endpoint = request.url.path
+    method = request.method
+    
+    # Increment request counter
+    API_REQUESTS_COUNTER.labels(endpoint=endpoint, method=method).inc()
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Record request duration
+    duration = time.time() - start_time
+    API_REQUEST_DURATION_HISTOGRAM.labels(endpoint=endpoint).observe(duration)
+    
+    return response
 
 # Custom logging filter to suppress WebSocket connection messages
 class WebSocketConnectionFilter(logging.Filter):
@@ -432,7 +489,6 @@ def transition_to_next_scenario(runner, next_scenario):
 
 
 # Initialize FastAPI app and logger
-app = FastAPI()
 logger = Logger()
 
 # Enable CORS
@@ -477,16 +533,36 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
-@app.get("/api/version")
-async def get_version():
-    """Get version information"""
-    version = os.getenv("VERSION", "latest")
-    build_time = os.getenv("BUILD_TIME", datetime.now().isoformat())
-    return {
-        "version": version,
-        "build_time": build_time,
-        "timestamp": datetime.now().isoformat()
-    }
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint"""
+    # Update app info
+    APP_INFO.info({
+        'version': os.getenv("VERSION", "dev"),
+        'build_time': os.getenv("BUILD_TIME", datetime.now().isoformat()),
+        'docker_image_tag': os.getenv("DOCKER_IMAGE_TAG", "latest")
+    })
+    
+    # Update simulation status gauge
+    if runner.state["is_running"]:
+        SIMULATION_STATUS_GAUGE.set(1)  # Running
+    elif runner.state.get("is_paused", False):
+        SIMULATION_STATUS_GAUGE.set(2)  # Paused
+    else:
+        SIMULATION_STATUS_GAUGE.set(0)  # Stopped
+    
+    # Update scenario progress gauge
+    if runner.state.get("scenarios_to_run"):
+        total_scenarios = len(runner.state["scenarios_to_run"])
+        current_index = runner.state.get("current_scenario_index", 0)
+        if total_scenarios > 0:
+            progress = (current_index / total_scenarios) * 100
+            SCENARIO_PROGRESS_GAUGE.set(progress)
+    
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# Remove duplicate version endpoint - keeping the one at the end of the file
 
 
 @app.get("/api/scenarios")
@@ -564,6 +640,9 @@ async def skip_scenario():
         
         # Set skipping flag for immediate UX feedback
         runner.state["is_skipping"] = True
+        
+        # Track metrics
+        SIMULATION_SKIP_COUNTER.inc()
         
         # Only set is_transitioning for actual scenario transitions
         current_index = runner.state["current_scenario_index"]
@@ -794,6 +873,11 @@ async def start_simulation(request: SimulationRequest):
 
             logger.debug(f"Reset is_transitioning=False, is_starting={runner.state['is_starting']}")
             logger.info("Simulation started successfully")
+            
+            # Track metrics
+            SIMULATION_START_COUNTER.inc()
+            SIMULATION_STATUS_GAUGE.set(1)  # Running
+            
             return {
                 "success": True,
                 "message": "Simulation started successfully",
@@ -828,6 +912,10 @@ async def stop_simulation():
         logger.info("================================")
         logger.info("Stopping simulation")
         logger.info("================================")
+        
+        # Track metrics
+        SIMULATION_STOP_COUNTER.inc()
+        SIMULATION_STATUS_GAUGE.set(0)  # Stopped
 
         # Check if simulation is actually running
         if not runner.state["is_running"]:
@@ -901,6 +989,10 @@ async def stop_simulation():
 async def websocket_endpoint(websocket: WebSocket):
     try:
         await websocket.accept()
+        
+        # Track metrics
+        WEBSOCKET_CONNECTIONS_COUNTER.inc()
+        ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE.inc()
         logger.debug("WebSocket connection established")
         last_sent_state = None
         last_frame_hash = [None]
@@ -1047,9 +1139,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     await video_task
                 except asyncio.CancelledError:
                     pass
+    except asyncio.CancelledError:
+        # Suppress noisy CancelledError on disconnect
+        return
     except Exception as e:
         logger.critical(f"Uncaught exception in websocket endpoint: {e}", exc_info=True)
         # Never crash the process
+    finally:
+        # Track metrics for connection cleanup
+        ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE.dec()
 
 
 @app.get("/api/reports")
