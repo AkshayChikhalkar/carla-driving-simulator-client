@@ -41,6 +41,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import VersionDisplay from './VersionDisplay';
 
 const drawerWidth = 240;
 
@@ -324,6 +325,7 @@ function Layout({ children }) {
           {children}
         </Box>
       </Box>
+      <VersionDisplay />
 
       <Dialog open={changePwdOpen} onClose={handleChangePwdClose} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ pb: 0, pt: 2}}>Change Password</DialogTitle>

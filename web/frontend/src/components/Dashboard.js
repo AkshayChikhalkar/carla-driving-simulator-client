@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   Box,
   FormControl,
@@ -10,7 +10,8 @@ import {
   Checkbox,
   Typography,
   Grid,
-  Paper
+  Paper,
+  CircularProgress
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -18,558 +19,218 @@ import {
   Pause as PauseIcon,
   SkipNext as SkipNextIcon
 } from '@mui/icons-material';
-import axios from 'axios';
 import logger from '../utils/logger';
+import { useWebSocketConnection } from '../hooks/useWebSocketConnection';
+import { useSimulationState } from '../hooks/useSimulationState';
+import { useScenarioSelection } from '../hooks/useScenarioSelection';
+import { getInstructionMessage } from '../utils/uiHelpers';
 
-const API_BASE_URL =
-  window.location.hostname === 'localhost'
-    ? '/api'
-    : `http://${window.location.hostname}:8081/api`;
-const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE_URL =
-  window.location.hostname === 'localhost'
-    ? `${WS_PROTOCOL}://localhost:8000/ws/simulation-view`
-    : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
+// Memoized style computations for better performance
+const computeButtonStates = ({
+  isRunning,
+  selectedScenariosLength,
+  isStarting,
+  isStopping,
+  isSkipping,
+  backendState
+}) => {
+  const anyTransition = isStarting || isStopping || isSkipping || 
+                       backendState.is_starting || backendState.is_stopping || backendState.is_skipping;
+  const isLastScenario = backendState.scenario_index >= backendState.total_scenarios;
+  const isSingleScenario = backendState.total_scenarios <= 1;
+  
+  return {
+    isStartDisabled: isRunning || !selectedScenariosLength || anyTransition,
+    isStopDisabled: !isRunning || anyTransition,
+    isPauseDisabled: !isRunning || anyTransition,
+    isSkipDisabled: !isRunning || anyTransition || isLastScenario || isSingleScenario
+  };
+};
 
-function Dashboard({ onThemeToggle, isDarkMode }) {
-  const [scenarios, setScenarios] = useState([]);
-  const [selectedScenarios, setSelectedScenarios] = useState([]);
-  const [debug, setDebug] = useState(false);
-  const [report, setReport] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [status, setStatus] = useState('');
-  const [isStarting, setIsStarting] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [hasReceivedFrame, setHasReceivedFrame] = useState(false);
-  const [error, setError] = useState(null);
-  const [isSkipping, setIsSkipping] = useState(false);
-  const wsRef = useRef(null);
-  const canvasRef = useRef(null);
+const computeCanvasStyle = ({
+  isRunning,
+  backendState,
+  hasReceivedFrame,
+  isStarting,
+  isStopping,
+  isSkipping
+}) => {
+  // Keep canvas visible during all transitions to prevent flickering
+  // Only hide canvas when simulation is completely stopped and no frames received
+  // For stop transitions, keep canvas visible even when not running to show last frame
+  const shouldShow = (isRunning || backendState.is_running) && 
+                    hasReceivedFrame && 
+                    !(isStarting && !backendState.is_running);
+  
+  // Special case: keep canvas visible during stop transition even if not running
+  const shouldShowDuringStop = isStopping || backendState.is_stopping;
+  
+  // Gradual fade-out effect: reduce opacity during stop transition
+  let opacity = 1;
+  if (shouldShowDuringStop && !shouldShow) {
+    opacity = 0.6; // Gradual fade-out during stop transition
+  } else if (!shouldShow && !shouldShowDuringStop) {
+    opacity = 0; // Completely hidden when not showing
+  }
 
-  // Backend state tracking for sync
-  const [backendState, setBackendState] = useState({
-    is_running: false,
-    is_starting: false,
-    is_stopping: false,
-    is_skipping: false,
-    is_transitioning: false,
-    current_scenario: null,
-    scenario_index: 0,
-    total_scenarios: 0,
-    status_message: 'Ready to Start'
-  });
+  // Quicker transitions for start/skip, slower for stop
+  let transition = 'opacity 1.2s ease-in-out';
+  if (isStarting || backendState.is_starting || isSkipping || backendState.is_skipping) {
+    transition = 'opacity 0.5s ease-in-out';
+  }
+  
+  return {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: (shouldShow || shouldShowDuringStop) ? 'block' : 'none',
+    background: '#000',
+    margin: 0,
+    padding: 0,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    opacity: opacity,
+    transition,
+    zIndex: 0
+  };
+};
 
-  // Add immediate reset of transition flags when backend state changes
-  useEffect(() => {
-    // Reset isStarting when backend confirms start is complete
-    if (isStarting && backendState.is_running && !backendState.is_starting) {
-      //console.log('Immediate reset: Backend confirmed start complete');
-      setIsStarting(false);
-    }
-  }, [isStarting, backendState.is_running, backendState.is_starting]);
-
-  useEffect(() => {
-    // Reset isStopping when backend confirms stop is complete
-    if (isStopping && !backendState.is_running && !backendState.is_stopping) {
-      //console.log('Immediate reset: Backend confirmed stop complete');
-      setIsStopping(false);
-    }
-  }, [isStopping, backendState.is_running, backendState.is_stopping]);
-
-  useEffect(() => {
-    // Reset isSkipping when backend confirms skip is complete
-    if (isSkipping && !backendState.is_skipping) {
-      //console.log('Immediate reset: Backend confirmed skip complete');
-      setIsSkipping(false);
-    }
-  }, [isSkipping, backendState.is_skipping]);
-
-  // Add a fallback mechanism to reset transition flags if backend confirms but frontend doesn't update
-  useEffect(() => {
-    if (isStarting && backendState.is_running && !backendState.is_starting) {
-      // Backend confirmed start is complete but frontend didn't reset
-      const timer = setTimeout(() => {
-        if (isStarting && backendState.is_running && !backendState.is_starting) {
-          //console.log('Fallback: Resetting isStarting flag after timeout');
-          setIsStarting(false);
-        }
-      }, 5000); // 5 second timeout
-
-      return () => clearTimeout(timer);
-    }
-  }, [isStarting, backendState.is_running, backendState.is_starting]);
-
-  useEffect(() => {
-    if (isStopping && !backendState.is_running && !backendState.is_stopping) {
-      // Backend confirmed stop is complete but frontend didn't reset
-      const timer = setTimeout(() => {
-        if (isStopping && !backendState.is_running && !backendState.is_stopping) {
-          //console.log('Fallback: Resetting isStopping flag after timeout');
-          setIsStopping(false);
-        }
-      }, 5000); // 5 second timeout
-
-      return () => clearTimeout(timer);
-    }
-  }, [isStopping, backendState.is_running, backendState.is_stopping]);
-
-  useEffect(() => {
-    if (isSkipping && !backendState.is_skipping) {
-      // Backend confirmed skip is complete but frontend didn't reset
-      const timer = setTimeout(() => {
-        if (isSkipping && !backendState.is_skipping) {
-          //console.log('Fallback: Resetting isSkipping flag after timeout');
-          setIsSkipping(false);
-        }
-      }, 5000); // 5 second timeout
-
-      return () => clearTimeout(timer);
-    }
-  }, [isSkipping, backendState.is_skipping]);
-
-  // Refined: Only reset isSkipping when skip is complete AND either a new scenario is running or simulation is stopped
-  useEffect(() => {
-    if (
-      isSkipping &&
-      !backendState.is_skipping &&
-      (
-        backendState.is_running || // new scenario running
-        (!backendState.is_running && !backendState.is_starting && !backendState.is_stopping && !backendState.is_skipping) // simulation stopped
-      )
-    ) {
-      //console.log('Refined: Backend confirmed skip complete and new scenario running or stopped');
-      setIsSkipping(false);
-    }
-  }, [isSkipping, backendState.is_skipping, backendState.is_running, backendState.is_starting, backendState.is_stopping]);
-
-  useEffect(() => {
-    // Fetch available scenarios
-    axios.get(`${API_BASE_URL}/scenarios`)
-      .then(response => {
-        setScenarios(Array.isArray(response.data.scenarios) ? response.data.scenarios : []);
-        setStatus('Connected to simulation server');
-      })
-      .catch(error => {
-        setScenarios([]);
-        setStatus('Error loading scenarios');
-        if (process.env.NODE_ENV !== 'production') {
-          logger.error('Error fetching scenarios:', error);
-        }
-      });
-
-    // Setup WebSocket connection for both video and status
-    let ws;
-    let isUnmounted = false;
-    const FRAME_INTERVAL = 1000 / 60; // Target 60 FPS
-
-    const setupWebSocket = () => {
-      ws = new WebSocket(WS_BASE_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (process.env.NODE_ENV !== 'production') {
-          //console.log('WebSocket connection opened');
-        }
-        setStatus('Connected to simulation server');
-      };
-
-      ws.onclose = () => {
-        if (!isRunning) {
-          setStatus('Ready to Start');
-        }
-        setIsRunning(false);
-        setIsPaused(false);
-        setStatus('Disconnected from simulation server');
-        // Attempt to reconnect after 2 seconds, but only if not unmounted
-        if (!isUnmounted) setTimeout(setupWebSocket, 2000);
-      };
-
-      ws.onerror = (e) => {
-        if (e && e.code && (e.code === 1001 || e.code === 1005)) {
-          // Suppress normal disconnect errors
-          return;
-        }
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('WebSocket error', e);
-        }
-        setStatus('Error in simulation connection');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          // If it's a status message (JSON)
-          if (event.data.startsWith('{')) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'status') {
-              // Update backend state for sync
-              setBackendState({
-                is_running: data.is_running || false,
-                is_starting: data.is_starting || false,
-                is_stopping: data.is_stopping || false,
-                is_skipping: data.is_skipping || false,
-                is_transitioning: data.is_transitioning || false,
-                current_scenario: data.current_scenario,
-                scenario_index: data.scenario_index || 0,
-                total_scenarios: data.total_scenarios || 0,
-                status_message: data.status_message || 'Ready to Start'
-              });
-
-              // Debug: Log when is_starting is true
-              if (data.is_starting) {
-                console.log('Backend reports is_starting=True');
-              }
-
-              // Always reset UI if backend says simulation is stopped
-              if (!data.is_running && !data.is_starting && !data.is_stopping && !data.is_skipping) {
-                setIsStopping(false);
-                setIsStarting(false);
-                setIsSkipping(false);
-                setIsRunning(false);
-                setHasReceivedFrame(false);
-                setStatus('Ready to Start');
-                return;
-              }
-
-              // Reset transition flags when backend confirms operations are complete
-              if (isStarting && data.is_running && !data.is_starting) {
-                // Backend confirmed start is complete, but wait a bit to ensure UX feedback
-                setTimeout(() => {
-                  if (process.env.NODE_ENV !== 'production') {
-                    //console.log('Resetting isStarting flag - backend confirmed start complete');
-                  }
-                  setIsStarting(false);
-                }, 1000); // Wait 1 second to ensure "Starting..." is visible
-              }
-              if (isStopping && !data.is_running && !data.is_stopping) {
-                // Backend confirmed stop is complete
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Resetting isStopping flag - backend confirmed stop complete');
-                }
-                setIsStopping(false);
-              }
-              if (isSkipping && !data.is_skipping) {
-                // Backend confirmed skip is complete
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Resetting isSkipping flag - backend confirmed skip complete');
-                }
-                setIsSkipping(false);
-              }
-
-              // Use backend status message - only override with local transition states for immediate UX feedback
-              if (isStarting || data.is_starting) {
-                // Show starting message if either frontend or backend thinks we're starting
-                setStatus(data.status_message || 'Hang on,\nLoading Simulation...');
-                
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Setting status to "Starting simulation..." (isStarting=', isStarting, ', data.is_starting=', data.is_starting, ')');
-                }
-              } else if (isStopping || data.is_stopping) {
-                // Show stopping message if either frontend or backend thinks we're stopping
-                setStatus(data.status_message || 'Stopping simulation...');
-              } else if (isSkipping || data.is_skipping) {
-                // Show skipping message if either frontend or backend thinks we're skipping
-                // Use backend status message to handle "Stopping simulation..." for last scenario
-                setStatus(data.status_message || 'Skipping scenario...');
-                
-                // Clear canvas when skipping to remove old frames
-                if (data.is_skipping) {
-                  //console.log('WebSocket: Backend confirmed skipping state, clearing canvas');
-                  const canvas = canvasRef.current;
-                  if (canvas) {
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    // Force hide canvas during skipping
-                    canvas.style.display = 'none';
-                    canvas.style.opacity = '0';
-                  }
-                  // Reset hasReceivedFrame to ensure canvas is hidden
-                  setHasReceivedFrame(false);
-                } else {
-                  // Skipping is complete, restore canvas display
-                  //console.log('WebSocket: Skipping complete, restoring canvas display');
-                  const canvas = canvasRef.current;
-                  if (canvas) {
-                    canvas.style.display = '';
-                    canvas.style.opacity = '';
-                  }
-                }
-              } else {
-                // Trust the backend status message for other states
-                setStatus(data.status_message || 'Ready to Start');
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Setting status to backend message:', data.status_message || 'Ready to Start');
-                }
-              }
-
-              // Update isRunning based on backend state
-              setIsRunning(data.is_running || false);
-              
-              // Sync local state with backend state on first connection or after refresh
-              if (data.is_running && !isRunning) {
-                setIsRunning(true);
-                if (process.env.NODE_ENV !== 'production') {
-                  //console.log('Synced local isRunning state with backend on reconnection');
-                }
-              }
-            }
-          } else {
-            // It's a video frame (base64 string)
-            // Always mark that we've received a frame for proper canvas display logic
-            setHasReceivedFrame(true);
-            
-            // Block drawing if skipping, but still track frame reception
-            if (isSkipping || backendState.is_skipping) {
-              if (process.env.NODE_ENV !== 'production') {
-                //console.log('Skipping: Not drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
-              }
-              return;
-            }
-            
-            if (process.env.NODE_ENV !== 'production') {
-              //console.log('Drawing frame to canvas. isSkipping:', isSkipping, 'backendState.is_skipping:', backendState.is_skipping);
-            }
-            
-            const img = new Image();
-            img.onload = () => {
-              const canvas = canvasRef.current;
-              if (canvas) {
-                const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-              }
-            };
-            img.src = `data:image/jpeg;base64,${event.data}`;
-          }
-        } catch (e) {
-          logger.error('Error parsing WebSocket message:', e);
-        }
-      };
+const computeOverlayStyle = ({
+  isStarting,
+  backendState,
+  isStopping,
+  isSkipping,
+  isRunning,
+  hasReceivedFrame
+}) => {
+  // During skipping, always show the overlay
+  if (isSkipping || backendState.is_skipping) {
+    return {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0, 0, 0, 0.7)',
+      opacity: 1,
+      transition: 'opacity 0.5s ease-in-out, background 0.5s ease-in-out',
+      zIndex: 1
     };
+  }
+  const anyTransition = isStarting || isStopping || isSkipping || 
+                       backendState.is_starting || backendState.is_stopping || backendState.is_skipping;
+  
+  // Show overlay during transitions or when no frames received
+  // For stop transitions, show a lighter overlay to keep last frame visible
+  const shouldShow = anyTransition || (!(isRunning || backendState.is_running) || !hasReceivedFrame);
+  
+  // Use lighter overlay during stop transition with gradual increase
+  let overlayOpacity = 0.7;
+  if (isStopping || backendState.is_stopping) {
+    overlayOpacity = 0.3; // Very light overlay during stop to show last frame
+  } else if (!(isRunning || backendState.is_running) && hasReceivedFrame) {
+    overlayOpacity = 0.5; // Medium overlay when stopped but still showing last frame
+  }
 
-    setupWebSocket();
-
-    return () => {
-      isUnmounted = true;
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [backendState.is_skipping, isRunning, isSkipping, isStarting, isStopping]); // Only run on mount/unmount
-
-  // --- Button handlers ---
-  const handleStart = async () => {
-    if (selectedScenarios.length === 0) {
-      setError('Please select at least one scenario');
-      return;
-    }
-    // Set local transition state immediately
-    setIsStarting(true);
-    setIsStopping(false);
-    setIsSkipping(false);
-    setStatus('Hang on,\nLoading Simulation...');
-    setError(null);
-
-    if (process.env.NODE_ENV !== 'production') {
-      //console.log('handleStart: Set isStarting=true, status="Starting simulation..."');
-    }
-    try {
-      await axios.post(`${API_BASE_URL}/simulation/start`, {
-        scenarios: selectedScenarios,
-        debug: debug,
-        report: report
-      });
-      // Do not reset isStarting here; let WebSocket handle it
-    } catch (e) {
-      setIsStarting(false);
-      setStatus('Ready to Start');
-      setError('Failed to start simulation');
-    }
+  // Quicker transitions for start/skip, slower for stop
+  let transition = 'opacity 1.2s ease-in-out, background 1.2s ease-in-out';
+  if (isStarting || backendState.is_starting || isSkipping || backendState.is_skipping) {
+    transition = 'opacity 0.5s ease-in-out, background 0.5s ease-in-out';
+  }
+  
+  return {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: `rgba(0, 0, 0, ${overlayOpacity})`, // Dynamic overlay opacity
+    opacity: shouldShow ? 1 : 0,
+    transition,
+    zIndex: 1
   };
+};
 
-  const handleStop = async () => {
-    setIsStopping(true);
-    setIsStarting(false);
-    setIsSkipping(false);
-    setStatus('Stopping simulation...');
-    setError(null);
-    try {
-      await axios.post(`${API_BASE_URL}/simulation/stop`);
-      // Do not reset isStopping here; let WebSocket handle it
-    } catch (e) {
-      setIsStopping(false);
-      setStatus('Ready to Start');
-      setError('Failed to stop simulation');
-    }
+const computeLoadingImageStyle = ({
+  isStarting,
+  backendState,
+  isStopping,
+  isSkipping,
+  isRunning,
+  hasReceivedFrame
+}) => {
+  const anyTransition = isStarting || isStopping || isSkipping || 
+                       backendState.is_starting || backendState.is_stopping || backendState.is_skipping;
+  
+  const shouldShow = anyTransition || (!(isRunning || backendState.is_running) || !hasReceivedFrame);
+  
+  // Gradual fade-out for loading image during stop transition
+  let opacity = shouldShow ? 1 : 0;
+  if (isStopping || backendState.is_stopping) {
+    opacity = 0.8; // Slightly fade loading image during stop
+  }
+
+  // Quicker transitions for start/skip, slower for stop
+  let transition = 'opacity 1.2s ease-in-out';
+  if (isStarting || backendState.is_starting || isSkipping || backendState.is_skipping) {
+    transition = 'opacity 0.5s ease-in-out';
+  }
+  
+  return {
+    width: '50%',
+    height: '50%',
+    objectFit: 'contain',
+    display: 'block',
+    background: 'transparent',
+    margin: 0,
+    padding: 0,
+    opacity: opacity,
+    transition
   };
+};
 
-  const handlePause = () => {
-    const newPauseState = !isPaused;
-    setIsPaused(newPauseState);
-    setStatus(newPauseState ? 'Simulation paused' : 'Simulation resumed');
-    logger.info(`Simulation ${newPauseState ? 'paused' : 'resumed'}`);
-  };
-
-  // Helper function to determine if any button should be disabled during transitions
-  const isAnyButtonDisabled = () => {
-    // All buttons should be disabled if any transition state is active
-    const disabled = isStarting || isStopping || isSkipping;
-    if (process.env.NODE_ENV !== 'production') {
-      //console.log('isAnyButtonDisabled:', { isStarting, isStopping, isSkipping, disabled });
-    }
-    return disabled;
-  };
-
-  // Helper function to determine if start button should be disabled
-  const isStartDisabled = () => {
-    return isRunning || !selectedScenarios.length || isAnyButtonDisabled();
-  };
-
-  // Helper function to determine if stop button should be disabled
-  const isStopDisabled = () => {
-    return !isRunning || isAnyButtonDisabled();
-  };
-
-  // Helper function to determine if pause button should be disabled
-  const isPauseDisabled = () => {
-    return !isRunning || isAnyButtonDisabled();
-  };
-
-  // Helper function to determine if skip button should be disabled
-  const isSkipDisabled = () => {
-    // Disable if not running, any transition is active, or if this is the last scenario
-    const isLastScenario = backendState.scenario_index >= backendState.total_scenarios;
-    const isSingleScenario = backendState.total_scenarios <= 1;
-    return !isRunning || isAnyButtonDisabled() || isLastScenario || isSingleScenario;
-  };
-
-  // Update the handleScenarioChange function
-  const handleScenarioChange = (event) => {
-    const value = event.target.value;
-
-    // If selecting individual scenarios
-    if (!value.includes('all')) {
-      // If all individual scenarios are selected, switch to "all"
-      if (value.length === scenarios.length) {
-        setSelectedScenarios(['all']);
-      } else {
-        setSelectedScenarios(value);
-      }
-      return;
-    }
-
-    // If "all" is selected
-    if (value.includes('all')) {
-      // If "all" is the only selection, keep it
-      if (value.length === 1) {
-        setSelectedScenarios(['all']);
-      } else {
-        // If other scenarios are selected with "all", remove "all" and keep individual selections
-        setSelectedScenarios(value.filter(v => v !== 'all'));
-      }
-    }
-  };
-
-  // Add state to control dropdown open/close
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-
-  // Handle dropdown open/close
-  const handleDropdownOpen = (event) => {
-    setDropdownOpen(true);
-  };
-
-  const handleDropdownClose = () => {
-    setDropdownOpen(false);
-  };
-
-  // Enhanced scenario change handler with auto-close
-  const handleScenarioChangeEnhanced = (event) => {
-    const value = event.target.value;
-
-    // If selecting individual scenarios
-    if (!value.includes('all')) {
-      // If all individual scenarios are selected, switch to "all"
-      if (value.length === scenarios.length) {
-        setSelectedScenarios(['all']);
-      } else {
-        setSelectedScenarios(value);
-      }
-      // Auto-close dropdown after selection
-      setTimeout(() => setDropdownOpen(false), 100);
-      return;
-    }
-
-    // If "all" is selected
-    if (value.includes('all')) {
-      // If "all" is the only selection, keep it
-      if (value.length === 1) {
-        setSelectedScenarios(['all']);
-      } else {
-        // If other scenarios are selected with "all", remove "all" and keep individual selections
-        setSelectedScenarios(value.filter(v => v !== 'all'));
-      }
-      // Auto-close dropdown after selection
-      setTimeout(() => setDropdownOpen(false), 100);
-    }
-  };
-
-  // Add skip scenario handler
-  const handleSkipScenario = async () => {
-    //console.log('handleSkipScenario: Starting skip process');
-    
-    // Set states immediately for instant visual feedback
-    setIsSkipping(true);
-    setIsStarting(false);
-    setIsStopping(false);
-    setHasReceivedFrame(false);
-    setStatus('Skipping scenario...'); // Set immediate status for UX feedback
-    setError(null);
-    
-    // Clear the canvas to remove old frames and force hide it
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // Force hide canvas immediately
-      canvas.style.display = 'none';
-      canvas.style.opacity = '0';
-      //console.log('handleSkipScenario: Canvas cleared and hidden');
-    }
-    
-    // Force a re-render to ensure overlay appears immediately
-    setTimeout(() => {
-      if (isSkipping) {
-        //console.log('handleSkipScenario: Ensuring overlay is visible');
-      }
-    }, 0);
-    
-    try {
-      await axios.post(`${API_BASE_URL}/simulation/skip`);
-      //console.log('handleSkipScenario: Skip API call successful');
-      // Do not reset isSkipping here; let WebSocket handle it
-    } catch (e) {
-      //console.log('handleSkipScenario: Skip API call failed', e);
-      setIsSkipping(false);
-      setStatus('Ready to Start');
-      setError('Failed to skip scenario');
-    }
-  };
+// Memoized Control Panel Component
+const ControlPanel = React.memo(({
+  scenarios,
+  selectedScenarios,
+  status,
+  debug,
+  report,
+  buttonStates,
+  isStarting,
+  isStopping,
+  isSkipping,
+  isPaused,
+  backendState,
+  isRunning,
+  dropdownOpen,
+  onScenarioChange,
+  onDropdownOpen,
+  onDropdownClose,
+  onDebugChange,
+  onReportChange,
+  onStart,
+  onStop,
+  onPause,
+  onSkip
+}) => {
+  const renderValue = useCallback((selected) => {
+    if (selected.includes('all')) return 'All Scenarios';
+    if (selected.length === 0) return 'Select scenarios...';
+    if (selected.length === 1) return selected[0];
+    return `${selected.length} scenarios selected`;
+  }, []);
 
   return (
-    <>
-      <Box sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        width: '100%',
-        overflow: 'hidden',
-        background: '#000',
-        minHeight: '84vh',
-        margin: 0,
-        padding: 0
-      }}>
-        {/* Control Panel */}
         <Paper sx={{
           p: 1,
           mb: 1,
@@ -589,23 +250,18 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   multiple
                   value={selectedScenarios}
                   label="Scenarios"
-                  onChange={handleScenarioChangeEnhanced}
-                  onOpen={handleDropdownOpen}
-                  onClose={handleDropdownClose}
+              onChange={onScenarioChange}
+              onOpen={onDropdownOpen}
+              onClose={onDropdownClose}
                   open={dropdownOpen}
-                  disabled={isRunning}
+              disabled={isStarting || isStopping || isSkipping || backendState.is_starting || backendState.is_stopping || backendState.is_skipping || isRunning || backendState.is_running}
                   size="small"
-                  renderValue={(selected) => {
-                    if (selected.includes('all')) return 'All Scenarios';
-                    if (selected.length === 0) return 'Select scenarios...';
-                    if (selected.length === 1) return selected[0];
-                    return `${selected.length} scenarios selected`;
-                  }}
+              renderValue={renderValue}
                   MenuProps={{
                     PaperProps: {
                       style: {
                         maxHeight: 300,
-                        width: 300 // Set fixed width for dropdown menu
+                    width: 300
                       }
                     },
                     anchorOrigin: {
@@ -638,8 +294,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   control={
                     <Checkbox
                       checked={debug}
-                      onChange={(e) => setDebug(e.target.checked)}
-                      disabled={isRunning}
+                  onChange={onDebugChange}
+                  disabled={buttonStates.isStartDisabled || isRunning || isSkipping || backendState.is_skipping}
                       size="small"
                     />
                   }
@@ -649,8 +305,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   control={
                     <Checkbox
                       checked={report}
-                      onChange={(e) => setReport(e.target.checked)}
-                      disabled={isRunning}
+                  onChange={onReportChange}
+                  disabled={buttonStates.isStartDisabled || isRunning || isSkipping || backendState.is_skipping}
                       size="small"
                     />
                   }
@@ -665,8 +321,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   variant="contained"
                   color="primary"
                   startIcon={<PlayIcon />}
-                  onClick={handleStart}
-                  disabled={isStartDisabled()}
+              onClick={onStart}
+              disabled={buttonStates.isStartDisabled}
                   size="small"
                   sx={{
                     '& .MuiButton-startIcon': {
@@ -681,15 +337,15 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   variant="contained"
                   color="secondary"
                   startIcon={<PauseIcon />}
-                  onClick={handlePause}
-                  disabled={isPauseDisabled()}
+              onClick={onPause}
+              disabled={buttonStates.isPauseDisabled}
                   size="small"
                   sx={{
                     '& .MuiButton-startIcon': {
                       marginRight: 0.5,
                       marginLeft: 0
                     },
-                    display: 'none' // Hide pause button but keep logic
+                display: 'none'
                   }}
                 >
                   {isPaused ? 'Resume' : 'Pause'}
@@ -698,8 +354,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   variant="contained"
                   color="warning"
                   startIcon={<SkipNextIcon />}
-                  onClick={handleSkipScenario}
-                  disabled={isSkipDisabled()}
+              onClick={onSkip}
+              disabled={buttonStates.isSkipDisabled}
                   size="small"
                   sx={{
                     '& .MuiButton-startIcon': {
@@ -714,8 +370,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                   variant="contained"
                   color="error"
                   startIcon={<StopIcon />}
-                  onClick={handleStop}
-                  disabled={isStopDisabled()}
+              onClick={onStop}
+              disabled={buttonStates.isStopDisabled}
                   size="small"
                   sx={{
                     '& .MuiButton-startIcon': {
@@ -738,8 +394,20 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
             )}
           </Grid>
         </Paper>
+  );
+});
 
-        {/* Simulation View */}
+// Memoized Simulation View Component
+const SimulationView = React.memo(({
+  canvasRef,
+  canvasStyle,
+  overlayStyle,
+  loadingImageStyle,
+  error,
+  status,
+  instructionMessage
+}) => {
+  return (
         <Box
           sx={{
             flex: '1 1 0',
@@ -759,85 +427,15 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           }}
         >
           <canvas
+            id="simulationCanvas"
             ref={canvasRef}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              display: (isRunning || backendState.is_running) && hasReceivedFrame && 
-                      !isStarting && !backendState.is_starting && 
-                      !isStopping && !backendState.is_stopping && 
-                      !isSkipping && !backendState.is_skipping ? 'block' : 'none',
-              background: '#000',
-              margin: 0,
-              padding: 0,
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              opacity: (isRunning || backendState.is_running) && hasReceivedFrame && 
-                      !isStarting && !backendState.is_starting && 
-                      !isStopping && !backendState.is_stopping && 
-                      !isSkipping && !backendState.is_skipping ? 1 : 0,
-              transition: 'opacity 0.5s ease-in-out',
-              zIndex: 0
-            }}
-            onLoad={() => {
-              if (process.env.NODE_ENV !== 'production') {
-                console.log('Canvas display state:', {
-                  isRunning,
-                  backendRunning: backendState.is_running,
-                  hasReceivedFrame,
-                  isStarting,
-                  backendStarting: backendState.is_starting,
-                  isStopping,
-                  backendStopping: backendState.is_stopping,
-                  isSkipping,
-                  backendSkipping: backendState.is_skipping,
-                  shouldDisplay: (isRunning || backendState.is_running) && hasReceivedFrame && 
-                                !isStarting && !backendState.is_starting && 
-                                !isStopping && !backendState.is_stopping && 
-                                !isSkipping && !backendState.is_skipping
-                });
-              }
-            }}
-          />
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: '#000',
-              opacity: isStarting || backendState.is_starting || 
-                      isStopping || backendState.is_stopping || 
-                      isSkipping || backendState.is_skipping || 
-                      (!(isRunning || backendState.is_running) || !hasReceivedFrame) ? 1 : 0,
-              transition: (isSkipping || backendState.is_skipping) ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out', // Faster transition for skipping
-              zIndex: 1
-            }}
-          >
+        style={canvasStyle}
+      />
+      <Box sx={overlayStyle}>
             <img
               src="/wavy_logo_loading.gif"
               alt="Loading"
-              style={{
-                width: '50%',
-                height: '50%',
-                objectFit: 'contain',
-                display: 'block',
-                background: '#000',
-                margin: 0,
-                padding: 0,
-                opacity: isStarting || backendState.is_starting || 
-                        isStopping || backendState.is_stopping || 
-                        isSkipping || backendState.is_skipping || 
-                        (!(isRunning || backendState.is_running) || !hasReceivedFrame) ? 1 : 0,
-                transition: (isSkipping || backendState.is_skipping) ? 'opacity 0.1s ease-in-out' : 'opacity 0.5s ease-in-out' // Faster transition for skipping
-              }}
+          style={loadingImageStyle}
             />
             <Typography
               variant="h6"
@@ -864,11 +462,255 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
                 Click Start button to try again
               </Typography>
             )}
+        {!error && (
+          <Typography
+            variant="body2"
+            sx={{
+              color: '#888',
+              mt: 1,
+              textAlign: 'center',
+              textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+            }}
+          >
+            {instructionMessage}
+              </Typography>
+            )}
           </Box>
         </Box>
+  );
+});
+
+// Loading Component
+const LoadingSpinner = React.memo(() => (
+  <Box
+    sx={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '200px',
+      width: '100%'
+    }}
+  >
+    <CircularProgress size={60} />
+    <Typography variant="h6" sx={{ ml: 2 }}>
+      Loading scenarios...
+    </Typography>
+  </Box>
+));
+
+function Dashboard({ onThemeToggle, isDarkMode }) {
+  const [debug, setDebug] = useState(false);
+  const [report, setReport] = useState(false);
+  const canvasRef = useRef(null);
+  
+  // Use existing hooks for state management
+  const {
+    isStarting,
+    isStopping,
+    isSkipping,
+    isRunning,
+    isPaused,
+    hasReceivedFrame,
+    status,
+    error,
+    backendState,
+    setIsStarting,
+    setIsStopping,
+    setIsSkipping,
+    setIsRunning,
+    setIsPaused,
+    setHasReceivedFrame,
+    setStatus,
+    setBackendState,
+    startSimulation,
+    stopSimulation,
+    skipScenario,
+    pauseSimulation
+  } = useSimulationState();
+
+  const {
+    scenarios,
+    selectedScenarios,
+    dropdownOpen,
+    handleScenarioChangeEnhanced,
+    handleDropdownOpen,
+    handleDropdownClose,
+    getRenderValue
+  } = useScenarioSelection();
+
+  // Use WebSocket connection hook
+  useWebSocketConnection({
+    setStatus,
+    setIsRunning,
+    setIsPaused,
+    setBackendState,
+    setHasReceivedFrame,
+    setIsStarting,
+    setIsStopping,
+    setIsSkipping,
+    isSkipping,
+    backendState,
+    canvasRef
+  });
+
+  // Memoized button states with debounce to prevent flickering
+  const buttonStates = React.useMemo(() => {
+    const computedStates = computeButtonStates({
+      isRunning,
+      selectedScenariosLength: selectedScenarios.length,
+      isStarting,
+      isStopping,
+      isSkipping,
+      backendState
+    });
+    
+    // Apply debounce logic to prevent rapid state changes
+    const anyTransition = isStarting || isStopping || isSkipping || 
+                         backendState.is_starting || backendState.is_stopping || backendState.is_skipping;
+    
+    // If any transition is active, disable all buttons to prevent flickering
+    if (anyTransition) {
+      return {
+        isStartDisabled: true,
+        isStopDisabled: true,
+        isPauseDisabled: true,
+        isSkipDisabled: true
+      };
+    }
+    
+    return computedStates;
+  }, [isRunning, selectedScenarios.length, isStarting, isStopping, isSkipping, backendState]);
+
+  // Memoized styles
+  const canvasStyle = React.useMemo(() => 
+    computeCanvasStyle({
+      isRunning,
+      backendState,
+      hasReceivedFrame,
+      isStarting,
+      isStopping,
+      isSkipping
+    }), 
+    [isRunning, backendState, hasReceivedFrame, isStarting, isStopping, isSkipping]
+  );
+
+  const overlayStyle = React.useMemo(() => 
+    computeOverlayStyle({
+      isStarting,
+      backendState,
+      isStopping,
+      isSkipping,
+      isRunning,
+      hasReceivedFrame
+    }), 
+    [isStarting, backendState, isStopping, isSkipping, isRunning, hasReceivedFrame]
+  );
+
+  const loadingImageStyle = React.useMemo(() => 
+    computeLoadingImageStyle({
+      isStarting,
+      backendState,
+      isStopping,
+      isSkipping,
+      isRunning,
+      hasReceivedFrame
+    }), 
+    [isStarting, backendState, isStopping, isSkipping, isRunning, hasReceivedFrame]
+  );
+
+  // Optimized event handlers with useCallback
+  const handleStart = useCallback(async () => {
+    await startSimulation(selectedScenarios, debug, report);
+  }, [startSimulation, selectedScenarios, debug, report]);
+
+  const handleStop = useCallback(async () => {
+    await stopSimulation();
+  }, [stopSimulation]);
+
+  const handleSkip = useCallback(async () => {
+    await skipScenario();
+  }, [skipScenario]);
+
+  const handlePause = useCallback(() => {
+    pauseSimulation();
+  }, [pauseSimulation]);
+
+  // Optimized checkbox handlers with useCallback
+  const handleDebugChange = useCallback((e) => {
+    setDebug(e.target.checked);
+  }, []);
+
+  const handleReportChange = useCallback((e) => {
+    setReport(e.target.checked);
+  }, []);
+
+  // Instruction message
+  const instructionMessage = React.useMemo(() => 
+    getInstructionMessage({
+      selectedScenariosLength: selectedScenarios.length,
+      isRunning,
+      backendState,
+      isStarting,
+      isStopping,
+      isSkipping
+    }), 
+    [selectedScenarios.length, isRunning, backendState, isStarting, isStopping, isSkipping]
+  );
+
+  // Show loading spinner while scenarios are loading
+  if (scenarios.length === 0 && status !== 'Error loading scenarios') {
+    return <LoadingSpinner />;
+  }
+
+  return (
+    <>
+      <Box sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        width: '100%',
+        overflow: 'hidden',
+        background: '#000',
+        minHeight: '84vh',
+        margin: 0,
+        padding: 0
+      }}>
+        <ControlPanel
+          scenarios={scenarios}
+          selectedScenarios={selectedScenarios}
+          status={status}
+          debug={debug}
+          report={report}
+          buttonStates={buttonStates}
+          isStarting={isStarting}
+          isStopping={isStopping}
+          isSkipping={isSkipping}
+          isPaused={isPaused}
+          backendState={backendState}
+          isRunning={isRunning}
+          dropdownOpen={dropdownOpen}
+          onScenarioChange={handleScenarioChangeEnhanced}
+          onDropdownOpen={handleDropdownOpen}
+          onDropdownClose={handleDropdownClose}
+          onDebugChange={handleDebugChange}
+          onReportChange={handleReportChange}
+          onStart={handleStart}
+          onStop={handleStop}
+          onPause={handlePause}
+          onSkip={handleSkip}
+        />
+        <SimulationView
+          canvasRef={canvasRef}
+          canvasStyle={canvasStyle}
+          overlayStyle={overlayStyle}
+          loadingImageStyle={loadingImageStyle}
+          error={error}
+          status={status}
+          instructionMessage={instructionMessage}
+        />
       </Box>
     </>
   );
 }
 
-export default Dashboard; 
+export default React.memo(Dashboard); 

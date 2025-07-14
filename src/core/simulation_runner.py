@@ -72,7 +72,7 @@ class SimulationRunner:
             raise RuntimeError("Failed to create vehicle")
 
         # Create sensor manager with vehicle
-        sensor_manager = SensorManager(config=app.sensor_config, vehicle=vehicle)
+        sensor_manager = SensorManager(config=app.sensor_config, vehicle=vehicle, world_manager=world_manager)
 
         # Create controller based on config type
         controller_type = getattr(app.controller_config, "type", "autopilot")

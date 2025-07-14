@@ -16,6 +16,7 @@ import Logs from './components/Logs';
 import Analytics from './components/Analytics';
 import Imprint from './components/Imprint';
 import ForgotPassword from './components/ForgotPassword';
+import VersionDisplay from './components/VersionDisplay';
 
 const theme = createTheme({
   palette: {
@@ -32,24 +33,6 @@ const theme = createTheme({
 function AppContent() {
   const { user, login, register } = useAuth();
   const location = useLocation();
-  const [version, setVersion] = useState('');
-
-  useEffect(() => {
-    fetch('/api/version')
-      .then(res => res.json())
-      .then(data => {
-        let safeVersion = 'dev';
-        if (data && typeof data === 'object' && data.version) {
-          safeVersion = typeof data.version === 'string' ? data.version : String(data.version);
-        } else if (typeof data === 'string') {
-          safeVersion = data;
-        } else if (data) {
-          safeVersion = String(data);
-        }
-        setVersion(safeVersion);
-      })
-      .catch(() => setVersion('dev'));
-  }, []);
 
   // Log app start
   useEffect(() => {
@@ -97,23 +80,9 @@ function AppContent() {
         <Route path="/analytics" element={<ProtectedRoute><Layout><Analytics /></Layout></ProtectedRoute>} />
                 <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
-      <Box
-        sx={{
-          position: 'fixed',
-          bottom: 8,
-          left: 16,
-          zIndex: 1300,
-          color: 'rgba(255,255,255,0.5)',
-          fontSize: 13,
-          fontFamily: 'Roboto, sans-serif',
-          letterSpacing: 1,
-          userSelect: 'none',
-        }}
-      >
-        {`Version: ${typeof version === 'string' ? version : String(version)}`}
-      </Box>
-      </ThemeProvider>
-    );
+      <VersionDisplay />
+    </ThemeProvider>
+  );
 }
 
 export default AppContent; 
