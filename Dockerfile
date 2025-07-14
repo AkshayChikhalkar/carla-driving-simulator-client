@@ -7,15 +7,21 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get update && apt-get install -y \
-        lsof \
-        procps \
-        libstdc++6 \
-        libgcc1 \
-        libx11-6 \
-        libpthread-stubs0-dev \
+    lsof \
+    procps \
+    libstdc++6 \
+    libgcc1 \
+    libx11-6 \
+    libpthread-stubs0-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+ARG IMAGE_TAG=dev
+ARG VERSION=dev
+ENV DOCKER_IMAGE_TAG=$IMAGE_TAG
+ENV VERSION=$VERSION
+
+# Create version file for application access
 WORKDIR /app
 
 # Create necessary directories
@@ -33,7 +39,7 @@ COPY config/simulation.yaml /app/config/
 # Copy backend and source code
 COPY src/ ./src/
 COPY web/backend/ ./web/backend/
-COPY setup.py run.py VERSION README.md ./
+COPY setup.py run.py README.md ./
 RUN pip install -e .
 
 # Copy frontend source
@@ -43,35 +49,27 @@ COPY web/frontend/public/ ./web/frontend/public/
 
 # Install frontend dependencies
 WORKDIR /app/web/frontend
-RUN npm install --production=false
+RUN npm install --production=true
+RUN npm run build
 
 WORKDIR /app
 
 # Set environment variables
 ENV PYTHONPATH=/app \
-    HOST=0.0.0.0 \
     REACT_APP_API_URL=http://localhost:8000 \
-    WDS_SOCKET_HOST=0.0.0.0 \
-    WDS_SOCKET_PORT=3000 \
     DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator \
-    CARLA_HOST=carla-server \
-    CARLA_PORT=2000 \
-    WEB_HOST=0.0.0.0 \
-    WEB_PORT=8000 \
-    FRONTEND_PORT=3000 \
     LOG_LEVEL=INFO \
     DEBUG=true \
     TESTING=false \
     # Container-specific environment variables for vehicle spawning fixes
     CONTAINER_ENV=true \
-    WEB_MODE=true
+    WEB_MODE=true \
+    VERSION=${VERSION} \
+    DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG} \
+    BUILD_TIME=${BUILD_TIME}
 # Copy start script and fix line endings
-COPY start.sh /app/start.sh
-RUN dos2unix /app/start.sh 2>/dev/null || sed -i 's/\r$//' /app/start.sh \
-    && chmod +x /app/start.sh
-
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
