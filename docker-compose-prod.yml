@@ -11,20 +11,16 @@ services:
     ulimits:
       stack: 67108864
     ports:
-      - "3000:3000"  # Frontend
-      - "8081:8000"  # Backend
+      - "8081:8000"  # Backend serves both API and frontend
     environment:
       - PYTHONPATH=/app
-      - HOST=0.0.0.0
       - REACT_APP_API_URL=http://localhost:8000
-      - WDS_SOCKET_HOST=0.0.0.0
-      - WDS_SOCKET_PORT=3000
       - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
-      - CARLA_HOST=carla-server
-      - CARLA_PORT=2000
       - NVIDIA_VISIBLE_DEVICES=all
-      - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}
-      - VERSION=${DOCKER_IMAGE_TAG}
+      - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-dev_v1.0.0}
+      - VERSION=${DOCKER_IMAGE_TAG:-dev_v1.0.0}
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -32,12 +28,16 @@ services:
       timeout: 30s
       retries: 3
       start_period: 140s
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.healthcheck=true"
+      - "prometheus.scrape=true"
+      - "prometheus.port=8000"
+      - "prometheus.path=/metrics"
+      - "com.centurylinklabs.watchtower.lifecycle-hooks=true"
+      - "com.centurylinklabs.watchtower.enable-label=true"
+      - "app.version=${DOCKER_IMAGE_TAG}"
+      - "app.build.version=${DOCKER_IMAGE_TAG}"
     volumes:
       - ./logs:/app/logs
       - ./reports:/app/reports
@@ -47,15 +47,6 @@ services:
         condition: service_healthy
     networks:
       - carla-network
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-      - "com.centurylinklabs.watchtower.healthcheck=true"
-      - "prometheus.scrape=true"
-      - "prometheus.port=8000"
-      - "com.centurylinklabs.watchtower.lifecycle-hooks=true"
-      - "com.centurylinklabs.watchtower.enable-label=true"
-      - "app.version=${DOCKER_IMAGE_TAG}"
-      - "app.build.version=${DOCKER_IMAGE_TAG}"
     logging:
       driver: "json-file"
       options:
@@ -80,9 +71,13 @@ services:
         hard: 67108864
     env_file:
       - .env
-    volumes:
-      - ./carla-server-scripts/start.sh:/start.sh:ro
-    command: bash /start.sh
+    command: >
+      ./CarlaUnreal.sh
+      -RenderOffScreen
+      -quality-level=High
+      -fps=60
+      -ResX=1920 -ResY=1080
+      -opengl
     environment:
       - NVIDIA_VISIBLE_DEVICES=2
     healthcheck:
@@ -118,6 +113,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "watchtower"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      carla-driving-simulator-client:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -126,6 +130,7 @@ services:
 
   # Monitoring Stack
   prometheus:
+    profiles: ["monitoring"]
     image: prom/prometheus:latest
     container_name: carla-prometheus
     restart: unless-stopped
@@ -143,6 +148,21 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      carla-driving-simulator-client:
+        condition: service_healthy
+      node-exporter:
+        condition: service_healthy
+      cadvisor:
+        condition: service_healthy
+      gpu-exporter:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -151,7 +171,8 @@ services:
 
   # Log Management with Loki
   loki:
-    image: grafana/loki:2.9.0
+    profiles: ["monitoring"]
+    image: grafana/loki:latest
     container_name: carla-loki
     restart: unless-stopped
     ports:
@@ -162,6 +183,12 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
@@ -169,7 +196,8 @@ services:
         max-file: "3"
 
   promtail:
-    image: grafana/promtail:2.9.0
+    profiles: ["monitoring"]
+    image: grafana/promtail:latest
     container_name: carla-promtail
     restart: unless-stopped
     volumes:
@@ -180,12 +208,21 @@ services:
     command: -config.file=/etc/promtail/config.yml
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "promtail"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - loki
-      - carla-driving-simulator-client
+      loki:
+        condition: service_healthy
+      carla-driving-simulator-client:
+        condition: service_healthy
 
   # System Metrics
   node-exporter:
+    profiles: ["monitoring"]
     image: prom/node-exporter:latest
     container_name: carla-node-exporter
     restart: unless-stopped
@@ -202,10 +239,17 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Container Metrics
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    profiles: ["monitoring"]
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
     container_name: carla-cadvisor
     restart: unless-stopped
     ports:
@@ -221,9 +265,16 @@ services:
       - /dev/kmsg
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # GPU Metrics for DGX A100 (nvidia-smi based)
   gpu-exporter:
+    profiles: ["monitoring"]
     image: mindprince/nvidia_gpu_prometheus_exporter:0.1
     container_name: carla-gpu-exporter
     restart: unless-stopped
@@ -234,6 +285,38 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
     networks:
       - carla-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9445/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+
+
+  # Backup Service (Optional)
+  backup:
+    profiles: ["backup"]
+    image: alpine:3.18
+    container_name: carla-backup
+    restart: "no"
+    volumes:
+      - ./logs:/backup/logs:ro
+      - ./reports:/backup/reports:ro
+      - ./config:/backup/config:ro
+      - backup_data:/backup/storage
+    environment:
+      - BACKUP_RETENTION_DAYS=7
+    command: >
+      sh -c "
+        echo 'Starting backup at $$(date)'
+        tar -czf /backup/storage/carla-backup-$$(date +%Y%m%d-%H%M%S).tar.gz 
+          /backup/logs /backup/reports /backup/config
+        find /backup/storage -name 'carla-backup-*.tar.gz' -mtime +$$BACKUP_RETENTION_DAYS -delete
+        echo 'Backup completed at $$(date)'
+      "
+    networks:
+      - carla-network
 
 # Persistent Volumes
 volumes:
@@ -241,8 +324,12 @@ volumes:
     driver: local
   loki_data:
     driver: local
+  backup_data:
+    driver: local
 
 # Network Configuration
 networks:
   carla-network:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: carla-br0
