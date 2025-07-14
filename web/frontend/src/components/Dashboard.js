@@ -231,169 +231,169 @@ const ControlPanel = React.memo(({
   }, []);
 
   return (
-    <Paper sx={{
-      p: 1,
-      mb: 1,
-      mt: 0,
-      boxShadow: 3,
-      background: '#222',
-      width: '100%',
-      flex: '0 0 auto',
-      position: 'relative',
-      borderRadius: '8px'
-    }}>
-      <Grid container spacing={1} alignItems="center" sx={{ margin: 0, padding: 0 }}>
-        <Grid item xs={12} md={3}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Scenarios</InputLabel>
-            <Select
-              multiple
-              value={selectedScenarios}
-              label="Scenarios"
+        <Paper sx={{
+          p: 1,
+          mb: 1,
+          mt: 0,
+          boxShadow: 3,
+          background: '#222',
+          width: '100%',
+          flex: '0 0 auto',
+          position: 'relative',
+          borderRadius: '8px'
+        }}>
+          <Grid container spacing={1} alignItems="center" sx={{ margin: 0, padding: 0 }}>
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Scenarios</InputLabel>
+                <Select
+                  multiple
+                  value={selectedScenarios}
+                  label="Scenarios"
               onChange={onScenarioChange}
               onOpen={onDropdownOpen}
               onClose={onDropdownClose}
-              open={dropdownOpen}
+                  open={dropdownOpen}
               disabled={isStarting || isStopping || isSkipping || backendState.is_starting || backendState.is_stopping || backendState.is_skipping || isRunning || backendState.is_running}
-              size="small"
+                  size="small"
               renderValue={renderValue}
-              MenuProps={{
-                PaperProps: {
-                  style: {
-                    maxHeight: 300,
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
                     width: 300
-                  }
-                },
-                anchorOrigin: {
-                  vertical: 'bottom',
-                  horizontal: 'left',
-                },
-                transformOrigin: {
-                  vertical: 'top',
-                  horizontal: 'left',
-                }
-              }}
-            >
-              <MenuItem value="all">All Scenarios</MenuItem>
-              {status === 'Error loading scenarios' ? (
-                <MenuItem disabled>Failed to load scenarios from server.</MenuItem>
-              ) : (
-                Array.isArray(scenarios) && scenarios.map((scenario) => (
-                  <MenuItem key={scenario} value={scenario}>
-                    {scenario}
-                  </MenuItem>
-                ))
-              )}
-            </Select>
-          </FormControl>
-        </Grid>
+                      }
+                    },
+                    anchorOrigin: {
+                      vertical: 'bottom',
+                      horizontal: 'left',
+                    },
+                    transformOrigin: {
+                      vertical: 'top',
+                      horizontal: 'left',
+                    }
+                  }}
+                >
+                  <MenuItem value="all">All Scenarios</MenuItem>
+                  {status === 'Error loading scenarios' ? (
+                    <MenuItem disabled>Failed to load scenarios from server.</MenuItem>
+                  ) : (
+                    Array.isArray(scenarios) && scenarios.map((scenario) => (
+                      <MenuItem key={scenario} value={scenario}>
+                        {scenario}
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            </Grid>
 
-        <Grid item xs={12} md={3}>
-          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={debug}
+            <Grid item xs={12} md={3}>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={debug}
                   onChange={onDebugChange}
                   disabled={buttonStates.isStartDisabled || isRunning || isSkipping || backendState.is_skipping}
-                  size="small"
+                      size="small"
+                    />
+                  }
+                  label="Debug"
                 />
-              }
-              label="Debug"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={report}
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={report}
                   onChange={onReportChange}
                   disabled={buttonStates.isStartDisabled || isRunning || isSkipping || backendState.is_skipping}
-                  size="small"
+                      size="small"
+                    />
+                  }
+                  label="Report"
                 />
-              }
-              label="Report"
-            />
-          </Box>
-        </Grid>
+              </Box>
+            </Grid>
 
-        <Grid item xs={12} md={6}>
-          <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pr: 2.5, alignItems: 'center' }}>
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<PlayIcon />}
+            <Grid item xs={12} md={6}>
+              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pr: 2.5, alignItems: 'center' }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<PlayIcon />}
               onClick={onStart}
               disabled={buttonStates.isStartDisabled}
-              size="small"
-              sx={{
-                '& .MuiButton-startIcon': {
-                  marginRight: 0.5,
-                  marginLeft: 0
-                }
-              }}
-            >
-              {isStarting ? 'Starting...' : 'Start'}
-            </Button>
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<PauseIcon />}
+                  size="small"
+                  sx={{
+                    '& .MuiButton-startIcon': {
+                      marginRight: 0.5,
+                      marginLeft: 0
+                    }
+                  }}
+                >
+                  {isStarting ? 'Starting...' : 'Start'}
+                </Button>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<PauseIcon />}
               onClick={onPause}
               disabled={buttonStates.isPauseDisabled}
-              size="small"
-              sx={{
-                '& .MuiButton-startIcon': {
-                  marginRight: 0.5,
-                  marginLeft: 0
-                },
+                  size="small"
+                  sx={{
+                    '& .MuiButton-startIcon': {
+                      marginRight: 0.5,
+                      marginLeft: 0
+                    },
                 display: 'none'
-              }}
-            >
-              {isPaused ? 'Resume' : 'Pause'}
-            </Button>
-            <Button
-              variant="contained"
-              color="warning"
-              startIcon={<SkipNextIcon />}
+                  }}
+                >
+                  {isPaused ? 'Resume' : 'Pause'}
+                </Button>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  startIcon={<SkipNextIcon />}
               onClick={onSkip}
               disabled={buttonStates.isSkipDisabled}
-              size="small"
-              sx={{
-                '& .MuiButton-startIcon': {
-                  marginRight: 0.5,
-                  marginLeft: 0
-                }
-              }}
-            >
-              {isSkipping ? 'Skipping...' : 'Skip'}
-            </Button>
-            <Button
-              variant="contained"
-              color="error"
-              startIcon={<StopIcon />}
+                  size="small"
+                  sx={{
+                    '& .MuiButton-startIcon': {
+                      marginRight: 0.5,
+                      marginLeft: 0
+                    }
+                  }}
+                >
+                  {isSkipping ? 'Skipping...' : 'Skip'}
+                </Button>
+                <Button
+                  variant="contained"
+                  color="error"
+                  startIcon={<StopIcon />}
               onClick={onStop}
               disabled={buttonStates.isStopDisabled}
-              size="small"
-              sx={{
-                '& .MuiButton-startIcon': {
-                  marginRight: 0.5,
-                  marginLeft: 0
-                }
-              }}
-            >
-              {isStopping ? 'Stopping...' : 'Stop'}
-            </Button>
-          </Box>
-        </Grid>
+                  size="small"
+                  sx={{
+                    '& .MuiButton-startIcon': {
+                      marginRight: 0.5,
+                      marginLeft: 0
+                    }
+                  }}
+                >
+                  {isStopping ? 'Stopping...' : 'Stop'}
+                </Button>
+              </Box>
+            </Grid>
 
-        {status && (
-          <Grid item xs={12}>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0, mb: 0, lineHeight: 1.2 }}>
-              Status: {status}
-            </Typography>
+            {status && (
+              <Grid item xs={12}>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0, mb: 0, lineHeight: 1.2 }}>
+                  Status: {status}
+                </Typography>
+              </Grid>
+            )}
           </Grid>
-        )}
-      </Grid>
-    </Paper>
+        </Paper>
   );
 });
 
@@ -408,60 +408,60 @@ const SimulationView = React.memo(({
   instructionMessage
 }) => {
   return (
-    <Box
-      sx={{
-        flex: '1 1 0',
-        minHeight: 0,
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-        p: 0,
-        m: 0,
-        background: '#000',
-        border: '1px solid',
-        borderColor: 'divider',
-        position: 'relative',
-        borderRadius: '8px'
-      }}
-    >
-      <canvas
-        id="simulationCanvas"
-        ref={canvasRef}
+        <Box
+          sx={{
+            flex: '1 1 0',
+            minHeight: 0,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            p: 0,
+            m: 0,
+            background: '#000',
+            border: '1px solid',
+            borderColor: 'divider',
+            position: 'relative',
+            borderRadius: '8px'
+          }}
+        >
+          <canvas
+            id="simulationCanvas"
+            ref={canvasRef}
         style={canvasStyle}
       />
       <Box sx={overlayStyle}>
-        <img
-          src="/wavy_logo_loading.gif"
-          alt="Loading"
+            <img
+              src="/wavy_logo_loading.gif"
+              alt="Loading"
           style={loadingImageStyle}
-        />
-        <Typography
-          variant="h6"
-          sx={{
-            color: 'white',
-            mt: 2,
-            textAlign: 'center',
-            textShadow: '0 2px 4px rgba(0,0,0,0.5)',
-            whiteSpace: 'pre-line'
-          }}
-        >
-          {error ? error : status}
-        </Typography>
-        {error && (
-          <Typography
-            variant="body2"
-            sx={{
-              color: '#ff6b6b',
-              mt: 1,
-              textAlign: 'center',
-              textShadow: '0 1px 2px rgba(0,0,0,0.5)'
-            }}
-          >
-            Click Start button to try again
-          </Typography>
-        )}
+            />
+            <Typography
+              variant="h6"
+              sx={{
+                color: 'white',
+                mt: 2,
+                textAlign: 'center',
+                textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                whiteSpace: 'pre-line'
+              }}
+            >
+              {error ? error : status}
+            </Typography>
+            {error && (
+              <Typography
+                variant="body2"
+                sx={{
+                  color: '#ff6b6b',
+                  mt: 1,
+                  textAlign: 'center',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                }}
+              >
+                Click Start button to try again
+              </Typography>
+            )}
         {!error && (
           <Typography
             variant="body2"
@@ -473,10 +473,10 @@ const SimulationView = React.memo(({
             }}
           >
             {instructionMessage}
-          </Typography>
-        )}
-      </Box>
-    </Box>
+              </Typography>
+            )}
+          </Box>
+        </Box>
   );
 });
 
