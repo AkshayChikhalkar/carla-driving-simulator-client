@@ -24,8 +24,6 @@ ENV VERSION=$VERSION
 # Create version file for application access
 WORKDIR /app
 
-RUN echo "$VERSION" > /app/version.txt
-
 # Create necessary directories
 RUN mkdir -p /app/config /app/logs /app/reports
 
