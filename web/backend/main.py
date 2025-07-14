@@ -1669,23 +1669,7 @@ async def change_password(payload: dict, current_user: dict = Depends(get_curren
 
 @app.get("/api/version")
 async def get_version():
-    # Primary source: Docker image tag from environment variables
-    # Check multiple common Docker environment variables
-    version = (
-        os.environ.get("DOCKER_IMAGE_TAG") or
-        os.environ.get("IMAGE_TAG") or
-        os.environ.get("VERSION") or
-        os.environ.get("APP_VERSION")
-    )
-    
-    if not version:
-        # Fallback to VERSION file
-        version_file = Path(__file__).parent.parent.parent / "VERSION"
-        if version_file.exists():
-            version = version_file.read_text().strip()
-        else:
-            version = "dev"
-    
+    version = os.environ.get("VERSION", "dev")
     return {"version": version}
 
 
