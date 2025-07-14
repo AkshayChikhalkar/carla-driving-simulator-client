@@ -37,13 +37,15 @@ const VersionDisplay = () => {
     fetchVersion();
   }, []);
 
+  console.log('VersionDisplay rendering with version:', version); // Debug log
+
   return (
     <Box
       sx={{
         position: 'fixed',
         bottom: 12,
         left: 12,
-        zIndex: 1000,
+        zIndex: 9999, // Higher z-index
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-start',
@@ -54,7 +56,7 @@ const VersionDisplay = () => {
         label={`v${version}`}
         size="small"
         sx={{
-          backgroundColor: 'rgba(0,0,0,0.8)',
+          backgroundColor: 'transparent', // Remove background
           color: 'white',
           fontSize: '0.75rem',
           height: '20px',
@@ -67,9 +69,9 @@ const VersionDisplay = () => {
         <Typography
           variant="caption"
           sx={{
-            color: 'rgba(255,255,255,0.7)',
+            color: 'rgba(255,255,255,0.8)', // More visible text
             fontSize: '0.6rem',
-            backgroundColor: 'rgba(0,0,0,0.6)',
+            backgroundColor: 'rgba(0,0,0,0.8)', // More opaque background
             padding: '2px 6px',
             borderRadius: '4px',
           }}
@@ -81,4 +83,4 @@ const VersionDisplay = () => {
   );
 };
 
-export default VersionDisplay; 
+export default VersionDisplay;
