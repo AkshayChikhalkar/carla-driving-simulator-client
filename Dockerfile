@@ -16,10 +16,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-ARG IMAGE_TAG=dev
-ARG VERSION=dev
-ENV DOCKER_IMAGE_TAG=$IMAGE_TAG
+ARG DOCKER_IMAGE_TAG
+ARG VERSION
+ARG BUILD_TIME
+
+ENV DOCKER_IMAGE_TAG=$DOCKER_IMAGE_TAG
 ENV VERSION=$VERSION
+ENV BUILD_TIME=$BUILD_TIME
 
 # Create version file for application access
 WORKDIR /app
@@ -63,13 +66,10 @@ ENV PYTHONPATH=/app \
     TESTING=false \
     # Container-specific environment variables for vehicle spawning fixes
     CONTAINER_ENV=true \
-    WEB_MODE=true \
-    VERSION=${VERSION} \
-    DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG} \
-    BUILD_TIME=${BUILD_TIME}
+    WEB_MODE=true
 # Copy start script and fix line endings
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

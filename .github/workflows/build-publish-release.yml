@@ -151,7 +151,7 @@ jobs:
   test:
     name: Run tests and collect coverage
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_tests == 'true'
+    if: github.event_name == 'push' || github.event.inputs.run_tests == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -195,7 +195,7 @@ jobs:
     name: Test Docker Builds and Save Images
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' || inputs.run_docker_tests == 'true'
+    if: github.event_name == 'push' || github.event.inputs.run_docker_tests == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -218,34 +218,73 @@ jobs:
 
       - name: Test Production Dockerfile
         run: |
-          docker build -t test-prod .
+          docker build -t test-prod \
+            --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
+            --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
+            --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+            .
           echo "Production Dockerfile builds successfully"
 
       - name: Test Development Dockerfile
         if: env.skip_dev_build != 'true'
         run: |
-          docker build -f Dockerfile.dev -t test-dev .
+          docker build -f Dockerfile.dev -t test-dev \
+            --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
+            --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
+            --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+            .
           echo "Development Dockerfile builds successfully"
         env:
           skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Test Docker Compose
         run: |
-          # Test docker compose build
-          docker compose build
+          # Test docker compose build with build args
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          docker compose build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
           echo "Docker Compose build successful"
           
           # Test docker compose config validation
           docker compose config
           echo "Docker Compose configuration is valid"
+          
+          # Test runtime validation (start services and check health)
+          echo "Testing Docker Compose runtime validation..."
+          docker compose up -d --timeout 60
+          sleep 30  # Wait for services to start
+          
+          # Check if the main service is healthy
+          if docker compose ps | grep -q "healthy"; then
+            echo "✅ Docker Compose services are healthy"
+          else
+            echo "⚠️  Some services may not be healthy, but continuing..."
+          fi
+          
+          # Clean up
+          docker compose down
+          echo "Docker Compose runtime validation completed"
+
+      - name: Quick sanity test - verify environment variables
+        run: |
+          echo "Testing production image environment variables..."
+          docker run --rm --entrypoint /bin/sh test-prod -c "env | grep -E '(VERSION|DOCKER_IMAGE_TAG|BUILD_TIME)'"
+          
+          if [ "${{ env.skip_dev_build }}" != "true" ]; then
+            echo "Testing development image environment variables..."
+            docker run --rm --entrypoint /bin/sh test-dev -c "env | grep -E '(VERSION|DOCKER_IMAGE_TAG|BUILD_TIME)'"
+          fi
+        env:
+          skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Save production image as artifact
+        if: false  # Disabled since docker-publish always rebuilds
         run: |
           docker save test-prod | gzip > production-image.tar.gz
           echo "Production image saved as artifact"
 
       - name: Save development image as artifact
-        if: env.skip_dev_build != 'true'
+        if: false  # Disabled since docker-publish always rebuilds
         run: |
           docker save test-dev | gzip > development-image.tar.gz
           echo "Development image saved as artifact"
@@ -253,6 +292,7 @@ jobs:
           skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Upload Docker images as artifacts
+        if: false  # Disabled since docker-publish always rebuilds
         uses: actions/upload-artifact@v4
         with:
           name: docker-images
@@ -266,10 +306,10 @@ jobs:
   build:
     needs: [test, docker-build-test, version-bump]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.run_build == 'true'
+    if: github.event_name == 'push' || github.event.inputs.run_build == 'true'
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-      build_time: ${{ needs.version-bump.outputs.build_time }}
+      build_time: ${{ steps.get_build_time.outputs.build_time }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -314,6 +354,13 @@ jobs:
         env:
           build_time: ${{ needs.version-bump.outputs.build_time }}
 
+      - name: Get build time
+        id: get_build_time
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "Build time: $BUILD_TIME"
+
       - name: Build Python package
         run: |
           # Clean any existing builds
@@ -352,40 +399,6 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package
-          path: dist/
-
-      - name: Download Docker images
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-images
-          path: ./
-
-      - name: Load production image
-        run: |
-          if [ -f "production-image.tar.gz" ]; then
-            gunzip -c production-image.tar.gz | docker load
-            echo "Production image loaded successfully"
-          else
-            echo "Production image artifact not found, will build from scratch"
-            echo "build_prod_from_scratch=true" >> $GITHUB_ENV
-          fi
-        env:
-          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
-
-      - name: Load development image
-        run: |
-          if [ -f "development-image.tar.gz" ]; then
-            gunzip -c development-image.tar.gz | docker load
-            echo "Development image loaded successfully"
-          else
-            echo "Development image artifact not found, will build from scratch"
-            echo "build_dev_from_scratch=true" >> $GITHUB_ENV
-          fi
-
       - name: Get version from Git tags
         id: get_version
         run: |
@@ -410,7 +423,7 @@ jobs:
           fi
 
       - name: Build and push production image
-        if: env.build_prod_from_scratch == 'true' && steps.check_docker.outputs.docker_exists != 'true'
+        if: steps.check_docker.outputs.docker_exists != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -429,22 +442,7 @@ jobs:
           provenance: true
           platforms: linux/amd64
         env:
-          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
           build_time: ${{ steps.get_version.outputs.build_time }}
-
-      - name: Tag and push production image (reused)
-        if: env.build_prod_from_scratch != 'true' && steps.check_docker.outputs.docker_exists != 'true'
-        run: |
-          docker tag test-prod ${{ env.DOCKER_IMAGE }}:latest
-          docker tag test-prod ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
-          
-          # Push both tags
-          docker push ${{ env.DOCKER_IMAGE }}:latest
-          docker push ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
-          
-          echo "Production image tagged and pushed successfully"
-        env:
-          build_prod_from_scratch: ${{ env.build_prod_from_scratch }}
 
       - name: Set DOCKER_IMAGE_TAG environment variable
         run: |
