@@ -46,7 +46,7 @@ import os
 
 frontend_build_dir = os.path.join(os.path.dirname(__file__), "../../web/frontend/build")
 if os.path.exists(frontend_build_dir):
-    app.mount("/app", StaticFiles(directory=frontend_build_dir, html=True), name="static")
+    app.mount("/", StaticFiles(directory=frontend_build_dir, html=True), name="static")
 
 # Prometheus metrics
 # Counters
@@ -521,10 +521,10 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_uncaught_exception
 
 
-@app.get("/")
-async def root():
-    """Root endpoint for health check"""
-    return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
+# @app.get("/")
+# async def root():
+#     """Root endpoint for health check"""
+#     return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
 
 
 @app.get("/health")
