@@ -225,8 +225,17 @@ jobs:
       - name: Test Docker Compose
         run: |
           # Test docker compose build with build args
-          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 2>/dev/null | sed 's/^v//' || echo "dev")
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # Set environment variables for docker compose
+          export DOCKER_IMAGE_TAG=$VERSION
+          export VERSION=$VERSION
+          export BUILD_TIME=$BUILD_TIME
+          
+          echo "Using version: $VERSION"
+          echo "Using build time: $BUILD_TIME"
+          
           docker compose -f deployment/docker/docker-compose.yml build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
           echo "Docker Compose build successful"
           

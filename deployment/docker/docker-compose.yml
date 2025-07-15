@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   carla-driving-simulator-client:
     image: akshaychikhalkar/carla-driving-simulator-client:latest
@@ -70,8 +68,6 @@ services:
       stack:
         soft: 67108864
         hard: 67108864
-    env_file:
-      - .env
     command: >
       ./CarlaUnreal.sh
       -RenderOffScreen
