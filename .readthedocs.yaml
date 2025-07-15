@@ -21,7 +21,7 @@ formats:
 # Set the path to your Python project to install it
 python:
   install:
-    - requirements: docs/requirements.txt
+    - requirements: docs/requirements.txt 
     - method: pip
       path: .
       extra_requirements:

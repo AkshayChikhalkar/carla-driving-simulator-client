@@ -227,27 +227,27 @@ jobs:
           # Test docker compose build with build args
           VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          docker compose build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
+          docker compose -f deployment/docker/docker-compose.yml build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
           echo "Docker Compose build successful"
           
           # Test docker compose config validation
-          docker compose config
+          docker compose -f deployment/docker/docker-compose.yml config
           echo "Docker Compose configuration is valid"
           
           # Test runtime validation (start services and check health)
           echo "Testing Docker Compose runtime validation..."
-          docker compose up -d --timeout 60
+          docker compose -f deployment/docker/docker-compose.yml up -d --timeout 60
           sleep 30  # Wait for services to start
           
           # Check if the main service is healthy
-          if docker compose ps | grep -q "healthy"; then
+          if docker compose -f deployment/docker/docker-compose.yml ps | grep -q "healthy"; then
             echo "✅ Docker Compose services are healthy"
           else
             echo "⚠️  Some services may not be healthy, but continuing..."
           fi
           
           # Clean up
-          docker compose down
+          docker compose -f deployment/docker/docker-compose.yml down
           echo "Docker Compose runtime validation completed"
 
       - name: Quick sanity test - verify environment variables
@@ -571,12 +571,12 @@ jobs:
             git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
             cd carla-driving-simulator-client
             
-            # Run with docker-compose
-            docker-compose up --build
+            # Run with docker compose
+            docker compose -f deployment/docker/docker-compose.yml up --build
             
             # Or pull the latest image and run
-            docker-compose pull
-            docker-compose up
+            docker compose -f deployment/docker/docker-compose.yml pull
+            docker compose -f deployment/docker/docker-compose.yml up
             ```
             
             ## Python Package
