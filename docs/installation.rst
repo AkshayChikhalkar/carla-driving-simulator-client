@@ -32,7 +32,7 @@ Steps
 
    .. code-block:: bash
 
-      docker-compose -f docker-compose-prod.yml up -d
+      docker-compose -f deployment/docker/docker-compose.yml up -d
 
 4. **(Alternative) Run with Docker directly:**
 

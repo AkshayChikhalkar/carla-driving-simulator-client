@@ -35,7 +35,7 @@ Quickstart
 
 .. code-block:: bash
 
-   docker-compose -f docker-compose-prod.yml up -d
+   docker-compose -f deployment/docker/docker-compose.yml up -d
 
 **Option 2: Docker Direct**
 
