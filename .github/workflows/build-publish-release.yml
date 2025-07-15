@@ -205,16 +205,11 @@ jobs:
 
       - name: Validate Dockerfile existence
         run: |
-          if [ ! -f "Dockerfile" ]; then
+          if [ ! -f "deployment/docker/Dockerfile" ]; then
             echo "Error: Dockerfile not found"
             exit 1
           fi
-          if [ ! -f "Dockerfile.dev" ]; then
-            echo "Warning: Dockerfile.dev not found, skipping dev build test"
-            echo "skip_dev_build=true" >> $GITHUB_ENV
-          else
-            echo "skip_dev_build=false" >> $GITHUB_ENV
-          fi
+
 
       - name: Test Production Dockerfile
         run: |
@@ -222,20 +217,10 @@ jobs:
             --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-            .
+            -f deployment/docker/Dockerfile .
           echo "Production Dockerfile builds successfully"
 
-      - name: Test Development Dockerfile
-        if: env.skip_dev_build != 'true'
-        run: |
-          docker build -f Dockerfile.dev -t test-dev \
-            --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
-            --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
-            --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-            .
-          echo "Development Dockerfile builds successfully"
-        env:
-          skip_dev_build: ${{ env.skip_dev_build }}
+
 
       - name: Test Docker Compose
         run: |
@@ -270,12 +255,6 @@ jobs:
           echo "Testing production image environment variables..."
           docker run --rm --entrypoint /bin/sh test-prod -c "env | grep -E '(VERSION|DOCKER_IMAGE_TAG|BUILD_TIME)'"
           
-          if [ "${{ env.skip_dev_build }}" != "true" ]; then
-            echo "Testing development image environment variables..."
-            docker run --rm --entrypoint /bin/sh test-dev -c "env | grep -E '(VERSION|DOCKER_IMAGE_TAG|BUILD_TIME)'"
-          fi
-        env:
-          skip_dev_build: ${{ env.skip_dev_build }}
 
       - name: Save production image as artifact
         if: false  # Disabled since docker-publish always rebuilds
@@ -283,13 +262,7 @@ jobs:
           docker save test-prod | gzip > production-image.tar.gz
           echo "Production image saved as artifact"
 
-      - name: Save development image as artifact
-        if: false  # Disabled since docker-publish always rebuilds
-        run: |
-          docker save test-dev | gzip > development-image.tar.gz
-          echo "Development image saved as artifact"
-        env:
-          skip_dev_build: ${{ env.skip_dev_build }}
+
 
       - name: Upload Docker images as artifacts
         if: false  # Disabled since docker-publish always rebuilds
@@ -298,10 +271,7 @@ jobs:
           name: docker-images
           path: |
             production-image.tar.gz
-            development-image.tar.gz
           retention-days: 1
-        env:
-          skip_dev_build: ${{ env.skip_dev_build }}
 
   build:
     needs: [test, docker-build-test, version-bump]
@@ -351,8 +321,6 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
-        env:
-          build_time: ${{ needs.version-bump.outputs.build_time }}
 
       - name: Get build time
         id: get_build_time
@@ -427,7 +395,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile.dev
+          file: deployment/docker/Dockerfile
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
@@ -436,13 +404,12 @@ jobs:
             IMAGE_TAG=${{ steps.get_version.outputs.version }}
             DOCKER_IMAGE_TAG=${{ steps.get_version.outputs.version }}
             VERSION=${{ steps.get_version.outputs.version }}
-            BUILD_TIME=${{ steps.get_version.outputs.build_time }}
+            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           platforms: linux/amd64
-        env:
-          build_time: ${{ steps.get_version.outputs.build_time }}
+
 
       - name: Set DOCKER_IMAGE_TAG environment variable
         run: |

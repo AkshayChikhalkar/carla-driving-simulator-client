@@ -86,7 +86,7 @@ docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
 # Or use Docker Compose (recommended)
 git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
 cd carla-driving-simulator-client
-docker-compose -f docker-compose-prod.yml up -d
+docker-compose -f deployment/docker/docker-compose.yml up -d
 ```
 
 ### From PyPI
@@ -149,26 +149,93 @@ The simulator client can be configured through the `config/simulation_config.yam
 
 ```
 carla-driving-simulator-client/
-├── src/
-│   ├── core/
-│   │   ├── world.py
-│   │   ├── vehicle.py
-│   │   └── sensors.py
-│   ├── visualization/
-│   │   ├── hud.py
-│   │   ├── minimap.py
-│   │   └── camera.py
-│   ├── control/
-│   │   ├── keyboard.py
-│   │   └── autopilot.py
-│   └── utils/
-│       ├── config.py
-│       └── logging.py
-├── tests/
-├── config/
-├── docs/
-├── requirements.txt
-└── README.md
+├── 📁 .github/                    # GitHub Actions workflows
+│   └── workflows/
+│       ├── build-publish-release.yml    # Original workflow
+│       └── ci-cd-enhanced.yml           # Enhanced workflow
+├── 📁 .vscode/                    # VS Code settings
+├── 📁 config/                     # Configuration files
+│   ├── simulation.yaml            # Application configuration
+│   └── tools/                     # Development tool configurations
+│       └── .pre-commit-config.yaml     # Pre-commit hooks
+├── 📁 deployment/                 # Deployment configurations
+│   ├── docker/                   # Docker configurations
+│   │   ├── Dockerfile            # Production Docker image
+│   │   ├── docker-compose.yml    # Production compose
+│   │   └── docker-compose.local.yml # Local development compose
+│   ├── monitoring/               # Monitoring configurations
+│   │   ├── loki-config.yml      # Log aggregation
+│   │   ├── prometheus.yml        # Metrics collection
+│   │   └── promtail-config.yml  # Log shipping
+│   └── grafana/                  # Grafana dashboards
+│       └── dashboards/           # Monitoring dashboards
+├── 📁 docs/                      # Documentation
+│   ├── auto_generate_docs.py     # Documentation generator
+│   ├── generate_diagrams.py      # Diagram generator
+│   └── *.rst                     # Sphinx documentation
+├── 📁 scripts/                   # Build and utility scripts
+│   ├── dev-tasks.bat            # Windows batch file (development tasks)
+│   ├── dev-tasks.ps1            # PowerShell script (development tasks)
+│   ├── generate_dbml.py         # Database schema generator
+│   └── start.sh                 # Quick start script
+├── 📁 src/                       # Main application code
+│   ├── core/                     # Core simulation components
+│   ├── control/                  # Vehicle control
+│   ├── scenarios/                # Test scenarios
+│   ├── database/                 # Database models and setup
+│   ├── models/                   # Data models
+│   ├── utils/                    # Utilities
+│   ├── visualization/            # Visualization components
+│   └── main.py                   # Application entry point
+├── 📁 web/                       # Web application
+│   ├── backend/                  # FastAPI backend
+│   └── frontend/                 # React frontend
+├── 📁 tests/                     # Test files
+├── 📁 wheels/                    # CARLA wheel files
+├── 📁 logs/                      # Application logs
+├── 📁 reports/                   # Generated reports
+├── 📄 README.md                  # Main documentation
+├── 📄 LICENSE                    # License file
+├── 📄 pyproject.toml            # Python project configuration
+├── 📄 Makefile                  # Unix/Linux development tasks
+├── 📄 requirements.txt           # Python dependencies
+├── 📄 requirements-docker.txt    # Docker dependencies
+├── 📄 run.py                    # Quick start script
+├── 📄 CHANGELOG.md              # Change log
+├── 📄 VERSIONING.md             # Versioning strategy
+├── 📄 ENVIRONMENT.md            # Environment configuration
+├── 📄 CONTRIBUTING.md           # Contributing guidelines
+├── 📄 CODE_OF_CONDUCT.md        # Code of conduct
+├── 📄 SUPPORT.md                # Support information
+└── 📄 SECURITY.md               # Security policy
+```
+
+### 🚀 Development Task Tools
+
+#### **Cross-Platform Options**
+
+**Unix/Linux/macOS:**
+```bash
+# Use Makefile
+make ci-simulate
+make dev-setup
+make quick-start
+```
+
+**Windows PowerShell (Recommended):**
+```powershell
+# Use PowerShell script
+.\scripts\dev-tasks.ps1 ci-simulate
+.\scripts\dev-tasks.ps1 dev-setup
+.\scripts\dev-tasks.ps1 quick-start
+```
+
+**Windows Command Prompt:**
+```cmd
+# Use batch file
+scripts\dev-tasks.bat ci-simulate
+scripts\dev-tasks.bat dev-setup
+scripts\dev-tasks.bat quick-start
 ```
 
 ## Contributing

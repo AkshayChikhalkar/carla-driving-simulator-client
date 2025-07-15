@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  carla-simulator-client:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    image: carla-simulator-client:local
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+    volumes:
+      - ../../logs:/app/logs
+      - ../../reports:/app/reports
+    networks:
+      - carla-network
+
+networks:
+  carla-network:
+    driver: bridge 
