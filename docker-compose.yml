@@ -17,13 +17,11 @@ services:
       - REACT_APP_API_URL=http://localhost:8000
       - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
       - NVIDIA_VISIBLE_DEVICES=all
-      - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-dev_v1.0.0}
-      - VERSION=${DOCKER_IMAGE_TAG:-dev_v1.0.0}
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s
       timeout: 30s
       retries: 3
@@ -82,10 +80,10 @@ services:
       - NVIDIA_VISIBLE_DEVICES=2
     healthcheck:
       test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      interval: 60s
+      timeout: 30s
+      retries: 10
+      start_period: 300s
     networks:
       - carla-network
     labels:

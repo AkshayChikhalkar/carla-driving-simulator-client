@@ -2,12 +2,12 @@
 
 # Server settings
 server:
-  host: hal9000.skim.th-owl.de
+  host: carla-server #hal9000.skim.th-owl.de
   port: 2000
-  timeout: 30.0  # Increased from 10.0 to 30.0 seconds
+  timeout: 60.0  # Increased to 60 seconds
   connection:
-    max_retries: 3
-    retry_delay: 5.0  # seconds
+    max_retries: 10
+    retry_delay: 30.0  # seconds
 
 # World settings
 world:
@@ -28,7 +28,7 @@ world:
     speed_difference_percentage: -100  # percentage (negative means faster)
     ignore_lights_percentage: 0  # percentage (0 means follow all traffic lights)
     ignore_signs_percentage: 0  # percentage (0 means follow all traffic signs)
-  fixed_delta_seconds: 0.0167  # 60 FPS (1/60 = 0.0167)
+  fixed_delta_seconds: 0.05  # 20 FPS
   target_distance: 500.0
   num_vehicles: 10
   enable_collision: false

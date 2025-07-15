@@ -56,13 +56,13 @@ scrape_configs:
           source: output
 
   # Application logs with filtering
-  - job_name: carla-app-logs
+  - job_name: carla-client-logs
     static_configs:
       - targets:
           - localhost
         labels:
-          job: carla-app
-          service: carla-simulator
+          job: carla-client
+          service: carla-client
           __path__: /app/logs/*.log
     pipeline_stages:
       # Drop noisy WebSocket and controller errors
