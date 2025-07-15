@@ -2,13 +2,13 @@
 
 <p align="left">
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
-        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=CI%2FCD%20Pipeline&logo=github" alt="CI/CD Pipeline">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=master&label=CI%2FCD%20Pipeline&logo=github" alt="CI/CD Pipeline">
     </a>
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
-        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=CI%2FCD&label=Tests&logo=github" alt="Tests">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=master&label=Tests&logo=github" alt="Tests">
     </a>
     <a href="https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
-        <img src="https://img.shields.io/codecov/c/github/akshaychikhalkar/carla-driving-simulator-client/CI%2FCD?logo=codecov" alt="Codecov">
+        <img src="https://img.shields.io/codecov/c/github/akshaychikhalkar/carla-driving-simulator-client/master?logo=codecov" alt="Codecov">
     </a>
     <a href="https://carla-driving-simulator-client.readthedocs.io/en/latest/" target="_blank">
         <img src="https://img.shields.io/readthedocs/carla-driving-simulator-client?logo=read-the-docs" alt="Documentation Status">
@@ -37,8 +37,8 @@
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls" target="_blank">
         <img src="https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub pull requests">
     </a>
-    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/commits/CI/CD" target="_blank">
-        <img src="https://img.shields.io/github/last-commit/akshaychikhalkar/carla-driving-simulator-client/CI/CD" alt="GitHub last commit">
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/commits/master" target="_blank">
+        <img src="https://img.shields.io/github/last-commit/akshaychikhalkar/carla-driving-simulator-client/master" alt="GitHub last commit">
     </a>
     <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
         <img src="https://img.shields.io/github/repo-size/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub repo size">
@@ -80,8 +80,13 @@ A personal project for experimenting with CARLA client, featuring vehicle contro
 # Pull the latest image
 docker pull akshaychikhalkar/carla-driving-simulator-client:latest
 
-# Run with Docker
-docker run -p 3000:3000 -p 8000:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+# Run with Docker (frontend served by backend on port 8081)
+docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+
+# Or use Docker Compose (recommended)
+git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
+cd carla-driving-simulator-client
+docker-compose -f docker-compose-prod.yml up -d
 ```
 
 ### From PyPI
@@ -187,15 +192,15 @@ Note: I cannot guarantee response times or implementation of suggested features 
 
 ## Support
 
-If you need help, please check our [Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SUPPORT.md) for various ways to get assistance.
+If you need help, please check our [Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SUPPORT.md) for various ways to get assistance.
 
 ## Security
 
-Please report any security issues to our [Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SECURITY.md).
+Please report any security issues to our [Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SECURITY.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -204,14 +209,14 @@ This project is licensed under the MIT License - see the [LICENSE](https://githu
 
 ## Roadmap
 
-Check our [Roadmap](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/ROADMAP.md) for planned features and improvements.
+Check our [Roadmap](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/ROADMAP.md) for planned features and improvements.
 
 ## Documentation
 
-- **[Versioning Strategy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/VERSIONING.md)** - How automatic versioning works
-- **[Environment Configuration](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/ENVIRONMENT.md)** - Environment variables and configuration
-- **[Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SUPPORT.md)** - Getting help and support
-- **[Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/SECURITY.md)** - Reporting security issues
-- **[Contributing Guidelines](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/main/CONTRIBUTING.md)** - How to contribute to the project
+- **[Versioning Strategy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/VERSIONING.md)** - How automatic versioning works
+- **[Environment Configuration](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/ENVIRONMENT.md)** - Environment variables and configuration
+- **[Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SUPPORT.md)** - Getting help and support
+- **[Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SECURITY.md)** - Reporting security issues
+- **[Contributing Guidelines](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/CONTRIBUTING.md)** - How to contribute to the project
 
 ## Configuration 

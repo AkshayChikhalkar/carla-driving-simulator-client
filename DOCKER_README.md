@@ -81,14 +81,14 @@ docker run -it --rm \
   - Upload coverage reports
 
 #### 2. Full CI/CD Pipeline (`ci-cd.yml`)
-- **Triggers**: Push to `main`, `develop`, or `CI/CD` branches
+- **Triggers**: Push to `master` branch
 - **Actions**:
   - All PR test actions
   - Build and test Docker images
   - Build Python package
-  - Publish to Docker Hub (on `CI/CD` branch)
-  - Publish to PyPI (on `CI/CD` branch)
-  - Create GitHub release (on `CI/CD` branch)
+  - Publish to Docker Hub (on `master` branch)
+- Publish to PyPI (on `master` branch)
+- Create GitHub release (on `master` branch)
 
 ### Required Secrets
 
@@ -110,7 +110,7 @@ CODECOV_TOKEN=your_codecov_token
 
 - **`main`**: Production-ready code
 - **`develop`**: Development branch
-- **`CI/CD`**: Triggers full deployment pipeline
+- **`master`**: Triggers full deployment pipeline
 
 ## Docker Image Tags
 

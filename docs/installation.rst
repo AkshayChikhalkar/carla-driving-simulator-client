@@ -28,10 +28,21 @@ Steps
 
       pip install -e .[dev,docs]
 
-3. **(Optional) Build and run with Docker:**
+3. **(Recommended) Run with Docker Compose:**
 
    .. code-block:: bash
 
-      docker-compose up --build
+      docker-compose -f docker-compose-prod.yml up -d
+
+4. **(Alternative) Run with Docker directly:**
+
+   .. code-block:: bash
+
+      docker pull akshaychikhalkar/carla-driving-simulator-client:latest
+      docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+
+5. **Access the application:**
+
+   Open your browser and navigate to: http://localhost:8081
 
 For more details, see the `README.md` and `DOCKER_README.md` files. 

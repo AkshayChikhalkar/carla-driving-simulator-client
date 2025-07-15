@@ -1,11 +1,11 @@
 Architecture & Pipeline Diagrams
 ================================
 
-Below are links to the system architecture and CI/CD pipeline diagrams:
+Below are links to the system architecture and master branch workflow diagrams:
 
 - `System Architecture Diagram <../mmd/system_architecture_diagram.mmd>`_
 - `Deployment Architecture Diagram <../mmd/system_architecture_deployment.mmd>`_
-- `CI/CD Pipeline Diagram <../mmd/pipeline.mmd>`_
+- `Master Branch Workflow Diagram <../mmd/pipeline.mmd>`_
 
 To view these diagrams, use a Mermaid live editor or compatible tool.
 
@@ -52,22 +52,22 @@ Database Schema
    :width: 100%
    :align: center
 
-CI/CD & Deployment
+Master Branch Workflow & Deployment
 ------------------
 
-CI/CD Workflow (High Level)
+Master Branch Workflow (High Level)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. image:: _static/images/carla_ci_cd_workflow_high_level.png
-   :alt: CI/CD Workflow High Level
+   :alt: Master Branch Workflow High Level
    :width: 100%
    :align: center
 
-CI/CD Workflow (Detailed)
+Master Branch Workflow (Detailed)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. image:: _static/images/carla_ci_cd_workflow.png
-   :alt: CI/CD Workflow Detailed
+   :alt: Master Branch Workflow Detailed
    :width: 100%
    :align: center
 

@@ -14,13 +14,13 @@ Versions follow the format: `vX.Y.Z` (e.g., `v1.2.3`)
 
 **Current version: `v1.0.7`**
 
-The next version will be determined by your commit message when you push to the CI/CD branch.
+The next version will be determined by your commit message when you push to the master branch.
 
 ## 🔄 Version Detection Priority
 
 The system detects versions in this order:
 
-1. **Environment Variable**: `PACKAGE_VERSION` (set by CI/CD)
+1. **Environment Variable**: `PACKAGE_VERSION` (set by CI/CD pipeline)
 2. **Git Tags**: Latest semantic version tag (e.g., `v1.2.3`)
 3. **Fallback**: `1.0.0` if no tags exist
 
@@ -28,7 +28,7 @@ The system detects versions in this order:
 
 ### How It Works
 
-1. **Push to CI/CD branch** triggers automatic version bump
+1. **Push to master branch** triggers automatic version bump
 2. **Version is incremented** according to commit messages:
    - `feat:` → Minor version bump (1.0.7 → 1.1.0)
    - `fix:` → Patch version bump (1.0.7 → 1.0.8)
@@ -51,7 +51,7 @@ The system detects versions in this order:
 - ❌ No manual `git tag` commands needed
 - ❌ No manual version file updates
 - ❌ No manual bump script usage
-- ✅ Just push to CI/CD branch and versioning happens automatically
+- ✅ Just push to master branch and versioning happens automatically
 
 ## 📦 Package Versioning
 
@@ -80,7 +80,7 @@ docker pull akshaychikhalkar/carla-driving-simulator-client:1.0.7
 
 The GitHub Actions workflow:
 
-1. **Automatically bumps versions** on every CI/CD branch push
+1. **Automatically bumps versions** on every master branch push
 2. **Creates single version** for each release
 3. **Prevents duplicate publishing** - checks if version already exists
 4. **Publishes to all platforms** with the same version
@@ -114,11 +114,11 @@ git tag -l v1.0.7
    - `fix: resolve bug` → Patch version bump
    - `BREAKING CHANGE: major change` → Major version bump
 
-2. **Push to CI/CD branch** to trigger automatic release
+2. **Push to master branch** to trigger automatic release
 
 3. **No manual versioning** - let the system handle it
 
-4. **Test thoroughly** before pushing to CI/CD branch
+4. **Test thoroughly** before pushing to master branch
 
 ## 🔍 Version History
 

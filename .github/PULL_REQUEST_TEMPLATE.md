@@ -36,7 +36,7 @@ Please check the relevant option.
 - [ ] **Breaking Change** (fix or feature that would cause existing functionality to not work as expected)
 - [ ] **Documentation** (changes to the documentation only)
 - [ ] **Refactoring** (a code change that neither fixes a bug nor adds a feature)
-- [ ] **CI/CD** (changes to our CI/CD pipeline)
+- [ ] **CI/CD** (changes to our CI/CD pipeline or workflow)
 - [ ] **Other** (please describe):
 
 ---

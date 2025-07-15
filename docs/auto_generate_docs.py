@@ -86,7 +86,7 @@ class DocumentationAutomator:
         self._generate_component_architecture_mmd()
         
         # Generate CI/CD workflow diagram
-        self._generate_cicd_workflow_mmd()
+        self._generate_master_workflow_mmd()
         
         # Generate deployment diagram
         self._generate_deployment_mmd()
@@ -212,14 +212,14 @@ class DocumentationAutomator:
         except Exception as e:
             print(f"  ⚠️  Could not generate component architecture: {e}")
     
-    def _generate_cicd_workflow_mmd(self):
-        """Generate CI/CD workflow diagram from GitHub Actions."""
+    def _generate_master_workflow_mmd(self):
+        """Generate master branch workflow diagram from GitHub Actions."""
         workflow_file = self.project_root / ".github" / "workflows" / "build-publish-release.yml"
         
         if workflow_file.exists():
             mmd_content = [
                 "graph LR",
-                "    %% CI/CD Workflow for CARLA Driving Simulator",
+                "    %% Master Branch Workflow for CARLA Driving Simulator",
                 "",
                 "    %% Workflow Steps",
                 "    Push[Code Push]",

@@ -31,10 +31,30 @@ Installation
 Quickstart
 ----------
 
-To run the simulator client:
+**Option 1: Docker Compose (Recommended)**
+
+.. code-block:: bash
+
+   docker-compose -f docker-compose-prod.yml up -d
+
+**Option 2: Docker Direct**
+
+.. code-block:: bash
+
+   docker pull akshaychikhalkar/carla-driving-simulator-client:latest
+   docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+
+**Option 3: Local Development**
 
 .. code-block:: bash
 
    python run.py
+
+Access the Application
+---------------------
+
+1. Open your browser and navigate to: http://localhost:8081
+2. Log in with your credentials
+3. Start exploring the CARLA simulation interface
 
 For more details, see the README or the API Reference. 
