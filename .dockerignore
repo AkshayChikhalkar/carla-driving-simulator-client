@@ -79,9 +79,6 @@ logs/
 # Reports
 reports/
 
-# Wheels (will be installed in container)
-wheels/
-
 # Temporary files
 *.tmp
 *.temp
