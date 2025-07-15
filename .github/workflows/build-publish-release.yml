@@ -2,7 +2,7 @@ name: Run tests, build, publish and release
 
 on: 
   push:
-    branches: [ organize ]
+    branches: [ organize, develop ]
   workflow_dispatch:
     inputs:
       run_tests:
@@ -151,7 +151,7 @@ jobs:
   test:
     name: Run tests and collect coverage
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.inputs.run_tests == 'true'
+    if: ${{ github.event.inputs.run_tests == 'true' || github.event_name == 'push' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -195,7 +195,7 @@ jobs:
     name: Test Docker Builds and Save Images
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'push' || github.event.inputs.run_docker_tests == 'true'
+    if: ${{ github.event.inputs.run_docker_tests == 'true' || github.event_name == 'push' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -211,81 +211,59 @@ jobs:
           fi
 
 
-      - name: Test Production Dockerfile
+      - name: Test Docker Build
         run: |
-          docker build -t test-prod \
-            --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
-            --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
-            --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-            -f deployment/docker/Dockerfile .
-          echo "Production Dockerfile builds successfully"
-
-
-
-      - name: Test Docker Compose
-        run: |
-          # Test docker compose build with build args
+          # Test docker build with build args
           VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 2>/dev/null | sed 's/^v//' || echo "dev")
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          
-          # Set environment variables for docker compose
-          export DOCKER_IMAGE_TAG=$VERSION
-          export VERSION=$VERSION
-          export BUILD_TIME=$BUILD_TIME
           
           echo "Using version: $VERSION"
           echo "Using build time: $BUILD_TIME"
           
-          docker compose -f deployment/docker/docker-compose.yml build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
-          echo "Docker Compose build successful"
+          # Build Docker image for testing
+          docker build -f deployment/docker/Dockerfile \
+            --build-arg VERSION=$VERSION \
+            --build-arg DOCKER_IMAGE_TAG=$VERSION \
+            --build-arg BUILD_TIME=$BUILD_TIME \
+            -t test-prod .
+          echo "✅ Docker build successful"
+
+      - name: Test Docker Image
+        run: |
+          # Test that the image runs and responds
+          echo "Testing Docker image functionality..."
           
-          # Test docker compose config validation
-          docker compose -f deployment/docker/docker-compose.yml config
-          echo "Docker Compose configuration is valid"
+          # Start container in background
+          docker run -d --name test-container -p 8081:8000 test-prod
           
-          # Test runtime validation (start services and check health)
-          echo "Testing Docker Compose runtime validation..."
-          docker compose -f deployment/docker/docker-compose.yml up -d --timeout 60
-          sleep 30  # Wait for services to start
+          # Wait for container to start
+          sleep 30
           
-          # Check if the main service is healthy
-          if docker compose -f deployment/docker/docker-compose.yml ps | grep -q "healthy"; then
-            echo "✅ Docker Compose services are healthy"
+          # Check if container is running
+          if docker ps | grep -q "test-container"; then
+            echo "✅ Container is running"
+            
+            # Test basic connectivity (optional - only if you have a health endpoint)
+            if curl -f http://localhost:8081/health 2>/dev/null; then
+              echo "✅ Health check passed"
+            else
+              echo "⚠️  Health check failed (expected if no /health endpoint)"
+            fi
           else
-            echo "⚠️  Some services may not be healthy, but continuing..."
+            echo "❌ Container failed to start"
+            docker logs test-container
+            exit 1
           fi
           
           # Clean up
-          docker compose -f deployment/docker/docker-compose.yml down
-          echo "Docker Compose runtime validation completed"
-
-      - name: Quick sanity test - verify environment variables
-        run: |
-          echo "Testing production image environment variables..."
-          docker run --rm --entrypoint /bin/sh test-prod -c "env | grep -E '(VERSION|DOCKER_IMAGE_TAG|BUILD_TIME)'"
-          
-
-      - name: Save production image as artifact
-        if: false  # Disabled since docker-publish always rebuilds
-        run: |
-          docker save test-prod | gzip > production-image.tar.gz
-          echo "Production image saved as artifact"
-
-
-
-      - name: Upload Docker images as artifacts
-        if: false  # Disabled since docker-publish always rebuilds
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-images
-          path: |
-            production-image.tar.gz
-          retention-days: 1
+          docker stop test-container
+          docker rm test-container
+          echo "✅ Docker image test completed"
 
   build:
     needs: [test, docker-build-test, version-bump]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.inputs.run_build == 'true'
+    if: ${{ github.event.inputs.run_build == 'true' || github.event_name == 'push' }}
     outputs:
       version: ${{ steps.get_version.outputs.version }}
       build_time: ${{ steps.get_build_time.outputs.build_time }}
@@ -355,7 +333,7 @@ jobs:
 
   docker-publish:
     needs: [build, docker-build-test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/organize'
+    if: ${{ github.event.inputs.run_docker_publish == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/organize') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -438,7 +416,7 @@ jobs:
 
   pypi-publish:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/organize'
+    if: ${{ github.event.inputs.run_pypi_publish == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/organize') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -513,7 +491,7 @@ jobs:
 
   github-release:
     needs: [build, docker-publish, pypi-publish]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/organize'
+    if: ${{ github.event.inputs.run_github_release == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/organize') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

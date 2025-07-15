@@ -1,6 +1,6 @@
 services:
   carla-driving-simulator-client:
-    image: akshaychikhalkar/carla-driving-simulator-client:latest
+    image: akshaychikhalkar/carla-driving-simulator-client:${TAG-latest}
     #image: akshaychikhalkar/carla-simulator-client:dev_v1.5
     pull_policy: always
     container_name: carla-client
@@ -12,7 +12,7 @@ services:
       - "8081:8000"  # Backend (remove 3000:3000 if not needed)
     environment:
       - PYTHONPATH=/app
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=http://carla-client:8000
       - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
       - NVIDIA_VISIBLE_DEVICES=all
       - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-1.0.0}
@@ -22,7 +22,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 30s
       retries: 3
@@ -41,6 +41,7 @@ services:
       - ./logs:/app/logs
       - ./reports:/app/reports
       - ./config:/app/config
+      - ./src:/app/src:ro  # Mount source code for development
     depends_on:
       carla-server:
         condition: service_healthy
