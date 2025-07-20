@@ -204,6 +204,11 @@ class ThreadSafeState:
             self._state[key] = value
             self._state["last_state_update"] = datetime.now()
 
+    def get(self, key, default=None):
+        """Get a value with a default if key doesn't exist"""
+        with self._lock:
+            return self._state.get(key, default)
+
     def get_state(self):
         with self._lock:
             return self._state.copy()
@@ -583,30 +588,55 @@ async def health_check():
 @app.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint"""
-    # Update app info
-    APP_INFO.info({
-        'version': os.getenv("VERSION", "dev"),
-        'build_time': os.getenv("BUILD_TIME", datetime.now().isoformat()),
-        'docker_image_tag': os.getenv("DOCKER_IMAGE_TAG", "latest")
-    })
-    
-    # Update simulation status gauge
-    if runner.state["is_running"]:
-        SIMULATION_STATUS_GAUGE.set(1)  # Running
-    elif runner.state.get("is_paused", False):
-        SIMULATION_STATUS_GAUGE.set(2)  # Paused
-    else:
-        SIMULATION_STATUS_GAUGE.set(0)  # Stopped
-    
-    # Update scenario progress gauge
-    if runner.state.get("scenarios_to_run"):
-        total_scenarios = len(runner.state["scenarios_to_run"])
-        current_index = runner.state.get("current_scenario_index", 0)
-        if total_scenarios > 0:
-            progress = (current_index / total_scenarios) * 100
-            SCENARIO_PROGRESS_GAUGE.set(progress)
-    
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    try:
+        # Update app info
+        APP_INFO.info({
+            'version': os.getenv("VERSION", "dev"),
+            'build_time': os.getenv("BUILD_TIME", datetime.now().isoformat()),
+            'docker_image_tag': os.getenv("DOCKER_IMAGE_TAG", "latest")
+        })
+        
+        # Update simulation status gauge with proper error handling
+        try:
+            if runner.state["is_running"]:
+                SIMULATION_STATUS_GAUGE.set(1)  # Running
+            elif runner.state.get("is_paused", False):
+                SIMULATION_STATUS_GAUGE.set(2)  # Paused
+            else:
+                SIMULATION_STATUS_GAUGE.set(0)  # Stopped
+        except Exception as e:
+            logger.error(f"Error updating simulation status gauge: {str(e)}")
+            SIMULATION_STATUS_GAUGE.set(0)  # Default to stopped on error
+        
+        # Update scenario progress gauge with proper error handling
+        try:
+            scenarios_to_run = runner.state.get("scenarios_to_run", [])
+            if scenarios_to_run:
+                total_scenarios = len(scenarios_to_run)
+                current_index = runner.state.get("current_scenario_index", 0)
+                if total_scenarios > 0:
+                    progress = (current_index / total_scenarios) * 100
+                    SCENARIO_PROGRESS_GAUGE.set(progress)
+                else:
+                    SCENARIO_PROGRESS_GAUGE.set(0)
+            else:
+                SCENARIO_PROGRESS_GAUGE.set(0)
+        except Exception as e:
+            logger.error(f"Error updating scenario progress gauge: {str(e)}")
+            SCENARIO_PROGRESS_GAUGE.set(0)  # Default to 0 on error
+        
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        
+    except Exception as e:
+        logger.error(f"Error in metrics endpoint: {str(e)}")
+        # Return basic metrics even on error to prevent 500
+        try:
+            return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        except Exception as inner_e:
+            logger.error(f"Error generating metrics: {str(inner_e)}")
+            # Return minimal metrics to prevent complete failure
+            minimal_metrics = "# HELP carla_app_info Application information\n# TYPE carla_app_info gauge\ncarla_app_info{version=\"error\"} 1\n"
+            return Response(minimal_metrics, media_type=CONTENT_TYPE_LATEST)
 
 
 # Remove duplicate version endpoint - keeping the one at the end of the file
