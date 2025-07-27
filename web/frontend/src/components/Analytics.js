@@ -21,14 +21,14 @@ const dashboardConfigs = [
     id: 'metrics',
     label: 'Simulator Metrics',
     icon: <AssessmentIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-simulator-metrics${GRAFANA_PARAMS}`,
+    url: `${GRAFANA_BASE_URL}/carla-simulator-metrics/carla-simulator-metrics${GRAFANA_PARAMS}`,
     description: 'Vehicle speed, navigation metrics, position, and controls'
   },
   {
     id: 'performance',
     label: 'Performance Monitor',
     icon: <SpeedIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-dgx-performance${GRAFANA_PARAMS}`,
+    url: `${GRAFANA_BASE_URL}/carla-dgx-performance/carla-dgx-a100-performance-monitor${GRAFANA_PARAMS}`,
     description: 'DGX A100 GPU utilization, memory usage, CPU and system performance'
   },
   {
@@ -110,6 +110,8 @@ const Analytics = () => {
                 borderRadius: '4px'
               }}
               allowFullScreen
+              allow="fullscreen"
+              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
             />
           </Box>
         </TabPanel>
