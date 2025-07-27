@@ -35,14 +35,14 @@ const dashboardConfigs = [
     id: 'power',
     label: 'Power & Performance',
     icon: <TimelineIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-power-enhanced/carla-dgx-a100-power-consumption-enhanced${GRAFANA_PARAMS}`,
+    url: `${GRAFANA_BASE_URL}/power-and-other${GRAFANA_PARAMS}`,
     description: 'DGX A100 power consumption, GPU utilization and temperature monitoring'
   },
   {
     id: 'services',
     label: 'Services Monitor',
     icon: <LocationIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-services-monitor${GRAFANA_PARAMS}`,
+    url: `${GRAFANA_BASE_URL}/logging${GRAFANA_PARAMS}`,
     description: 'Log monitoring, error tracking, and service health for CARLA components'
   }
 ];
