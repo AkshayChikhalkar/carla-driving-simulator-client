@@ -219,7 +219,7 @@ function Layout({ children }) {
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-              CARLA Simulator
+              CARLA Simulator - 28.07.2025
             </Typography>
             
             {user && (
