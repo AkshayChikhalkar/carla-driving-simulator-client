@@ -25,6 +25,14 @@ psql -U $PGUSER -d $DB -f 03_create_tables.sql
 echo "Creating auth tables..."
 psql -U $PGUSER -d $DB -f 04_create_auth_tables.sql
 
+# 5. Create multitenant tables (run on the new DB)
+echo "Creating multitenant tables..."
+psql -U $PGUSER -d $DB -f 05_create_multitenant_tables.sql
+
+# 6. Create logs and reports tables
+echo "Creating logs and reports tables..."
+psql -U $PGUSER -d $DB -f 06_create_logging_reports.sql
+
 echo "Database setup complete!"
 echo "Database: $DB"
 echo "Schema: $SCHEMA"

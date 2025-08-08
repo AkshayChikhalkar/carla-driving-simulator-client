@@ -4,3 +4,22 @@ services:
       context: ../..
       dockerfile: deployment/docker/Dockerfile.dev
     image: carla-simulator-client:dev
+    environment:
+      - PYTHONPATH=/app
+      - REACT_APP_API_URL=http://localhost:8000
+      # Database URL can be provided directly or via parts below
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_HOST=${DB_HOST}
+      - DB_HOSTIP=${DB_HOSTIP}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      # Optional tenant context for multitenant config
+      - CONFIG_TENANT_ID=${CONFIG_TENANT_ID}
+    volumes:
+      - ../../logs:/app/logs
+      - ../../reports:/app/reports
+      - ../../config:/app/config
+    ports:
+      - "8081:8000"

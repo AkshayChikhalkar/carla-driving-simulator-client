@@ -1,181 +1,166 @@
-# CARLA Simulator Configuration
-
-# Server settings
 server:
   host: hal9000.skim.th-owl.de
   port: 2000
-  timeout: 30.0  # Increased from 10.0 to 30.0 seconds
+  timeout: 30
   connection:
     max_retries: 3
-    retry_delay: 5.0  # seconds
-
-# World settings
+    retry_delay: 5
 world:
   map: Town10HD_Opt
   weather:
     cloudiness: 0
     precipitation: 0
+    precipitation_deposits: 0
     sun_altitude_angle: 45
     sun_azimuth_angle: 0
     wind_intensity: 0
     fog_density: 0
+    fog_distance: 0
+    fog_falloff: 0
     wetness: 0
   physics:
-    max_substep_delta_time: 0.01  # 10ms
+    max_substep_delta_time: 0.01
     max_substeps: 10
   traffic:
-    distance_to_leading_vehicle: 3.0  # meters (increased for higher speed)
-    speed_difference_percentage: -100  # percentage (negative means faster)
-    ignore_lights_percentage: 0  # percentage (0 means follow all traffic lights)
-    ignore_signs_percentage: 0  # percentage (0 means follow all traffic signs)
-  fixed_delta_seconds: 0.0167  # 60 FPS (1/60 = 0.0167)
-  target_distance: 500.0
+    distance_to_leading_vehicle: 3
+    speed_difference_percentage: -100
+    ignore_lights_percentage: 0
+    ignore_signs_percentage: 0
+  fixed_delta_seconds: 0.0167
+  target_distance: 500
   num_vehicles: 10
   enable_collision: false
   synchronous_mode: true
-
-# Vehicle settings
-vehicle:
-  model: vehicle.dodge.charger
-  mass: 1500  # kg
-  drag_coefficient: 0.3
-  max_rpm: 5000
-  moi: 1.0  # moment of inertia
-  center_of_mass: [0.0, 0.0, 0.0]
-
-# Controller settings
-controller:
-  type: autopilot  # keyboard, gamepad, or autopilot
-  steer_speed: 1.0
-  throttle_speed: 1.0
-  brake_speed: 1.0
-  keyboard:
-    forward: ["w", "UP"]
-    backward: ["s", "DOWN"]
-    left: ["a", "LEFT"]
-    right: ["d", "RIGHT"]
-    brake: ["SPACE"]
-    hand_brake: ["b"]
-    reverse: ["r"]
-    quit: ["ESCAPE"]
-
-# Sensor settings
-sensors:
-  collision:
-    enabled: true
-  camera:
-    enabled: true
-    width: 1920
-    height: 890
-    fov: 100
-    x: -2.0  # moved closer to vehicle
-    y: 0.0
-    z: 1.7  # adjusted height for better view
-  gnss:
-    enabled: true
-
-# Display settings
+simulation:
+  max_speed: 120
+  simulation_time: 600
+  update_rate: 20
+  speed_change_threshold: 0.5
+  position_change_threshold: 0.1
+  heading_change_threshold: 1
+  target_tolerance: 5
+  max_collision_force: 1000
+logging:
+  log_level: DEBUG
+  enabled: true
+  directory: logs
 display:
   width: 1920
   height: 890
   fps: 60
-  hud_enabled: true
-  minimap_enabled: true
   hud:
     font_size: 15
-    font_name: "default"
+    font_name: default
     alpha: 200
     colors:
-      target: "red"
-      vehicle: "white"
-      text: "white"
-      background: "black"
+      text: white
+      target: red
+      vehicle: white
+      background: black
   minimap:
     width: 100
     height: 100
     scale: 0.1
     alpha: 128
     colors:
-      target: "red"
-      vehicle: "white"
-      text: "white"
-      background: "black"
+      text: white
+      target: red
+      vehicle: white
+      background: black
   camera:
     font_size: 20
-    font_name: "default"
-
-# Simulation settings
-simulation:
-  max_speed: 120.0  # km/h
-  simulation_time: 600  # seconds
-  update_rate: 20.0  # Hz
-  speed_change_threshold: 0.5  # m/s
-  position_change_threshold: 0.1  # meters
-  heading_change_threshold: 1.0  # degrees
-  target_tolerance: 5.0  # meters
-  max_collision_force: 1000.0  # N
-
-# Logging settings
-logging:
-  simulation_file: simulation_data.csv
-  operations_file: simulation_operations.log
-  log_level: DEBUG
-  enabled: true
-  directory: logs
-  format:
-    csv_header: "Time_Elapsed[s],Speed[km/h],Position_X[m],Position_Y[m],Position_Z[m],Throttle[0-1],Brake[0-1],Steer[-1to1],Distance_To_Target[m],Heading_To_Target[deg],Vehicle_Heading[deg],Heading_Difference[deg],Acceleration[m/s2],Angular_Velocity[rad/s],Gear,HandBrake[0/1],Reverse[0/1],Manual_Shift[0/1],Collision_Intensity[N],Weather_Cloudiness[%],Weather_Precipitation[%],Traffic_Count,FPS[Hz],Scenario_Event,Event_Details,Rotation_Pitch[deg],Rotation_Yaw[deg],Rotation_Roll[deg]"
-
-# Web backend settings
-web:
-  host: 0.0.0.0
-  port: 8000
-
-# Database settings
-database:
-  url: postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
-
-# Analytics / Monitoring settings
-analytics:
-  grafana_base_url: http://193.16.126.186:3005/d
-
-# Scenario settings
+    font_name: default
+  hud_enabled: true
+  minimap_enabled: true
+sensors:
+  camera:
+    enabled: true
+    width: 1920
+    height: 890
+    fov: 100
+    x: -2
+    y: 0
+    z: 1.7
+  collision:
+    enabled: true
+  gnss:
+    enabled: true
+controller:
+  type: autopilot
+  steer_speed: 1
+  throttle_speed: 1
+  brake_speed: 1
+  keyboard:
+    forward:
+    - w
+    - UP
+    backward:
+    - s
+    - DOWN
+    left:
+    - a
+    - LEFT
+    right:
+    - d
+    - RIGHT
+    brake:
+    - SPACE
+    hand_brake:
+    - b
+    reverse:
+    - r
+    quit:
+    - ESCAPE
+vehicle:
+  model: vehicle.dodge.charger
+  mass: 1500
+  drag_coefficient: 0.3
+  max_rpm: 5000
+  moi: 1
+  center_of_mass:
+  - 0
+  - 0
+  - 0
 scenarios:
   follow_route:
     num_waypoints: 5
-    waypoint_tolerance: 5.0  # meters
-    min_distance: 50.0  # meters
-    max_distance: 100.0  # meters
+    waypoint_tolerance: 5
+    min_distance: 50
+    max_distance: 100
   avoid_obstacle:
-    target_distance: 100.0  # meters
-    obstacle_spacing: 25.0  # meters
-    completion_distance: 110.0  # meters
-    collision_threshold: 1.0  # meters
-    max_simulation_time: 0.0  # 0 means unlimited time
-    waypoint_tolerance: 5.0  # meters
-    min_waypoint_distance: 30.0  # meters
-    max_waypoint_distance: 50.0  # meters
-    num_waypoints: 3  # number of waypoints to generate
-    num_obstacles: 10  # number of obstacles to spawn
-    min_obstacle_distance: 15.0  # minimum distance between obstacles
-    obstacle_types:  # list of possible obstacle types
-      - "static.prop.streetbarrier"
-      - "static.prop.container"
-      - "static.prop.constructioncone"
-  emergency_brake:
-    trigger_distance: 50.0  # meters
-    target_speed: 40.0  # km/h
-    obstacle_type: "static.prop.streetbarrier"
-  vehicle_cutting:
-    target_distance: 100.0  # meters
-    cutting_distance: 30.0  # meters
-    completion_distance: 110.0  # meters
-    collision_threshold: 1.0  # meters
-    max_simulation_time: 120.0  # seconds
-    waypoint_tolerance: 5.0  # meters
-    min_waypoint_distance: 30.0  # meters
-    max_waypoint_distance: 50.0  # meters
+    target_distance: 100
+    obstacle_spacing: 25
+    completion_distance: 110
+    collision_threshold: 1
+    max_simulation_time: 0
+    waypoint_tolerance: 5
+    min_waypoint_distance: 30
+    max_waypoint_distance: 50
     num_waypoints: 3
-    cutting_vehicle_model: "vehicle.fuso.mitsubishi"
-    normal_speed: 30.0  # km/h
-    cutting_speed: 40.0  # km/h
-    cutting_trigger_distance: 20.0  # meters 
+    num_obstacles: 10
+    min_obstacle_distance: 15
+    obstacle_types:
+    - static.prop.streetbarrier
+    - static.prop.container
+    - static.prop.constructioncone
+  emergency_brake:
+    trigger_distance: 50
+    target_speed: 40
+    obstacle_type: static.prop.streetbarrier
+  vehicle_cutting:
+    target_distance: 100
+    cutting_distance: 30
+    completion_distance: 110
+    collision_threshold: 1
+    max_simulation_time: 120
+    waypoint_tolerance: 5
+    min_waypoint_distance: 30
+    max_waypoint_distance: 50
+    num_waypoints: 3
+    cutting_vehicle_model: vehicle.dodge.charger
+    normal_speed: 30
+    cutting_speed: 40
+    cutting_trigger_distance: 20
+analytics:
+  grafana_base_url: http://193.16.126.186:3005/d
+web_mode: false

@@ -215,7 +215,13 @@ class SimulationMetrics:
 
     def generate_html_report(self, scenario_results, start_time, end_time):
         """Generate a pytest-html style HTML report for multiple scenarios in the reports directory at the project root."""
+        # Do not generate empty reports
+        if not scenario_results or len(scenario_results) == 0:
+            return
         import platform
+        from carla_simulator.database.config import SessionLocal
+        from carla_simulator.database.models import SimulationReport
+        import os
 
         total = len(scenario_results)
         passed = sum(1 for s in scenario_results if s["result"].lower() == "passed")
@@ -319,6 +325,23 @@ class SimulationMetrics:
             f.write(html_content)
         if self.logger:
             self.logger.info(f"HTML report generated: {report_path}")
+
+        # Also store report in DB if tenant context is set via env
+        try:
+            tenant_env = os.environ.get("CONFIG_TENANT_ID")
+            if tenant_env:
+                tenant_id = int(tenant_env)
+                # name is file name for convenience
+                report_name = report_path.name
+                db = SessionLocal()
+                # Use plain SQLAlchemy session to insert via model classmethod helper
+                # We can call Database model's create via DatabaseManager-like API is not present here
+                from carla_simulator.database.db_manager import DatabaseManager
+                dbm = DatabaseManager()
+                SimulationReport.create(dbm, name=report_name, html=html_content, tenant_id=tenant_id)
+        except Exception:
+            # Don't fail simulation if report DB save fails
+            pass
             # self.logger.info(f"Report directory: {reports_dir.absolute()}")
 
 
@@ -354,15 +377,18 @@ class SimulationConfig:
         self.scenario_config = self._main_config.scenarios
 
     def _load_config(self, config_path: str, scenario: str = None) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+        """Load configuration, preferring DB when CONFIG_TENANT_ID is set; fallback to YAML."""
         try:
+            from carla_simulator.utils.config import _load_config_dict
+
+            # Resolve relative path to absolute for YAML fallback resolution
             if not os.path.isabs(config_path):
                 config_path = os.path.join(
                     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                     config_path,
                 )
-            with open(config_path, "r") as f:
-                config = yaml.safe_load(f) or {}
+
+            config = _load_config_dict(config_path) or {}
 
             # Use scenario from argument
             if scenario:
@@ -370,7 +396,7 @@ class SimulationConfig:
 
             return config
         except Exception as e:
-            raise RuntimeError(f"Failed to load config file {config_path}: {str(e)}")
+            raise RuntimeError(f"Failed to load config: {str(e)}")
 
     def _create_server_config(self) -> ServerConfig:
         """Create ServerConfig object from configuration"""
@@ -427,10 +453,7 @@ class SimulationConfig:
             raise ValueError("Missing required 'logging' configuration section")
 
         return LoggingConfig(
-            simulation_file=logging["simulation_file"],
-            operations_file=logging["operations_file"],
             log_level=logging["log_level"],
-            format=logging.get("format", {}),
             enabled=logging["enabled"],
             directory=logging["directory"],
         )

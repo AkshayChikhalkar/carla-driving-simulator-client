@@ -133,7 +133,7 @@ from carla_simulator.utils.logging import Logger
 from carla_simulator.utils.paths import get_project_root
 from carla_simulator.core.scenario_results_manager import ScenarioResultsManager
 from carla_simulator.database.db_manager import DatabaseManager
-from carla_simulator.database.models import User, UserSession
+from carla_simulator.database.models import User, UserSession, TenantConfig, SimulationReport
 from carla_simulator.utils.auth import (
     LoginRequest, RegisterRequest, UserResponse,
     hash_password, verify_password, generate_session_token,
@@ -147,6 +147,7 @@ class SimulationRequest(BaseModel):
     scenarios: List[str]
     debug: bool = False
     report: bool = False
+    tenant_id: Optional[int] = None
 
 
 class LogWriteRequest(BaseModel):
@@ -166,6 +167,10 @@ class LogFileRequest(BaseModel):
 
 class ConfigUpdate(BaseModel):
     config_data: dict
+
+
+class ResetConfigRequest(BaseModel):
+    tenant_id: Optional[int] = None
 
 
 class LogDirectoryRequest(BaseModel):
@@ -397,12 +402,12 @@ def record_scenario_result(runner, scenario, result, status, duration):
 
 def generate_final_report(runner):
     """Generate final report if enabled"""
-    if hasattr(runner.app, "metrics") and getattr(runner.app._config, "report", False):
-        runner.app.metrics.generate_html_report(
-            runner.state["scenario_results"].all_results(),
-            runner.state["batch_start_time"],
-            datetime.now(),
-        )
+    if not hasattr(runner, "app") or runner.app is None:
+        return
+    results = runner.state["scenario_results"].all_results() if runner.state else []
+    # Only generate when explicitly requested and we actually have results
+    if getattr(runner.app._config, "report", False) and results:
+        runner.app.metrics.generate_html_report(results, runner.state["batch_start_time"], datetime.now())
 
 
 def handle_file_operation(file_path, operation):
@@ -658,14 +663,36 @@ async def get_scenarios():
 
 
 @app.get("/api/config")
-async def get_config():
-    """Get current configuration"""
-    logger.debug("Fetching current configuration")
-    return runner.config
+async def get_config(tenant_id: Optional[int] = None):
+    """Get current configuration. If tenant_id provided, return DB-backed active config."""
+    try:
+        # Resolve effective tenant id: query param overrides env
+        effective_tenant_id: Optional[int] = None
+        if tenant_id is not None:
+            effective_tenant_id = tenant_id
+        else:
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    effective_tenant_id = int(env_tid)
+                except ValueError:
+                    effective_tenant_id = None
+
+        if effective_tenant_id is not None:
+            dbm = DatabaseManager()
+            cfg = TenantConfig.get_active_config(dbm, effective_tenant_id)
+            if cfg:
+                return cfg
+        # fallback to current loaded YAML config
+        logger.debug("Fetching current configuration from YAML fallback")
+        return runner.config if isinstance(runner.config, dict) else {}
+    except Exception as e:
+        logger.error(f"Error getting config: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/config")
-async def update_config(config_update: ConfigUpdate):
+async def update_config(config_update: ConfigUpdate, tenant_id: Optional[int] = None):
     """Update configuration"""
     try:
         logger.debug("Updating configuration")
@@ -674,24 +701,47 @@ async def update_config(config_update: ConfigUpdate):
         if not isinstance(config_update.config_data, dict):
             raise HTTPException(status_code=400, detail="Invalid configuration format")
 
-        # Try to create a Config object to validate the structure
-        try:
-            Config(**config_update.config_data)
-        except Exception as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid configuration structure: {str(e)}"
-            )
+        # Best-effort validation: use current loader to check required sections
+        # but do not force dataclass construction here (save path can be YAML)
+        if not isinstance(config_update.config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid configuration format")
 
-        # Save the configuration
-        save_config(config_update.config_data, runner.config_file)
+        # Resolve effective tenant id: query param overrides env
+        effective_tenant_id: Optional[int] = None
+        if tenant_id is not None:
+            effective_tenant_id = tenant_id
+        else:
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    effective_tenant_id = int(env_tid)
+                except ValueError:
+                    effective_tenant_id = None
 
-        # Reload the configuration
-        runner.config = load_config(runner.config_file)
+        if effective_tenant_id is not None:
+            # Store config in DB for tenant and return
+            dbm = DatabaseManager()
+            result = TenantConfig.upsert_active_config(dbm, effective_tenant_id, config_update.config_data)
+            if not result:
+                raise HTTPException(status_code=500, detail="Failed to store tenant config")
+            return {"message": "Tenant configuration updated", "tenant_id": effective_tenant_id, "version": result["version"], "config": config_update.config_data}
+        else:
+            # Save to YAML fallback
+            # Write raw dict to YAML to preserve structure
+            try:
+                with open(runner.config_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(config_update.config_data, f, sort_keys=False)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed writing YAML: {str(e)}")
+            # Immediately reflect saved YAML in in-memory config without DB override
+            runner.config = config_update.config_data
 
         logger.debug("Configuration updated successfully")
         return {
             "message": "Configuration updated successfully",
-            "config": runner.config,
+                # Return the dict we just wrote (frontend expects plain JSON)
+                "config": config_update.config_data,
+                "source": "db" if effective_tenant_id is not None else "fs",
         }
     except yaml.YAMLError as e:
         logger.error(f"YAML parsing error: {str(e)}")
@@ -883,6 +933,10 @@ async def start_simulation(request: SimulationRequest):
             )
             logger.debug(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
             runner.state["scenario_results"].clear_results()
+
+            # If tenant_id provided, set env for config loader to fetch DB config BEFORE app creation
+            if request.tenant_id is not None:
+                os.environ["CONFIG_TENANT_ID"] = str(request.tenant_id)
 
             runner.app = runner.create_application(
                 scenarios_to_run[0], session_id=session_id
@@ -1228,9 +1282,32 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.get("/api/reports")
-async def list_reports():
-    """List all HTML reports in the /reports directory."""
+async def list_reports(tenant_id: Optional[int] = None):
+    """List HTML reports. Prefer DB if tenant context is present (query param or CONFIG_TENANT_ID), otherwise filesystem."""
     try:
+        effective_tenant_id: Optional[int] = None
+        if tenant_id is not None:
+            effective_tenant_id = tenant_id
+        else:
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    effective_tenant_id = int(env_tid)
+                except ValueError:
+                    effective_tenant_id = None
+
+        if effective_tenant_id is not None:
+            dbm = DatabaseManager()
+            rows = dbm.execute_query(
+                "SELECT id, name, created_at FROM simulation_reports WHERE tenant_id = %(tenant_id)s ORDER BY created_at DESC",
+                {"tenant_id": effective_tenant_id},
+            )
+            reports = [
+                {"id": r["id"], "filename": r["name"], "created": r["created_at"]}
+                for r in rows
+            ]
+            return {"reports": reports, "source": "db"}
+        # Fallback to filesystem
         reports_dir = project_root / "reports"
         logger.logger.info(f"Looking for reports in: {reports_dir.resolve()}")
         reports_dir.mkdir(exist_ok=True)
@@ -1240,31 +1317,77 @@ async def list_reports():
                 "%Y-%m-%d %H:%M:%S"
             )
             reports.append({"filename": file.name, "created": created})
-        return {"reports": reports}
+        return {"reports": reports, "source": "fs"}
     except Exception as e:
         logger.logger.error(f"Error listing reports: {str(e)}")
         return {"reports": [], "error": str(e)}
 
 
-@app.get("/api/reports/{filename}")
-async def get_report(filename: str):
-    """Serve a specific HTML report file."""
+@app.get("/api/reports/{ref}")
+async def get_report(ref: str, tenant_id: Optional[int] = None):
+    """Serve a specific HTML report. If tenant context is present, ref is DB id; otherwise ref is filename from filesystem."""
     try:
+        effective_tenant_id: Optional[int] = None
+        if tenant_id is not None:
+            effective_tenant_id = tenant_id
+        else:
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    effective_tenant_id = int(env_tid)
+                except ValueError:
+                    effective_tenant_id = None
+
+        if effective_tenant_id is not None:
+            dbm = DatabaseManager()
+            rows = dbm.execute_query(
+                "SELECT name, html FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
+                {"id": int(ref), "tenant_id": effective_tenant_id},
+            )
+            if not rows:
+                raise HTTPException(status_code=404, detail="Report not found")
+            name = rows[0]["name"]
+            html = rows[0]["html"]
+            return Response(content=html, media_type="text/html", headers={"Content-Disposition": f"inline; filename={name}"})
+
         reports_dir = project_root / "reports"
-        file_path = reports_dir / filename
+        file_path = reports_dir / ref
         return handle_file_operation(
             file_path, lambda p: FileResponse(str(p), media_type="text/html")
         )
     except Exception as e:
-        logger.error(f"Error serving report {filename}: {str(e)}")
+        logger.error(f"Error serving report {ref}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/reports/{filename}")
-async def delete_report(filename: str):
-    """Delete a specific HTML report file."""
+@app.delete("/api/reports/{ref}")
+async def delete_report(ref: str, tenant_id: Optional[int] = None):
+    """Delete a specific HTML report. Prefer DB if tenant context is present, else filesystem."""
+    effective_tenant_id: Optional[int] = None
+    if tenant_id is not None:
+        effective_tenant_id = tenant_id
+    else:
+        env_tid = os.getenv("CONFIG_TENANT_ID")
+        if env_tid is not None:
+            try:
+                effective_tenant_id = int(env_tid)
+            except ValueError:
+                effective_tenant_id = None
+
+    if effective_tenant_id is not None:
+        try:
+            dbm = DatabaseManager()
+            dbm.execute_query(
+                "DELETE FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
+                {"id": int(ref), "tenant_id": effective_tenant_id},
+            )
+            return {"success": True, "message": "Report deleted"}
+        except Exception as e:
+            logger.error(f"Error deleting report {ref}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     reports_dir = project_root / "reports"
-    file_path = reports_dir / filename
+    file_path = reports_dir / ref
     return handle_file_operation(
         file_path,
         lambda p: (
@@ -1377,6 +1500,47 @@ async def frontend_log(request: FrontendLogRequest):
         logger.error(f"Error logging frontend message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/config/reset")
+async def reset_config(request: ResetConfigRequest):
+    """Reset configuration to defaults for a tenant (DB) or overwrite YAML fallback with defaults."""
+    try:
+        # Determine effective tenant id
+        effective_tenant_id: Optional[int] = None
+        if request.tenant_id is not None:
+            effective_tenant_id = request.tenant_id
+        else:
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    effective_tenant_id = int(env_tid)
+                except ValueError:
+                    effective_tenant_id = None
+
+        # Load defaults from YAML file path; if missing, use currently loaded config
+        from carla_simulator.utils.paths import get_config_path
+        cfg_file = get_config_path("simulation.yaml")
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                defaults = yaml.safe_load(f) or {}
+        except Exception:
+            defaults = runner.config if isinstance(runner.config, dict) else {}
+
+        if effective_tenant_id is not None:
+            dbm = DatabaseManager()
+            result = TenantConfig.upsert_active_config(dbm, effective_tenant_id, defaults)
+            if not result:
+                raise HTTPException(status_code=500, detail="Failed to reset tenant config")
+            return {"message": "Configuration reset to defaults (DB)", "tenant_id": effective_tenant_id, "config": defaults}
+
+        # YAML fallback: overwrite file
+        with open(runner.config_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(defaults, f, sort_keys=False)
+        runner.config = defaults
+        return {"message": "Configuration reset to defaults (YAML)", "config": defaults}
+    except Exception as e:
+        logger.error(f"Error resetting configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/simulation/status")
 async def get_simulation_status():
@@ -1567,6 +1731,38 @@ async def register(request: RegisterRequest):
                 detail="Failed to create user"
             )
         logger.info(f"Register success: username={request.username}, id={new_user['id']}")
+
+        # Seed default config for this user by creating a per-user tenant if none provided
+        try:
+            # Determine tenant to use: if CONFIG_TENANT_ID is set, use it; otherwise create a per-user tenant
+            default_tenant_id: Optional[int] = None
+            env_tid = os.getenv("CONFIG_TENANT_ID")
+            if env_tid is not None:
+                try:
+                    default_tenant_id = int(env_tid)
+                except ValueError:
+                    default_tenant_id = None
+
+            if default_tenant_id is None:
+                from carla_simulator.database.models import Tenant
+                slug = f"user-{new_user['id']}"
+                name = f"User {new_user['username']}"
+                tenant = Tenant.create_if_not_exists(db, name=name, slug=slug, is_active=True)
+                if tenant:
+                    default_tenant_id = tenant["id"]
+
+            if default_tenant_id is not None:
+                # Load defaults from YAML fallback and store as active tenant config
+                from carla_simulator.utils.paths import get_config_path
+                cfg_file = get_config_path("simulation.yaml")
+                try:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        defaults = yaml.safe_load(f) or {}
+                except Exception:
+                    defaults = runner.config if isinstance(runner.config, dict) else {}
+                TenantConfig.upsert_active_config(db, default_tenant_id, defaults)
+        except Exception as se:
+            logger.warning(f"Failed to seed default config for new user: {se}")
         
         return {
             "message": "User registered successfully",

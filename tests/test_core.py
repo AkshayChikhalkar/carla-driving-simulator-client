@@ -15,7 +15,7 @@ def simulation_runner():
         runner = MagicMock()
         runner.logger = MagicMock()
         runner.logger.debug_mode = True
-        runner.logger.operations_file = MagicMock()
+        # operations file not used anymore
         runner.scenario_registry = MagicMock()
         runner.scenario_registry.get_available_scenarios.return_value = [
             "follow_route",
@@ -59,5 +59,3 @@ def test_logger_setup(simulation_runner):
 def test_cleanup(simulation_runner):
     """Test proper cleanup of resources."""
     simulation_runner.logger.close()
-    simulation_runner.logger.operations_file = None
-    assert simulation_runner.logger.operations_file is None

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
 import yaml
 import os
+import json
 
 
 @dataclass
@@ -179,18 +180,13 @@ class SimulationConfig:
 class LoggingConfig:
     """Logging configuration parameters"""
 
-    simulation_file: str
-    operations_file: str
     log_level: str
-    format: Dict[str, str]
     enabled: bool = True
     directory: str = "logs"
 
     def __post_init__(self):
-        """Ensure log files are in the configured directory"""
-        if self.directory:
-            self.simulation_file = os.path.join(self.directory, self.simulation_file)
-            self.operations_file = os.path.join(self.directory, self.operations_file)
+        # No file paths to normalize anymore
+        pass
 
 
 @dataclass
@@ -352,10 +348,34 @@ class Config:
     web_mode: bool = False
 
 
+def _load_config_dict(config_path: str) -> Dict[str, Any]:
+    """Load config as raw dict. If CONFIG_TENANT_ID is set, try DB-backed config first."""
+    tenant_id = os.environ.get("CONFIG_TENANT_ID")
+    if tenant_id:
+        try:
+            from carla_simulator.database.db_manager import DatabaseManager
+            from carla_simulator.database.models import TenantConfig
+
+            db = DatabaseManager()
+            config_from_db = TenantConfig.get_active_config(db, int(tenant_id))
+            if config_from_db:
+                return config_from_db
+        except Exception:
+            # Fallback to YAML if DB fails
+            pass
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def load_config(config_path: str) -> Config:
-    """Load configuration from YAML file"""
-    with open(config_path, "r") as f:
-        config_dict = yaml.safe_load(f)
+    """Load configuration, with optional multi-tenant DB source."""
+    config_dict = _load_config_dict(config_path)
+
+    # Sanitize logging block to accept only supported keys
+    logging_block = config_dict.get("logging", {}) or {}
+    allowed_logging_keys = {"log_level", "enabled", "directory"}
+    logging_filtered = {k: v for k, v in logging_block.items() if k in allowed_logging_keys}
 
     config = Config(
         server=ServerConfig(
@@ -366,7 +386,7 @@ def load_config(config_path: str) -> Config:
         ),
         world=WorldConfig(**config_dict["world"]),
         simulation=SimulationConfig(**config_dict["simulation"]),
-        logging=LoggingConfig(**config_dict["logging"]),
+        logging=LoggingConfig(**logging_filtered),
         display=DisplayConfig(**config_dict["display"]),
         sensors=SensorConfig(
             camera=CameraConfig(**config_dict["sensors"]["camera"]),
@@ -445,10 +465,7 @@ def save_config(config: Config, config_path: str) -> None:
             "max_collision_force": config.simulation.max_collision_force,
         },
         "logging": {
-            "simulation_file": config.logging.simulation_file,
-            "operations_file": config.logging.operations_file,
             "log_level": config.logging.log_level,
-            "format": config.logging.format,
             "enabled": config.logging.enabled,
             "directory": config.logging.directory,
         },
@@ -549,7 +566,7 @@ def save_config(config: Config, config_path: str) -> None:
         "web_mode": config.web_mode,
     }
 
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(config_dict, f, default_flow_style=False)
 
 

@@ -15,8 +15,9 @@ from .default_config import SIMULATION_CONFIG
 from .paths import get_project_root
 from .types import SimulationData
 from carla_simulator.database.config import SessionLocal
-from carla_simulator.database.models import SimulationMetrics
+from carla_simulator.database.models import SimulationMetrics, AppLog
 import uuid
+import os
 
 
 class Logger:
@@ -37,12 +38,8 @@ class Logger:
         # Get configuration values with fallbacks
         self.log_level = getattr(SIMULATION_CONFIG, "log_level", "INFO")
         self.log_dir = get_project_root() / "logs"
-        self.log_format = getattr(
-            SIMULATION_CONFIG, "log_format", "%(asctime)s - %(levelname)s - %(message)s"
-        )
-        self.log_date_format = getattr(
-            SIMULATION_CONFIG, "log_date_format", "%Y-%m-%d %H:%M:%S"
-        )
+        self.log_format = "%(asctime)s - %(levelname)s - %(message)s"
+        self.log_date_format = "%Y-%m-%d %H:%M:%S"
         self.log_to_file = True
         self.log_to_console = getattr(SIMULATION_CONFIG, "log_to_console", True)
 
@@ -117,6 +114,7 @@ class Logger:
     def info(self, message: str):
         """Log info message"""
         self.logger.info(message)
+        self._db_log("INFO", message)
 
     def error(self, message: str, exc_info: Optional[Exception] = None):
         """Log error message with optional exception info"""
@@ -124,10 +122,12 @@ class Logger:
             self.logger.error(f"{message}\n{traceback.format_exc()}")
         else:
             self.logger.error(message)
+        self._db_log("ERROR", message, include_trace=bool(exc_info and DEBUG_MODE))
 
     def warning(self, message: str):
         """Log warning message"""
         self.logger.warning(message)
+        self._db_log("WARNING", message)
 
     def debug(self, message: str):
         """Log debug message (only shown in debug mode)"""
@@ -140,6 +140,7 @@ class Logger:
             self.logger.critical(f"{message}\n{traceback.format_exc()}")
         else:
             self.logger.critical(message)
+        self._db_log("CRITICAL", message, include_trace=bool(exc_info and DEBUG_MODE))
 
     def log_vehicle_state(self, state: Dict[str, Any]):
         """Log vehicle state (only shown in debug mode)"""
@@ -176,6 +177,7 @@ class Logger:
     def log_event(self, elapsed_time: float, event: str, details: str) -> None:
         """Log significant events to operations log"""
         self.logger.info(f"[{elapsed_time:.1f}s] {event}: {details}")
+        self._db_log("INFO", f"[{elapsed_time:.1f}s] {event}: {details}")
 
     def close(self) -> None:
         """Close logging system"""
@@ -183,3 +185,24 @@ class Logger:
         self.logger.info(
             f"Simulation ended at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
+
+    def _db_log(self, level: str, message: str, include_trace: bool = False) -> None:
+        """Best-effort DB log sink per tenant when CONFIG_TENANT_ID is set."""
+        try:
+            tenant_env = os.environ.get("CONFIG_TENANT_ID")
+            if not tenant_env:
+                return
+            tenant_id = int(tenant_env)
+            # Include session and scenario if present
+            extra = {
+                "session_id": str(getattr(self, "_session_id", "") or ""),
+                "scenario_id": getattr(self, "_scenario_id", None),
+            }
+            if include_trace:
+                extra["trace"] = traceback.format_exc()
+            from carla_simulator.database.db_manager import DatabaseManager
+            dbm = DatabaseManager()
+            AppLog.write(dbm, level=level, message=message, tenant_id=tenant_id, extra=extra)
+        except Exception:
+            # Never fail logging due to DB issues
+            pass
