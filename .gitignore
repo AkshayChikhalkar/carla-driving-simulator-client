@@ -15,10 +15,10 @@ lib64/
 parts/
 sdist/
 var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+local_scripts/
 
 # Virtual Environment
 venv/
@@ -45,6 +45,8 @@ CarlaUE4/
 CarlaUE4.sh
 docker_container_carla.sh
 publish.ps1
+temp_test_scenarios.py
+
 # Testing
 .coverage
 htmlcov/
@@ -56,6 +58,87 @@ docs/_build/
 site/
 scenario_runner/
 *.ini
+reports/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.yarn-integrity
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Web build outputs
+web/frontend/dist/
+web/frontend/build/
+web/frontend/.next/
+web/frontend/out/
+web/frontend/.nuxt/
+web/frontend/.output/
+
+# Web dependencies
+web/frontend/node_modules/
+web/frontend/.cache/
+web/frontend/.parcel-cache/
+
+# Web IDE and editor files
+web/frontend/.idea/
+web/frontend/.vscode/
+web/frontend/*.sublime-project
+web/frontend/*.sublime-workspace
+
+# Web testing and coverage
+web/frontend/coverage/
+web/frontend/.nyc_output/
+web/frontend/cypress/videos/
+web/frontend/cypress/screenshots/
+
+# Web misc
+web/frontend/.DS_Store
+web/frontend/Thumbs.db
+web/frontend/.env.local
+web/frontend/.vercel
+web/frontend/.netlify
+
 # OS specific
 .DS_Store
 Thumbs.db 
+certificate_base64.txt
+EduCert_bkr-6cg_3DES.p12
+th-owl.de_2.ovpn
+
+!docs/*.rst
+!docs/index.rst
+!docs/api.rst
+!docs/requirements.txt
+!docs/conf.py
+!docs/diagrams.rst
+!docs/generate_diagrams.py
+!docs/generate_diagrams.bat
+!docs/auto_generate_docs.py
+!docs/auto_generate_docs.bat
+mmd/
+docs/_static/images/*.png
+
+docs/_autosummary/
+docs/*.rst
+!docs/index.rst
+!docs/api.rst
+!docs/architecture.rst
+!docs/changelog.rst
+!docs/contributing.rst
+!docs/diagrams.rst
+!docs/faq.rst
+!docs/getting_started.rst
+!docs/installation.rst
+!docs/license.rst
+!docs/support.rst
+!docs/tutorials.rst
+material-theme.json
+carla_schema.dbml

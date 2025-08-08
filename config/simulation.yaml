@@ -28,9 +28,9 @@ world:
     speed_difference_percentage: -100  # percentage (negative means faster)
     ignore_lights_percentage: 0  # percentage (0 means follow all traffic lights)
     ignore_signs_percentage: 0  # percentage (0 means follow all traffic signs)
-  fixed_delta_seconds: 0.05  # 20 FPS
+  fixed_delta_seconds: 0.0167  # 60 FPS (1/60 = 0.0167)
   target_distance: 500.0
-  num_vehicles: 50
+  num_vehicles: 10
   enable_collision: false
   synchronous_mode: true
 
@@ -65,26 +65,26 @@ sensors:
     enabled: true
   camera:
     enabled: true
-    width: 1280
-    height: 720
-    fov: 90
-    x: -2.5  # camera position relative to vehicle (moved closer)
+    width: 1920
+    height: 890
+    fov: 100
+    x: -2.0  # moved closer to vehicle
     y: 0.0
-    z: 2.0  # lowered camera height
+    z: 1.7  # adjusted height for better view
   gnss:
     enabled: true
 
 # Display settings
 display:
-  width: 1280
-  height: 720
+  width: 1920
+  height: 890
   fps: 60
   hud_enabled: true
   minimap_enabled: true
   hud:
     font_size: 15
     font_name: "default"
-    alpha: 128
+    alpha: 200
     colors:
       target: "red"
       vehicle: "white"
@@ -124,6 +124,19 @@ logging:
   directory: logs
   format:
     csv_header: "Time_Elapsed[s],Speed[km/h],Position_X[m],Position_Y[m],Position_Z[m],Throttle[0-1],Brake[0-1],Steer[-1to1],Distance_To_Target[m],Heading_To_Target[deg],Vehicle_Heading[deg],Heading_Difference[deg],Acceleration[m/s2],Angular_Velocity[rad/s],Gear,HandBrake[0/1],Reverse[0/1],Manual_Shift[0/1],Collision_Intensity[N],Weather_Cloudiness[%],Weather_Precipitation[%],Traffic_Count,FPS[Hz],Scenario_Event,Event_Details,Rotation_Pitch[deg],Rotation_Yaw[deg],Rotation_Roll[deg]"
+
+# Web backend settings
+web:
+  host: 0.0.0.0
+  port: 8000
+
+# Database settings
+database:
+  url: postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
+
+# Analytics / Monitoring settings
+analytics:
+  grafana_base_url: http://193.16.126.186:3005/d
 
 # Scenario settings
 scenarios:

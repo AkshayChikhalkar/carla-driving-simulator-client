@@ -1,15 +1,49 @@
 # CARLA Driving Simulator Client
 
-[![CI](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/ci.yml/badge.svg)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client/branch/main/graph/badge.svg)](https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client)
-[![Documentation Status](https://readthedocs.org/projects/carla-driving-simulator-client/badge/?version=latest)](https://carla-driving-simulator-client.readthedocs.io/en/latest/?badge=latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![PyPI version](https://badge.fury.io/py/carla-driving-simulator-client.svg)](https://badge.fury.io/py/carla-driving-simulator-client)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases)
-[![GitHub issues](https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client)](https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls)
+<p align="left">
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=master&label=CI%2FCD%20Pipeline&logo=github" alt="CI/CD Pipeline">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/actions/workflows/build-publish-release.yml" target="_blank">
+        <img src="https://img.shields.io/github/actions/workflow/status/akshaychikhalkar/carla-driving-simulator-client/build-publish-release.yml?branch=master&label=Tests&logo=github" alt="Tests">
+    </a>
+    <a href="https://codecov.io/gh/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/codecov/c/github/akshaychikhalkar/carla-driving-simulator-client/master?logo=codecov" alt="Codecov">
+    </a>
+    <a href="https://carla-driving-simulator-client.readthedocs.io/en/latest/" target="_blank">
+        <img src="https://img.shields.io/readthedocs/carla-driving-simulator-client?logo=read-the-docs" alt="Documentation Status">
+    </a>
+    <a href="https://opensource.org/licenses/MIT" target="_blank">
+        <img src="https://img.shields.io/github/license/akshaychikhalkar/carla-driving-simulator-client" alt="License">
+    </a>
+    <a href="https://www.python.org/downloads/" target="_blank">
+        <img src="https://img.shields.io/badge/python-3.11-blue.svg?logo=python" alt="Python 3.11">
+    </a>
+    <a href="https://github.com/psf/black" target="_blank">
+        <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black">
+    </a>
+    <a href="https://pypi.org/project/carla-driving-simulator-client/" target="_blank">
+        <img src="https://img.shields.io/pypi/v/carla-driving-simulator-client?logo=pypi" alt="PyPI version">
+    </a>
+    <a href="https://hub.docker.com/r/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/docker/pulls/akshaychikhalkar/carla-driving-simulator-client?logo=docker" alt="Docker Hub">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/releases" target="_blank">
+        <img src="https://img.shields.io/github/v/release/akshaychikhalkar/carla-driving-simulator-client?logo=github" alt="GitHub release">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/issues" target="_blank">
+        <img src="https://img.shields.io/github/issues/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub issues">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/pulls" target="_blank">
+        <img src="https://img.shields.io/github/issues-pr/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub pull requests">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client/commits/master" target="_blank">
+        <img src="https://img.shields.io/github/last-commit/akshaychikhalkar/carla-driving-simulator-client/master" alt="GitHub last commit">
+    </a>
+    <a href="https://github.com/akshaychikhalkar/carla-driving-simulator-client" target="_blank">
+        <img src="https://img.shields.io/github/repo-size/akshaychikhalkar/carla-driving-simulator-client" alt="GitHub repo size">
+    </a>
+</p>
 
 A personal project for experimenting with CARLA client, featuring vehicle control, sensor management, and visualization capabilities.
 
@@ -23,18 +57,37 @@ A personal project for experimenting with CARLA client, featuring vehicle contro
 - Comprehensive logging and data collection
 - Support for both manual and autopilot modes
 - Configurable simulation parameters
+- **Automatic versioning and CI/CD pipeline**
+- **Docker support with zero-configuration setup**
+- **Web-based frontend and backend API**
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.11
 - CARLA Simulator 0.10.0
 - Pygame
 - NumPy
 - Matplotlib
 - Tabulate
 - PyYAML
+- SQLAlchemy
+- PostgreSQL (optional)
 
 ## Installation
+
+### From Docker (Recommended)
+```bash
+# Pull the latest image
+docker pull akshaychikhalkar/carla-driving-simulator-client:latest
+
+# Run with Docker (frontend served by backend on port 8081)
+docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
+
+# Or use Docker Compose (recommended)
+git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
+cd carla-driving-simulator-client
+docker-compose -f docker-compose-prod.yml up -d
+```
 
 ### From PyPI
 ```bash
@@ -44,7 +97,7 @@ pip install carla-driving-simulator-client
 ### From Source
 1. Clone the repository:
 ```bash
-git clone https://github.com/akshaychikhalkar/carla-driving-simulator-client.git
+git clone https://github.com/AkshayChikhalkar/carla-driving-simulator-client.git
 cd carla-driving-simulator-client
 ```
 
@@ -59,10 +112,10 @@ pip install -e .
 - Add CARLA Python API to your PYTHONPATH:
 ```bash
 # For Windows
-set PYTHONPATH=%PYTHONPATH%;C:\path\to\carla\PythonAPI\carla\dist\carla-0.10.0-py3.7-win-amd64.egg
+set PYTHONPATH=%PYTHONPATH%;C:\path\to\carla\PythonAPI\carla\dist\carla-0.10.0-py3.11-win-amd64.egg
 
 # For Linux
-export PYTHONPATH=$PYTHONPATH:/path/to/carla/PythonAPI/carla/dist/carla-0.10.0-py3.7-linux-x86_64.egg
+export PYTHONPATH=$PYTHONPATH:/path/to/carla/PythonAPI/carla/dist/carla-0.10.0-py3.11-linux-x86_64.egg
 ```
 
 ## Usage
@@ -78,7 +131,7 @@ export PYTHONPATH=$PYTHONPATH:/path/to/carla/PythonAPI/carla/dist/carla-0.10.0-p
 carla-simulator-client
 
 # If installed from source
-python src/main.py
+python -m carla_simulator.cli
 ```
 
 ## Configuration
@@ -96,25 +149,19 @@ The simulator client can be configured through the `config/simulation_config.yam
 
 ```
 carla-driving-simulator-client/
-├── src/
+├── carla_simulator/
 │   ├── core/
-│   │   ├── world.py
-│   │   ├── vehicle.py
-│   │   └── sensors.py
 │   ├── visualization/
-│   │   ├── hud.py
-│   │   ├── minimap.py
-│   │   └── camera.py
 │   ├── control/
-│   │   ├── keyboard.py
-│   │   └── autopilot.py
-│   └── utils/
-│       ├── config.py
-│       └── logging.py
+│   ├── scenarios/
+│   ├── database/
+│   ├── utils/
+│   └── cli.py
+├── web/
 ├── tests/
 ├── config/
 ├── docs/
-├── requirements.txt
+├── requirements/
 └── README.md
 ```
 
@@ -139,15 +186,15 @@ Note: I cannot guarantee response times or implementation of suggested features 
 
 ## Support
 
-If you need help, please check our [Support Guide](SUPPORT.md) for various ways to get assistance.
+If you need help, please check our [Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SUPPORT.md) for various ways to get assistance.
 
 ## Security
 
-Please report any security issues to our [Security Policy](SECURITY.md).
+Please report any security issues to our [Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SECURITY.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -156,4 +203,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Roadmap
 
-Check our [Roadmap](ROADMAP.md) for planned features and improvements. 
+Check our [Roadmap](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/ROADMAP.md) for planned features and improvements.
+
+## Documentation
+
+- **[Versioning Strategy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/VERSIONING.md)** - How automatic versioning works
+- **[Environment Configuration](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/ENVIRONMENT.md)** - Environment variables and configuration
+- **[Support Guide](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SUPPORT.md)** - Getting help and support
+- **[Security Policy](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/SECURITY.md)** - Reporting security issues
+- **[Contributing Guidelines](https://github.com/AkshayChikhalkar/carla-driving-simulator-client/blob/master/CONTRIBUTING.md)** - How to contribute to the project
+
+## Configuration 
