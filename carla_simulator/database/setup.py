@@ -7,14 +7,32 @@ import platform
 from .config import DATABASE_URL, SCHEMA_NAME
 from .models import Base
 from sqlalchemy import create_engine
+from sqlalchemy.engine.url import make_url
 import re
 
-# Database configuration
-DB_NAME = "carla_simulator"
-DB_USER = "postgres"
-DB_PASSWORD = "postgres"
-DB_HOST = "localhost"
-DB_PORT = "5432"
+def _derive_db_params_from_url(url: str):
+    """Parse DATABASE_URL (from YAML via config) into discrete params with sensible fallbacks."""
+    try:
+        parsed = make_url(url)
+        name = parsed.database or "carla_simulator"
+        user = parsed.username or "postgres"
+        password = parsed.password or "postgres"
+        host = parsed.host or "localhost"
+        port = str(parsed.port or 5432)
+        return name, user, password, host, port
+    except Exception:
+        # Fallbacks if parsing fails
+        return (
+            "carla_simulator",
+            "postgres",
+            "postgres",
+            "localhost",
+            "5432",
+        )
+
+
+# Database configuration (sourced from config via DATABASE_URL)
+DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT = _derive_db_params_from_url(DATABASE_URL)
 
 
 def check_postgres_installation():

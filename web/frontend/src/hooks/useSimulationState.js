@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = window.location.hostname === 'localhost' ? '/api' : `http://${window.location.hostname}:8081/api`;
+// Always use relative '/api' and rely on proxy in dev and same-origin in prod
+const API_BASE_URL = '/api';
 
 export const useSimulationState = () => {
   // Local transition states

@@ -1735,5 +1735,23 @@ if __name__ == "__main__":
         logger_instance = logging.getLogger(logger_name)
         logger_instance.addFilter(websocket_filter)
 
-    logger.info("Starting FastAPI server on 0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    # Load host/port strictly from YAML config (fallback to defaults if missing)
+    try:
+        import yaml
+        from carla_simulator.utils.paths import get_config_path
+
+        cfg_host, cfg_port = "0.0.0.0", 8000
+        cfg_path = get_config_path("simulation.yaml")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+                web_cfg = cfg.get("web", {}) or {}
+                cfg_host = str(web_cfg.get("host", cfg_host))
+                cfg_port = int(web_cfg.get("port", cfg_port))
+
+        logger.info(f"Starting FastAPI server on {cfg_host}:{cfg_port}")
+        uvicorn.run(app, host=cfg_host, port=cfg_port, log_level="warning")
+    except Exception:
+        # Fallback to sane defaults if config loading fails
+        logger.info("Starting FastAPI server on 0.0.0.0:8000 (config load failed)")
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")

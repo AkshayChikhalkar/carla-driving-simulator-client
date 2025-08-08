@@ -1,8 +1,9 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
-  const backendHost = process.env.BACKEND_HOST || 'localhost';
-  const backendPort = process.env.BACKEND_PORT || '8000';
+  // Dev proxy: keep simple defaults; frontend will talk to same-origin in prod
+  const backendHost = 'localhost';
+  const backendPort = '8000';
   const httpTarget = `http://${backendHost}:${backendPort}`;
   const wsTarget = `ws://${backendHost}:${backendPort}`;
 

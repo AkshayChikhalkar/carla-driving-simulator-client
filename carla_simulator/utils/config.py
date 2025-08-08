@@ -256,6 +256,13 @@ class DisplayConfig:
 
 
 @dataclass
+class AnalyticsConfig:
+    """Analytics / Monitoring configuration"""
+
+    grafana_base_url: str = "/grafana/d"
+
+
+@dataclass
 class CameraConfig:
     """Camera sensor configuration"""
 
@@ -341,6 +348,7 @@ class Config:
     controller: ControllerConfig
     vehicle: VehicleConfig
     scenarios: ScenarioConfig
+    analytics: Optional[AnalyticsConfig] = None
     web_mode: bool = False
 
 
@@ -374,6 +382,7 @@ def load_config(config_path: str) -> Config:
         ),
         vehicle=VehicleConfig(**config_dict["vehicle"]),
         scenarios=ScenarioConfig(**config_dict["scenarios"]),
+        analytics=AnalyticsConfig(**config_dict.get("analytics", {})) if config_dict.get("analytics") is not None else None,
     )
 
     if os.environ.get("WEB_MODE", "false").lower() == "true":
@@ -533,6 +542,9 @@ def save_config(config: Config, config_path: str) -> None:
                 "cutting_distance": config.scenarios.vehicle_cutting.cutting_distance,
                 "cutting_speed": config.scenarios.vehicle_cutting.cutting_speed,
             },
+        },
+        "analytics": {
+            "grafana_base_url": (config.analytics.grafana_base_url if config.analytics else "/grafana/d"),
         },
         "web_mode": config.web_mode,
     }
