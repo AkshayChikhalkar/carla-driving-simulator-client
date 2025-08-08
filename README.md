@@ -131,7 +131,7 @@ export PYTHONPATH=$PYTHONPATH:/path/to/carla/PythonAPI/carla/dist/carla-0.10.0-p
 carla-simulator-client
 
 # If installed from source
-python src/main.py
+python -m carla_simulator.cli
 ```
 
 ## Configuration
@@ -149,25 +149,19 @@ The simulator client can be configured through the `config/simulation_config.yam
 
 ```
 carla-driving-simulator-client/
-├── src/
+├── carla_simulator/
 │   ├── core/
-│   │   ├── world.py
-│   │   ├── vehicle.py
-│   │   └── sensors.py
 │   ├── visualization/
-│   │   ├── hud.py
-│   │   ├── minimap.py
-│   │   └── camera.py
 │   ├── control/
-│   │   ├── keyboard.py
-│   │   └── autopilot.py
-│   └── utils/
-│       ├── config.py
-│       └── logging.py
+│   ├── scenarios/
+│   ├── database/
+│   ├── utils/
+│   └── cli.py
+├── web/
 ├── tests/
 ├── config/
 ├── docs/
-├── requirements.txt
+├── requirements/
 └── README.md
 ```
 

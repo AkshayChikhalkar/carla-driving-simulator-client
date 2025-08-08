@@ -28,7 +28,9 @@ import glob
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(project_root / "src"))
+# Remove old src path; add package path
+# sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root / "carla_simulator"))
 
 class DocumentationAutomator:
     def __init__(self):
@@ -96,7 +98,7 @@ class DocumentationAutomator:
     def _generate_database_schema_mmd(self):
         """Generate database schema diagram from SQLAlchemy models."""
         try:
-            from src.database.models import Base, Scenario, VehicleData, SensorData, SimulationMetrics
+            from carla_simulator.database.models import Base, Scenario, VehicleData, SensorData, SimulationMetrics
             
             mmd_content = [
                 "graph TB",
@@ -157,7 +159,7 @@ class DocumentationAutomator:
         """Generate component architecture diagram from code analysis."""
         try:
             # Analyze the src directory structure
-            src_dir = self.project_root / "src"
+            src_dir = self.project_root / "carla_simulator"
             components = []
             
             for item in src_dir.iterdir():
@@ -169,12 +171,12 @@ class DocumentationAutomator:
                 "    %% Component Architecture for CARLA Driving Simulator",
                 "",
                 "    %% Main Components",
-                "    Main[Main Application<br/>src/main.py]",
+                "    Main[Main Application<br/>carla_simulator/cli.py]",
             ]
             
             # Add components
             for component in sorted(components):
-                mmd_content.append(f"    {component.capitalize()}[{component.capitalize()}<br/>src/{component}/]")
+                mmd_content.append(f"    {component.capitalize()}[{component.capitalize()}<br/>carla_simulator/{component}/]")
                 mmd_content.append(f"    Main --> {component.capitalize()}")
             
             mmd_content.extend([
@@ -345,7 +347,7 @@ class DocumentationAutomator:
             subprocess.run([
                 'sphinx-apidoc',
                 '-o', '.',
-                str(self.project_root / 'src')
+                str(self.project_root / 'carla_simulator')
             ], check=True, env=env)
             
             subprocess.run([

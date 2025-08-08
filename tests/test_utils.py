@@ -5,8 +5,8 @@ Unit tests for utility modules.
 import os
 import pytest
 from unittest.mock import patch, MagicMock
-from src.utils.config import ConfigLoader, SimulationConfig
-from src.utils.logging import Logger, SimulationData
+from carla_simulator.utils.config import ConfigLoader, SimulationConfig
+from carla_simulator.utils.logging import Logger, SimulationData
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def config_loader(mock_config_file):
 @pytest.fixture
 def simulation_logger():
     """Fixture providing a Logger instance."""
-    with patch("src.utils.logging.Logger") as mock_logger:
+    with patch("carla_simulator.utils.logging.Logger") as mock_logger:
         logger = MagicMock()
         logger.simulation_log = "test_simulation.csv"
         logger.operations_log = "test_operations.log"

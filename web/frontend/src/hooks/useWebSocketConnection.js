@@ -1,13 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
 import logger from '../utils/logger';
 
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE_URL = window.location.hostname === 'localhost'
-  ? `${WS_PROTOCOL}://localhost:8000/ws/simulation-view`
-  : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
+// Always use current host and let dev proxy forward to backend in development
+const WS_BASE_URL = `${WS_PROTOCOL}://${window.location.host}/ws/simulation-view`;
 
-const API_BASE_URL = window.location.hostname === 'localhost' ? '/api' : `http://${window.location.hostname}:8081/api`;
+// In development, rely on setupProxy to forward '/api' to backend
 
 // Global flag to prevent multiple WebSocket initializations
 let globalWebSocketInitialized = false;
@@ -154,7 +152,7 @@ export const useWebSocketConnection = ({
     };
     img.src = `data:image/jpeg;base64,${frameData}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setHasReceivedFrame]); // canvasRef is stable, so we can disable the warning
+  }, [setHasReceivedFrame]);
 
   useEffect(() => {
     // Prevent multiple initializations across component re-renders
@@ -262,7 +260,7 @@ export const useWebSocketConnection = ({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleStatusMessage, handleVideoFrame, setStatus]); // Empty dependency array - only run once on mount
+  }, [handleStatusMessage, handleVideoFrame, setStatus]);
 
   return { wsRef };
 }; 

@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 @pytest.fixture(autouse=True)
 def mock_carla():
     """Mock CARLA-related dependencies."""
-    with patch("src.core.simulation_runner.SimulationRunner") as mock_runner:
+    with patch("carla_simulator.core.simulation_runner.SimulationRunner") as mock_runner:
         # Setup mock runner
         mock_runner_instance = MagicMock()
         mock_runner.return_value = mock_runner_instance

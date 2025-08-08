@@ -19,7 +19,6 @@ import {
   Pause as PauseIcon,
   SkipNext as SkipNextIcon
 } from '@mui/icons-material';
-import logger from '../utils/logger';
 import { useWebSocketConnection } from '../hooks/useWebSocketConnection';
 import { useSimulationState } from '../hooks/useSimulationState';
 import { useScenarioSelection } from '../hooks/useScenarioSelection';
@@ -534,8 +533,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     dropdownOpen,
     handleScenarioChangeEnhanced,
     handleDropdownOpen,
-    handleDropdownClose,
-    getRenderValue
+    handleDropdownClose
   } = useScenarioSelection();
 
   // Use WebSocket connection hook

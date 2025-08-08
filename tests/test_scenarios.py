@@ -2,9 +2,9 @@ import pytest
 import logging
 from pathlib import Path
 from datetime import datetime
-from src.core.simulation_runner import SimulationRunner
-from src.scenarios.scenario_registry import ScenarioRegistry
-from src.utils.logging import Logger
+from carla_simulator.core.simulation_runner import SimulationRunner
+from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
+from carla_simulator.utils.logging import Logger
 
 # Configure logging
 logging.basicConfig(

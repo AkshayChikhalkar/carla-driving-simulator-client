@@ -1,11 +1,16 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
+  const backendHost = process.env.BACKEND_HOST || 'localhost';
+  const backendPort = process.env.BACKEND_PORT || '8000';
+  const httpTarget = `http://${backendHost}:${backendPort}`;
+  const wsTarget = `ws://${backendHost}:${backendPort}`;
+
   // Proxy all API calls to the backend
   app.use(
     '/api', 
     createProxyMiddleware({
-      target: 'http://localhost:8000',
+      target: httpTarget,
       changeOrigin: true,
       logLevel: 'debug',
     })
@@ -15,7 +20,7 @@ module.exports = function(app) {
   app.use(
     '/ws',
     createProxyMiddleware({
-      target: 'ws://localhost:8000',
+      target: wsTarget,
       ws: true,
       changeOrigin: true,
       logLevel: 'debug',

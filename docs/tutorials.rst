@@ -17,6 +17,6 @@ Example: Running a Scenario
 
 .. code-block:: bash
 
-   python run.py --scenario follow_route
+   csc --scenario follow_route
 
-For more advanced usage, explore the `src/scenarios/` directory and the API Reference. 
+For more advanced usage, explore the `carla_simulator/scenarios/` directory and the API Reference. 

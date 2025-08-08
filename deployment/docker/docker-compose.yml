@@ -1,0 +1,6 @@
+services:
+  carla-driving-simulator-client:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.dev
+    image: carla-simulator-client:dev

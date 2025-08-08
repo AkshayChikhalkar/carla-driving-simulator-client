@@ -125,16 +125,16 @@ class WebSocketConnectionFilter(logging.Filter):
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.core.simulation_runner import SimulationRunner
-from src.scenarios.scenario_registry import ScenarioRegistry
-from src.utils.config import Config, load_config, save_config
-from src.visualization.display_manager import DisplayManager
-from src.utils.logging import Logger
-from src.utils.paths import get_project_root
-from src.core.scenario_results_manager import ScenarioResultsManager
-from src.database.db_manager import DatabaseManager
-from src.database.models import User, UserSession
-from src.utils.auth import (
+from carla_simulator.core.simulation_runner import SimulationRunner
+from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
+from carla_simulator.utils.config import Config, load_config, save_config
+from carla_simulator.visualization.display_manager import DisplayManager
+from carla_simulator.utils.logging import Logger
+from carla_simulator.utils.paths import get_project_root
+from carla_simulator.core.scenario_results_manager import ScenarioResultsManager
+from carla_simulator.database.db_manager import DatabaseManager
+from carla_simulator.database.models import User, UserSession
+from carla_simulator.utils.auth import (
     LoginRequest, RegisterRequest, UserResponse,
     hash_password, verify_password, generate_session_token,
     create_jwt_token, verify_jwt_token, validate_password,

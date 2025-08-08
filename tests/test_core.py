@@ -4,14 +4,14 @@ Unit tests for core functionality.
 
 import pytest
 from unittest.mock import MagicMock, patch
-from src.core.simulation_runner import SimulationRunner
-from src.scenarios.scenario_registry import ScenarioRegistry
+from carla_simulator.core.simulation_runner import SimulationRunner
+from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
 
 
 @pytest.fixture
 def simulation_runner():
     """Fixture providing a SimulationRunner instance."""
-    with patch("src.core.simulation_runner.SimulationRunner") as mock_runner:
+    with patch("carla_simulator.core.simulation_runner.SimulationRunner") as mock_runner:
         runner = MagicMock()
         runner.logger = MagicMock()
         runner.logger.debug_mode = True

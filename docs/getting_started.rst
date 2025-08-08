@@ -44,11 +44,11 @@ Quickstart
    docker pull akshaychikhalkar/carla-driving-simulator-client:latest
    docker run -p 8081:8000 akshaychikhalkar/carla-driving-simulator-client:latest
 
-**Option 3: Local Development**
+**Option 3: Local Development (CLI)**
 
 .. code-block:: bash
 
-   python run.py
+   csc
 
 Access the Application
 ---------------------
