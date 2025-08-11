@@ -1402,10 +1402,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/api/reports")
 async def list_reports(tenant_id: Optional[int] = None):
-    """List HTML reports. Prefer DB if tenant context is present (query param or CONFIG_TENANT_ID), otherwise filesystem."""
+    """List reports strictly per-tenant (DB only)."""
     try:
+        # Resolve tenant strictly: header/context > query > env
         effective_tenant_id: Optional[int] = None
-        if tenant_id is not None:
+        ctx_tid = CURRENT_TENANT_ID.get()
+        if ctx_tid is not None:
+            effective_tenant_id = int(ctx_tid)
+        elif tenant_id is not None:
             effective_tenant_id = tenant_id
         else:
             env_tid = os.getenv("CONFIG_TENANT_ID")
@@ -1414,40 +1418,34 @@ async def list_reports(tenant_id: Optional[int] = None):
                     effective_tenant_id = int(env_tid)
                 except ValueError:
                     effective_tenant_id = None
-
-        if effective_tenant_id is not None:
-            dbm = DatabaseManager()
-            rows = dbm.execute_query(
-                "SELECT id, name, created_at FROM simulation_reports WHERE tenant_id = %(tenant_id)s ORDER BY created_at DESC",
-                {"tenant_id": effective_tenant_id},
-            )
-            reports = [
-                {"id": r["id"], "filename": r["name"], "created": r["created_at"]}
-                for r in rows
-            ]
-            return {"reports": reports, "source": "db"}
-        # Fallback to filesystem
-        reports_dir = project_root / "reports"
-        logger.logger.info(f"Looking for reports in: {reports_dir.resolve()}")
-        reports_dir.mkdir(exist_ok=True)
-        reports = []
-        for file in sorted(reports_dir.glob("*.html"), reverse=True):
-            created = datetime.fromtimestamp(file.stat().st_mtime).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-            reports.append({"filename": file.name, "created": created})
-        return {"reports": reports, "source": "fs"}
+        if effective_tenant_id is None:
+            raise HTTPException(status_code=400, detail="Tenant context required")
+        dbm = DatabaseManager()
+        rows = dbm.execute_query(
+            "SELECT id, name, created_at FROM simulation_reports WHERE tenant_id = %(tenant_id)s ORDER BY created_at DESC",
+            {"tenant_id": effective_tenant_id},
+        )
+        reports = [
+            {"id": r["id"], "filename": r["name"], "created": r["created_at"]}
+            for r in rows
+        ]
+        return {"reports": reports, "source": "db"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.logger.error(f"Error listing reports: {str(e)}")
-        return {"reports": [], "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/reports/{ref}")
 async def get_report(ref: str, tenant_id: Optional[int] = None):
-    """Serve a specific HTML report. If tenant context is present, ref is DB id; otherwise ref is filename from filesystem."""
+    """Serve a specific HTML report strictly from DB for the tenant."""
     try:
         effective_tenant_id: Optional[int] = None
-        if tenant_id is not None:
+        ctx_tid = CURRENT_TENANT_ID.get()
+        if ctx_tid is not None:
+            effective_tenant_id = int(ctx_tid)
+        elif tenant_id is not None:
             effective_tenant_id = tenant_id
         else:
             env_tid = os.getenv("CONFIG_TENANT_ID")
@@ -1456,24 +1454,18 @@ async def get_report(ref: str, tenant_id: Optional[int] = None):
                     effective_tenant_id = int(env_tid)
                 except ValueError:
                     effective_tenant_id = None
-
-        if effective_tenant_id is not None:
-            dbm = DatabaseManager()
-            rows = dbm.execute_query(
-                "SELECT name, html FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
-                {"id": int(ref), "tenant_id": effective_tenant_id},
-            )
-            if not rows:
-                raise HTTPException(status_code=404, detail="Report not found")
-            name = rows[0]["name"]
-            html = rows[0]["html"]
-            return Response(content=html, media_type="text/html", headers={"Content-Disposition": f"inline; filename={name}"})
-
-        reports_dir = project_root / "reports"
-        file_path = reports_dir / ref
-        return handle_file_operation(
-            file_path, lambda p: FileResponse(str(p), media_type="text/html")
+        if effective_tenant_id is None:
+            raise HTTPException(status_code=400, detail="Tenant context required")
+        dbm = DatabaseManager()
+        rows = dbm.execute_query(
+            "SELECT name, html FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
+            {"id": int(ref), "tenant_id": effective_tenant_id},
         )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Report not found")
+        name = rows[0]["name"]
+        html = rows[0]["html"]
+        return Response(content=html, media_type="text/html", headers={"Content-Disposition": f"inline; filename={name}"})
     except Exception as e:
         logger.error(f"Error serving report {ref}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1481,9 +1473,12 @@ async def get_report(ref: str, tenant_id: Optional[int] = None):
 
 @app.delete("/api/reports/{ref}")
 async def delete_report(ref: str, tenant_id: Optional[int] = None):
-    """Delete a specific HTML report. Prefer DB if tenant context is present, else filesystem."""
+    """Delete a specific HTML report strictly from DB for the tenant."""
     effective_tenant_id: Optional[int] = None
-    if tenant_id is not None:
+    ctx_tid = CURRENT_TENANT_ID.get()
+    if ctx_tid is not None:
+        effective_tenant_id = int(ctx_tid)
+    elif tenant_id is not None:
         effective_tenant_id = tenant_id
     else:
         env_tid = os.getenv("CONFIG_TENANT_ID")
@@ -1493,26 +1488,18 @@ async def delete_report(ref: str, tenant_id: Optional[int] = None):
             except ValueError:
                 effective_tenant_id = None
 
-    if effective_tenant_id is not None:
-        try:
-            dbm = DatabaseManager()
-            dbm.execute_query(
-                "DELETE FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
-                {"id": int(ref), "tenant_id": effective_tenant_id},
-            )
-            return {"success": True, "message": "Report deleted"}
-        except Exception as e:
-            logger.error(f"Error deleting report {ref}: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    reports_dir = project_root / "reports"
-    file_path = reports_dir / ref
-    return handle_file_operation(
-        file_path,
-        lambda p: (
-            {"success": True, "message": "Report deleted"} if p.unlink() else None
-        ),
-    )
+    if effective_tenant_id is None:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    try:
+        dbm = DatabaseManager()
+        dbm.execute_query(
+            "DELETE FROM simulation_reports WHERE id = %(id)s AND tenant_id = %(tenant_id)s",
+            {"id": int(ref), "tenant_id": effective_tenant_id},
+        )
+        return {"success": True, "message": "Report deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting report {ref}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/logs")
