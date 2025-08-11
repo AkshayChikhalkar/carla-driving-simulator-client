@@ -126,6 +126,45 @@ class TenantConfig(Base):
             return None
 
 
+class CarlaMetadata(Base):
+    """Stores CARLA catalogs/metadata (maps, blueprints, etc.) per version"""
+
+    __tablename__ = "carla_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(String(32), nullable=False, unique=True, index=True)
+    data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def get_by_version(cls, db: DatabaseManager, version: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = db.execute_query(
+                "SELECT version, data, created_at, updated_at FROM carla_metadata WHERE version = %(v)s",
+                {"v": version},
+            )
+            return res[0] if res else None
+        except Exception as e:
+            log_error("Error fetching CARLA metadata", e)
+            return None
+
+    @classmethod
+    def upsert(cls, db: DatabaseManager, version: str, data: Dict[str, Any]) -> bool:
+        try:
+            queries = [
+                ("DELETE FROM carla_metadata WHERE version = %(v)s", {"v": version}),
+                ("""
+                    INSERT INTO carla_metadata (version, data, created_at, updated_at)
+                    VALUES (%(v)s, %(data)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, {"v": version, "data": Json(data)}),
+            ]
+            db.execute_transaction(queries)
+            return True
+        except Exception as e:
+            log_error("Error upserting CARLA metadata", e)
+            return False
+
 class AppLog(Base):
     """Application logs stored per tenant"""
 

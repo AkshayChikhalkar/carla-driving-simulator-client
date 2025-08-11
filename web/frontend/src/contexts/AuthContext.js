@@ -30,6 +30,10 @@ export const AuthProvider = ({ children }) => {
         })
         .then(user => {
           setUser(user);
+          // Persist tenant id from JWT (if present via backend login) or backend me response (extend later)
+          if (user && user.tenant_id) {
+            localStorage.setItem('tenant_id', String(user.tenant_id));
+          }
           logger.info(`AuthContext: Loaded user from backend: ${user.username}`);
         })
         .catch(() => {

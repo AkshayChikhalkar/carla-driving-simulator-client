@@ -324,6 +324,23 @@ class WorldManager(IWorldManager):
         self.logger.error(f"[{spawn_id}] Failed to spawn {blueprint.id} after {max_attempts} attempts")
         return None
 
+    def _apply_advanced_attributes(self, blueprint: carla.ActorBlueprint, section: str, advanced: dict) -> None:
+        """Apply dynamic attributes from config.advanced.<section>.attributes for CARLA 0.10.0.
+        section: 'vehicle' | 'sensor' | 'walker'
+        """
+        try:
+            attrs = (advanced or {}).get(section, {}).get('attributes', {})
+            if not attrs:
+                return
+            for key, value in attrs.items():
+                try:
+                    if hasattr(blueprint, 'set_attribute'):
+                        blueprint.set_attribute(str(key), str(value))
+                except Exception as e:
+                    self.logger.debug(f"Could not set attribute {key} on {blueprint.id}: {e}")
+        except Exception as e:
+            self.logger.debug(f"Advanced attribute application failed: {e}")
+
     def create_vehicle(self) -> Optional[carla.Vehicle]:
         """Create and spawn a vehicle in the world"""
         try:
@@ -361,6 +378,17 @@ class WorldManager(IWorldManager):
                 spawn_point = self.spawn_points[0]  # Use first spawn point
                 self.logger.debug(f"Attempting to spawn vehicle at {spawn_point.location}")
                 
+                # Apply advanced blueprint attributes (if provided via config._config.advanced)
+                try:
+                    advanced_cfg = getattr(self, 'advanced_config', None)
+                    if advanced_cfg is None:
+                        # attempt to reach through application config if available
+                        if hasattr(self, 'app') and hasattr(self.app, '_config'):
+                            advanced_cfg = getattr(self.app._config, 'advanced', None)
+                    self._apply_advanced_attributes(vehicle_bp, 'vehicle', advanced_cfg or {})
+                except Exception:
+                    pass
+
                 self.vehicle = self._spawn_with_retry(vehicle_bp, spawn_point, spawn_id="main_vehicle")
 
                 if not self.vehicle:

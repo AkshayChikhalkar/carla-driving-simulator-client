@@ -62,4 +62,57 @@ BEGIN
     END IF;
 END$$;
 
+-- 9) Split tenant_configs into app_config and sim_config while keeping legacy config
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'carla_simulator' AND table_name='tenant_configs' AND column_name='app_config'
+    ) THEN
+        ALTER TABLE tenant_configs ADD COLUMN app_config JSON NULL;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'carla_simulator' AND table_name='tenant_configs' AND column_name='sim_config'
+    ) THEN
+        ALTER TABLE tenant_configs ADD COLUMN sim_config JSON NULL;
+    END IF;
+END $$;
+
+-- 10) Backfill from legacy config for existing rows (best-effort)
+UPDATE tenant_configs
+SET app_config = COALESCE(app_config, (config::jsonb - 'server' - 'world' - 'simulation' - 'sensors' - 'controller' - 'vehicle' - 'scenarios')::json),
+    sim_config = COALESCE(sim_config, config)
+WHERE TRUE;
+
+-- 11) CARLA metadata table for catalogs (maps, blueprints, enums)
+CREATE TABLE IF NOT EXISTS carla_metadata (
+    id SERIAL PRIMARY KEY,
+    version VARCHAR(32) NOT NULL UNIQUE,
+    data JSON NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_carla_metadata_version ON carla_metadata(version);
+
+-- 12) Convenience view for active tenant configs (split + legacy)
+CREATE OR REPLACE VIEW v_active_tenant_configs AS
+SELECT tenant_id, version, is_active, config, app_config, sim_config
+FROM tenant_configs
+WHERE is_active = TRUE;
+
+-- 13) Stored procedures for CARLA metadata
+CREATE OR REPLACE FUNCTION carla_metadata_upsert(v TEXT, d JSON)
+RETURNS VOID AS $$
+INSERT INTO carla_metadata (version, data, created_at, updated_at)
+VALUES (v, d, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (version)
+DO UPDATE SET data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP;
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION get_carla_metadata(v TEXT)
+RETURNS JSON AS $$
+SELECT data FROM carla_metadata WHERE version = v;
+$$ LANGUAGE SQL;
+
 

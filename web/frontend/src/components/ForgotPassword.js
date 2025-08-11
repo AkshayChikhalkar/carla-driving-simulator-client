@@ -4,13 +4,12 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import Link from '@mui/material/Link';
-import GitHubIcon from '@mui/icons-material/GitHub';
+// Removed unused imports
 
 const ForgotPassword = () => {
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
-  const [userExists, setUserExists] = useState(false);
+  // Removed userExists; step tracks flow
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +26,6 @@ const ForgotPassword = () => {
     try {
       const res = await axios.post('/api/auth/check-username', { username });
       if (res.data.exists) {
-        setUserExists(true);
         setStep(2);
       } else {
         setError('User not found');
@@ -58,7 +56,6 @@ const ForgotPassword = () => {
       setTimeout(() => navigate('/login'), 1500);
       setStep(1);
       setUsername('');
-      setUserExists(false);
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {

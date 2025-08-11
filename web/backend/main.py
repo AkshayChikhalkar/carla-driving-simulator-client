@@ -11,6 +11,8 @@ from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
+from jsonschema import validate as js_validate, Draft7Validator
+import jsonschema
 from typing import List, Optional
 import sys
 import os
@@ -133,7 +135,7 @@ from carla_simulator.utils.logging import Logger
 from carla_simulator.utils.paths import get_project_root
 from carla_simulator.core.scenario_results_manager import ScenarioResultsManager
 from carla_simulator.database.db_manager import DatabaseManager
-from carla_simulator.database.models import User, UserSession, TenantConfig, SimulationReport
+from carla_simulator.database.models import User, UserSession, TenantConfig, SimulationReport, CarlaMetadata
 from carla_simulator.utils.auth import (
     LoginRequest, RegisterRequest, UserResponse,
     hash_password, verify_password, generate_session_token,
@@ -166,7 +168,8 @@ class LogFileRequest(BaseModel):
 
 
 class ConfigUpdate(BaseModel):
-    config_data: dict
+    app_config: dict | None = None
+    sim_config: dict | None = None
 
 
 class ResetConfigRequest(BaseModel):
@@ -663,14 +666,20 @@ async def get_scenarios():
 
 
 @app.get("/api/config")
-async def get_config(tenant_id: Optional[int] = None):
+async def get_config(request: Request, tenant_id: Optional[int] = None):
     """Get current configuration. If tenant_id provided, return DB-backed active config."""
     try:
-        # Resolve effective tenant id: query param overrides env
+        # Resolve effective tenant id: header > query > env
         effective_tenant_id: Optional[int] = None
-        if tenant_id is not None:
+        header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+        if header_tid:
+            try:
+                effective_tenant_id = int(header_tid)
+            except ValueError:
+                effective_tenant_id = None
+        if effective_tenant_id is None and tenant_id is not None:
             effective_tenant_id = tenant_id
-        else:
+        if effective_tenant_id is None:
             env_tid = os.getenv("CONFIG_TENANT_ID")
             if env_tid is not None:
                 try:
@@ -683,34 +692,66 @@ async def get_config(tenant_id: Optional[int] = None):
             cfg = TenantConfig.get_active_config(dbm, effective_tenant_id)
             if cfg:
                 return cfg
-        # fallback to current loaded YAML config
-        logger.debug("Fetching current configuration from YAML fallback")
-        return runner.config if isinstance(runner.config, dict) else {}
+            # Fallback to DB defaults if active config not present
+            defaults = dbm.get_carla_metadata("simulation_defaults")
+            return defaults or {}
+        # No tenant context: require tenant for DB-only mode
+        raise HTTPException(status_code=400, detail="Tenant context required (CONFIG_TENANT_ID or ?tenant_id=)")
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/config/defaults")
+async def get_config_defaults():
+    """Return default configuration values stored in DB metadata."""
+    try:
+        dbm = DatabaseManager()
+        defaults = dbm.get_carla_metadata("simulation_defaults")
+        return {"config": defaults or {}}
+    except Exception as e:
+        logger.error(f"Error getting default configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/config")
-async def update_config(config_update: ConfigUpdate, tenant_id: Optional[int] = None):
+async def update_config(request: Request, config_update: ConfigUpdate, tenant_id: Optional[int] = None):
     """Update configuration"""
     try:
         logger.debug("Updating configuration")
 
-        # Validate the config data
-        if not isinstance(config_update.config_data, dict):
-            raise HTTPException(status_code=400, detail="Invalid configuration format")
+        # Merge app and sim sections into one dict for existing storage shape
+        merged: dict = {}
+        if config_update.app_config:
+            merged.update(config_update.app_config)
+        if config_update.sim_config:
+            merged.update(config_update.sim_config)
 
-        # Best-effort validation: use current loader to check required sections
-        # but do not force dataclass construction here (save path can be YAML)
-        if not isinstance(config_update.config_data, dict):
-            raise HTTPException(status_code=400, detail="Invalid configuration format")
+        # Server-side validation via jsonschema (permissive baseline)
+        try:
+            # Simple baseline schema requiring objects
+            base_schema = {"type": "object"}
+            Draft7Validator.check_schema(base_schema)
+            js_validate(instance=config_update.app_config or {}, schema=base_schema)
+            js_validate(instance=config_update.sim_config or {}, schema=base_schema)
+        except Exception as e:
+            logger.error(f"Schema validation failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Configuration validation failed: {e}")
 
-        # Resolve effective tenant id: query param overrides env
+        # Ensure payload is acceptable even if client sends only split sections
+        # (older clients used config_data, which we no longer require)
+
+        # Resolve effective tenant id: header > query > env
         effective_tenant_id: Optional[int] = None
-        if tenant_id is not None:
+        header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+        if header_tid:
+            try:
+                effective_tenant_id = int(header_tid)
+            except ValueError:
+                effective_tenant_id = None
+        if effective_tenant_id is None and tenant_id is not None:
             effective_tenant_id = tenant_id
-        else:
+        if effective_tenant_id is None:
             env_tid = os.getenv("CONFIG_TENANT_ID")
             if env_tid is not None:
                 try:
@@ -719,33 +760,35 @@ async def update_config(config_update: ConfigUpdate, tenant_id: Optional[int] = 
                     effective_tenant_id = None
 
         if effective_tenant_id is not None:
-            # Store config in DB for tenant and return
-            dbm = DatabaseManager()
-            result = TenantConfig.upsert_active_config(dbm, effective_tenant_id, config_update.config_data)
-            if not result:
-                raise HTTPException(status_code=500, detail="Failed to store tenant config")
-            return {"message": "Tenant configuration updated", "tenant_id": effective_tenant_id, "version": result["version"], "config": config_update.config_data}
-        else:
-            # Save to YAML fallback
-            # Write raw dict to YAML to preserve structure
             try:
-                with open(runner.config_file, "w", encoding="utf-8") as f:
-                    yaml.safe_dump(config_update.config_data, f, sort_keys=False)
+                dbm = DatabaseManager()
+                merged_payload = merged
+                # Touch columns (no-op) to ensure migration applied; ignore errors
+                try:
+                    dbm.execute_query("UPDATE tenant_configs SET app_config = app_config WHERE 1=0")
+                except Exception:
+                    pass
+                result = TenantConfig.upsert_active_config(dbm, effective_tenant_id, merged_payload)
+                if not result:
+                    raise RuntimeError("DB upsert returned no result")
+                return {"message": "Tenant configuration updated", "tenant_id": effective_tenant_id, "version": result["version"], "config": merged_payload}
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed writing YAML: {str(e)}")
-            # Immediately reflect saved YAML in in-memory config without DB override
-            runner.config = config_update.config_data
+                logger.error(f"Tenant DB save failed (tenant_id={effective_tenant_id}): {e}")
+                raise HTTPException(status_code=500, detail=f"DB save failed: {e}")
+
+        # If no tenant context, explicitly reject (DB-only policy)
+        raise HTTPException(status_code=400, detail="Tenant context required (CONFIG_TENANT_ID or ?tenant_id=) for saving")
 
         logger.debug("Configuration updated successfully")
         return {
             "message": "Configuration updated successfully",
                 # Return the dict we just wrote (frontend expects plain JSON)
-                "config": config_update.config_data,
+                "config": merged,
                 "source": "db" if effective_tenant_id is not None else "fs",
         }
     except yaml.YAMLError as e:
         logger.error(f"YAML parsing error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Invalid YAML format: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid configuration format: {str(e)}")
     except Exception as e:
         logger.error(f"Error updating configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1499,17 +1542,55 @@ async def frontend_log(request: FrontendLogRequest):
     except Exception as e:
         logger.error(f"Error logging frontend message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+@app.post("/api/carla/metadata")
+async def upsert_carla_metadata(payload: dict):
+    """Store CARLA catalogs (maps, blueprints, enums) by version into DB."""
+    try:
+        version = payload.get("version") or payload.get("carla_version")
+        data = payload.get("data") or payload
+        if not version or not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="version and data required")
+        dbm = DatabaseManager()
+        ok = CarlaMetadata.upsert(dbm, str(version), data)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to store metadata")
+        return {"message": "Metadata stored", "version": version}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error storing metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/carla/metadata/{version}")
+async def get_carla_metadata(version: str):
+    try:
+        dbm = DatabaseManager()
+        row = CarlaMetadata.get_by_version(dbm, version)
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/config/reset")
-async def reset_config(request: ResetConfigRequest):
-    """Reset configuration to defaults for a tenant (DB) or overwrite YAML fallback with defaults."""
+async def reset_config(request: Request, payload: ResetConfigRequest):
+    """Reset configuration to defaults for a tenant from DB metadata."""
     try:
-        # Determine effective tenant id
+        # Determine effective tenant id: header > body > env
         effective_tenant_id: Optional[int] = None
-        if request.tenant_id is not None:
-            effective_tenant_id = request.tenant_id
-        else:
+        header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+        if header_tid:
+            try:
+                effective_tenant_id = int(header_tid)
+            except ValueError:
+                effective_tenant_id = None
+        if effective_tenant_id is None and payload.tenant_id is not None:
+            effective_tenant_id = payload.tenant_id
+        if effective_tenant_id is None:
             env_tid = os.getenv("CONFIG_TENANT_ID")
             if env_tid is not None:
                 try:
@@ -1517,27 +1598,20 @@ async def reset_config(request: ResetConfigRequest):
                 except ValueError:
                     effective_tenant_id = None
 
-        # Load defaults from YAML file path; if missing, use currently loaded config
-        from carla_simulator.utils.paths import get_config_path
-        cfg_file = get_config_path("simulation.yaml")
-        try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                defaults = yaml.safe_load(f) or {}
-        except Exception:
-            defaults = runner.config if isinstance(runner.config, dict) else {}
+        # Load defaults from DB metadata
+        dbm = DatabaseManager()
+        defaults = dbm.get_carla_metadata("simulation_defaults") or {}
+        if not isinstance(defaults, dict) or len(defaults) == 0:
+            raise HTTPException(status_code=400, detail="No defaults configured in DB (simulation_defaults)")
 
         if effective_tenant_id is not None:
-            dbm = DatabaseManager()
             result = TenantConfig.upsert_active_config(dbm, effective_tenant_id, defaults)
             if not result:
                 raise HTTPException(status_code=500, detail="Failed to reset tenant config")
             return {"message": "Configuration reset to defaults (DB)", "tenant_id": effective_tenant_id, "config": defaults}
-
-        # YAML fallback: overwrite file
-        with open(runner.config_file, "w", encoding="utf-8") as f:
-            yaml.safe_dump(defaults, f, sort_keys=False)
-        runner.config = defaults
-        return {"message": "Configuration reset to defaults (YAML)", "config": defaults}
+        
+        # No tenant context
+        raise HTTPException(status_code=400, detail="Tenant context required (CONFIG_TENANT_ID or ?tenant_id=) for reset")
     except Exception as e:
         logger.error(f"Error resetting configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1618,12 +1692,26 @@ async def login(request: Request, login_request: LoginRequest):
         user_obj = User()
         user_obj.id = user["id"]
         user_obj.update_last_login(db)
+        # Determine default tenant for this user (per-user tenant)
+        default_tenant_id: Optional[int] = None
+        try:
+            from carla_simulator.database.models import Tenant
+            slug = f"user-{user['id']}"
+            tenant = Tenant.get_by_slug(db, slug)
+            if not tenant:
+                tenant = Tenant.create_if_not_exists(db, name=f"User {user['username']}", slug=slug, is_active=True)
+            if tenant:
+                default_tenant_id = tenant["id"]
+        except Exception:
+            default_tenant_id = None
+
         # Create JWT token
         token_data = {
             "sub": str(user["id"]),
             "username": user["username"],
             "email": user["email"],
-            "is_admin": user["is_admin"]
+            "is_admin": user["is_admin"],
+            "tenant_id": default_tenant_id,
         }
         access_token = create_jwt_token(token_data)
         # Create session token for additional security
@@ -1650,7 +1738,8 @@ async def login(request: Request, login_request: LoginRequest):
                 "email": user["email"],
                 "first_name": user["first_name"],
                 "last_name": user["last_name"],
-                "is_admin": user["is_admin"]
+                "is_admin": user["is_admin"],
+                "tenant_id": default_tenant_id,
             }
         }
     except HTTPException:
@@ -1759,7 +1848,7 @@ async def register(request: RegisterRequest):
                     with open(cfg_file, "r", encoding="utf-8") as f:
                         defaults = yaml.safe_load(f) or {}
                 except Exception:
-                    defaults = runner.config if isinstance(runner.config, dict) else {}
+                    defaults = {}
                 TenantConfig.upsert_active_config(db, default_tenant_id, defaults)
         except Exception as se:
             logger.warning(f"Failed to seed default config for new user: {se}")
@@ -1817,6 +1906,18 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
                 detail="User not found"
             )
         
+        # Determine user's default tenant id (if not present in JWT)
+        tenant_id = current_user.get("tenant_id")
+        if tenant_id is None:
+            try:
+                from carla_simulator.database.models import Tenant
+                slug = f"user-{user['id']}"
+                tenant = Tenant.get_by_slug(db, slug)
+                if tenant:
+                    tenant_id = tenant["id"]
+            except Exception:
+                tenant_id = None
+
         return {
             "id": user["id"],
             "username": user["username"],
@@ -1825,7 +1926,8 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
             "last_name": user["last_name"],
             "is_admin": user["is_admin"],
             "created_at": user["created_at"],
-            "last_login": user["last_login"]
+            "last_login": user["last_login"],
+            "tenant_id": tenant_id,
         }
     except HTTPException:
         raise
@@ -1940,7 +2042,11 @@ if __name__ == "__main__":
         cfg_path = get_config_path("simulation.yaml")
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
+                if cfg_path.lower().endswith('.json'):
+                    import json as _json
+                    cfg = _json.load(f) or {}
+                else:
+                    cfg = yaml.safe_load(f) or {}
                 web_cfg = cfg.get("web", {}) or {}
                 cfg_host = str(web_cfg.get("host", cfg_host))
                 cfg_port = int(web_cfg.get("port", cfg_port))

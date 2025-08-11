@@ -40,3 +40,6 @@ PyJWT>=2.8.0
 
 # Monitoring
 prometheus-client>=0.17.0 
+
+# Validation
+jsonschema>=4.17.3

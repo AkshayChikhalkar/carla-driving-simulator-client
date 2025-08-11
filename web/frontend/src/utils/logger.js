@@ -19,7 +19,8 @@ class Logger {
     this.config = {
       logLevel: process.env.NODE_ENV === 'development' ? 'DEBUG' : 'INFO',
       logToConsole: true,
-      logToFile: true,
+      // Disable file logging by default to avoid noisy /api/logs/* traffic
+      logToFile: false,
       logFormat: '%timestamp% - %level% - %message%',
       dateFormat: 'YYYY-MM-DD HH:mm:ss'
     };
@@ -32,7 +33,9 @@ class Logger {
     this._initialized = true;
 
     // Initialize file logging
-    this._initializeFileLogging();
+    if (this.config.logToFile) {
+      this._initializeFileLogging();
+    }
   }
 
   async _initializeFileLogging() {

@@ -157,10 +157,23 @@ class CameraSensor(SensorSubject):
         if not bp:
             return
 
-        # Use third-person chase view values for camera position
+        # Defaults; will be overridden by advanced attributes if present
         bp.set_attribute("image_size_x", str(1280))
         bp.set_attribute("image_size_y", str(720))
         bp.set_attribute("fov", str(90))
+
+        # Apply advanced sensor attributes if provided in configuration
+        try:
+            if world_manager and hasattr(world_manager, 'app') and hasattr(world_manager.app, '_config'):
+                adv = getattr(world_manager.app._config, 'advanced', None) or {}
+                attrs = (adv.get('sensor', {}) or {}).get('attributes', {})
+                for k, v in attrs.items():
+                    try:
+                        bp.set_attribute(str(k), str(v))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         spawn_point = carla.Transform(
             carla.Location(x=-6.0, y=0.0, z=3.0), carla.Rotation(pitch=-15)

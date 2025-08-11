@@ -8,6 +8,16 @@ import yaml
 import os
 import json
 
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge override into base and return a new dict."""
+    result = dict(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
 
 @dataclass
 class ServerConfig:
@@ -359,12 +369,31 @@ def _load_config_dict(config_path: str) -> Dict[str, Any]:
             db = DatabaseManager()
             config_from_db = TenantConfig.get_active_config(db, int(tenant_id))
             if config_from_db:
-                return config_from_db
+                # Validate critical structure; if incomplete, merge with file defaults
+                try:
+                    has_world = isinstance(config_from_db.get("world"), dict)
+                    world = config_from_db.get("world") or {}
+                    has_wpt = all(k in (world or {}) for k in ("weather", "physics", "traffic"))
+                    if not (has_world and has_wpt):
+                        # Load file defaults and deep-merge DB over them
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            file_defaults = json.load(f) if config_path.lower().endswith(".json") else yaml.safe_load(f)
+                        if isinstance(file_defaults, dict):
+                            return _deep_merge(file_defaults, config_from_db)
+                        # If defaults cannot be loaded, fall through to file load below
+                    else:
+                        return config_from_db
+                except Exception:
+                    # If anything goes wrong, fall through to file load
+                    pass
         except Exception:
-            # Fallback to YAML if DB fails
+            # Fallback to file if DB fails
             pass
 
+    # Load based on extension; default to YAML for compatibility
     with open(config_path, "r", encoding="utf-8") as f:
+        if config_path.lower().endswith(".json"):
+            return json.load(f)
         return yaml.safe_load(f)
 
 
@@ -412,7 +441,7 @@ def load_config(config_path: str) -> Config:
 
 
 def save_config(config: Config, config_path: str) -> None:
-    """Save configuration to YAML file"""
+    """Save configuration to file (JSON when path ends with .json, otherwise YAML)."""
     config_dict = {
         "server": {
             "host": config.server.host,
@@ -567,7 +596,10 @@ def save_config(config: Config, config_path: str) -> None:
     }
 
     with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config_dict, f, default_flow_style=False)
+        if config_path.lower().endswith(".json"):
+            json.dump(config_dict, f, indent=2)
+        else:
+            yaml.dump(config_dict, f, default_flow_style=False)
 
 
 class ConfigLoader:

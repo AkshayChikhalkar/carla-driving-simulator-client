@@ -57,6 +57,10 @@ const Login = ({ onLogin }) => {
         localStorage.setItem('access_token', data.access_token);
         localStorage.setItem('session_token', data.session_token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        // Persist tenant id for this session if returned
+        if (data.user && data.user.tenant_id) {
+          localStorage.setItem('tenant_id', String(data.user.tenant_id));
+        }
         
         // Call onLogin callback
         if (onLogin) {
