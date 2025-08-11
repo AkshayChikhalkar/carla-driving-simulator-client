@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 import yaml
+from contextvars import ContextVar
 import threading
 from threading import Lock, Event
 import queue
@@ -41,6 +42,52 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, His
 import prometheus_client
 
 app = FastAPI()
+# Import tenant context for logging and set per-request based on header/query/env
+from carla_simulator.utils.logging import CURRENT_TENANT_ID
+from carla_simulator.utils.auth import verify_jwt_token
+
+@app.middleware("http")
+async def tenant_context_middleware(request: Request, call_next):
+    tenant_id_ctx = None
+    header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+    if header_tid:
+        try:
+            tenant_id_ctx = int(header_tid)
+        except ValueError:
+            tenant_id_ctx = None
+    if tenant_id_ctx is None:
+        tid_q = request.query_params.get("tenant_id")
+        if tid_q:
+            try:
+                tenant_id_ctx = int(tid_q)
+            except ValueError:
+                tenant_id_ctx = None
+    if tenant_id_ctx is None:
+        env_tid = os.getenv("CONFIG_TENANT_ID")
+        if env_tid:
+            try:
+                tenant_id_ctx = int(env_tid)
+            except ValueError:
+                tenant_id_ctx = None
+    # 4) JWT claim
+    if tenant_id_ctx is None:
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1]
+            payload = verify_jwt_token(token)
+            if payload and isinstance(payload, dict):
+                try:
+                    claim_tid = payload.get("tenant_id")
+                    if claim_tid is not None:
+                        tenant_id_ctx = int(claim_tid)
+                except Exception:
+                    tenant_id_ctx = tenant_id_ctx
+    token = CURRENT_TENANT_ID.set(tenant_id_ctx)
+    try:
+        response = await call_next(request)
+    finally:
+        CURRENT_TENANT_ID.reset(token)
+    return response
 
 # Serve React production build
 from fastapi.staticfiles import StaticFiles
@@ -540,8 +587,8 @@ app.add_middleware(
 # Use robust project root
 project_root = get_project_root()
 
-# Initialize simulation runner with thread-safe state
-runner = SimulationRunner()
+# Initialize simulation runner in DB-only mode (defer YAML load)
+runner = SimulationRunner(db_only=True)
 runner.state = ThreadSafeState()
 
 # Web frontend log file handle
@@ -697,6 +744,9 @@ async def get_config(request: Request, tenant_id: Optional[int] = None):
             return defaults or {}
         # No tenant context: require tenant for DB-only mode
         raise HTTPException(status_code=400, detail="Tenant context required (CONFIG_TENANT_ID or ?tenant_id=)")
+    except HTTPException:
+        # Propagate intended HTTP errors (e.g., 400 when tenant context missing)
+        raise
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -914,7 +964,7 @@ async def skip_scenario():
 
 
 @app.post("/api/simulation/start")
-async def start_simulation(request: SimulationRequest):
+async def start_simulation(request: SimulationRequest, http_request: Request):
     """Start simulation with given parameters"""
     global setup_event, simulation_ready
     
@@ -977,9 +1027,35 @@ async def start_simulation(request: SimulationRequest):
             logger.debug(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
             runner.state["scenario_results"].clear_results()
 
-            # If tenant_id provided, set env for config loader to fetch DB config BEFORE app creation
-            if request.tenant_id is not None:
-                os.environ["CONFIG_TENANT_ID"] = str(request.tenant_id)
+            # Resolve effective tenant for this run: header > body > env
+            effective_tid = None
+            header_tid = http_request.headers.get("x-tenant-id") or http_request.headers.get("X-Tenant-Id")
+            if header_tid:
+                try:
+                    effective_tid = int(header_tid)
+                except ValueError:
+                    effective_tid = None
+            if effective_tid is None and request.tenant_id is not None:
+                effective_tid = int(request.tenant_id)
+            if effective_tid is None:
+                env_tid = os.getenv("CONFIG_TENANT_ID")
+                if env_tid:
+                    try:
+                        effective_tid = int(env_tid)
+                    except ValueError:
+                        effective_tid = None
+
+            # Persist tenant selection to env for background threads (logging, etc.)
+            if effective_tid is None:
+                # Try request-scoped context
+                try:
+                    ctx_tid = CURRENT_TENANT_ID.get()
+                except Exception:
+                    ctx_tid = None
+                if ctx_tid is not None:
+                    effective_tid = int(ctx_tid)
+            if effective_tid is not None:
+                os.environ["CONFIG_TENANT_ID"] = str(effective_tid)
 
             runner.app = runner.create_application(
                 scenarios_to_run[0], session_id=session_id
@@ -1482,10 +1558,16 @@ async def delete_log(filename: str):
     )
 
 
+def _web_file_logging_enabled() -> bool:
+    return os.getenv("WEB_FILE_LOGS_ENABLED", "false").lower() == "true"
+
+
 @app.post("/api/logs/directory")
 async def create_logs_directory():
     """Create logs directory if it doesn't exist"""
     try:
+        if not _web_file_logging_enabled():
+            return {"message": "Web file logging disabled"}
         logs_dir = Path(get_project_root()) / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return {"message": "Logs directory created/verified"}
@@ -1497,6 +1579,8 @@ async def create_logs_directory():
 async def create_log_file(request: LogFileRequest):
     """Create a new log file"""
     try:
+        if not _web_file_logging_enabled():
+            return {"message": "Web file logging disabled"}
         logs_dir = Path(get_project_root()) / "logs"
         log_file = logs_dir / request.filename
         # Create file if it doesn't exist
@@ -1511,6 +1595,8 @@ async def create_log_file(request: LogFileRequest):
 @app.post("/api/logs/write")
 async def write_log(request: LogWriteRequest):
     try:
+        if not _web_file_logging_enabled():
+            return {"success": True, "message": "Web file logging disabled"}
         logs_dir = Path("logs")
         logs_dir.mkdir(parents=True, exist_ok=True)
         app_log_file = logs_dir / "app.log"

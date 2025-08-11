@@ -315,30 +315,36 @@ class SimulationMetrics:
         </body>
         </html>
         """
-        # Save to 'reports' directory at project root
-        reports_dir = Path(__file__).parent.parent.parent / "reports"
-        reports_dir.mkdir(exist_ok=True)
-        report_path = (
-            reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
-        )
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        if self.logger:
-            self.logger.info(f"HTML report generated: {report_path}")
+        # Save report only when explicitly enabled via env
+        if os.getenv("ENABLE_FILE_REPORTS", "false").lower() == "true":
+            reports_dir = Path(__file__).parent.parent.parent / "reports"
+            reports_dir.mkdir(exist_ok=True)
+            report_path = (
+                reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
+            )
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            if self.logger:
+                self.logger.info(f"HTML report generated: {report_path}")
 
-        # Also store report in DB if tenant context is set via env
+        # Also store report in DB if tenant context is present (prefer request-scoped)
         try:
-            tenant_env = os.environ.get("CONFIG_TENANT_ID")
-            if tenant_env:
-                tenant_id = int(tenant_env)
-                # name is file name for convenience
-                report_name = report_path.name
-                db = SessionLocal()
-                # Use plain SQLAlchemy session to insert via model classmethod helper
-                # We can call Database model's create via DatabaseManager-like API is not present here
+            from carla_simulator.utils.logging import CURRENT_TENANT_ID
+            tenant_ctx = None
+            try:
+                tenant_ctx = CURRENT_TENANT_ID.get()
+            except Exception:
+                tenant_ctx = None
+            tenant_id = tenant_ctx
+            if tenant_id is None:
+                tenant_env = os.environ.get("CONFIG_TENANT_ID")
+                if tenant_env:
+                    tenant_id = int(tenant_env)
+            if tenant_id is not None:
+                report_name = (locals().get('report_path').name if 'report_path' in locals() else f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html")
                 from carla_simulator.database.db_manager import DatabaseManager
                 dbm = DatabaseManager()
-                SimulationReport.create(dbm, name=report_name, html=html_content, tenant_id=tenant_id)
+                SimulationReport.create(dbm, name=report_name, html=html_content, tenant_id=int(tenant_id))
         except Exception:
             # Don't fail simulation if report DB save fails
             pass

@@ -29,9 +29,10 @@ from carla_simulator.utils.config import load_config
 class SimulationRunner:
     """Class to handle simulation execution and management"""
 
-    def __init__(self, config_file: str = None, session_id: uuid.UUID = None):
+    def __init__(self, config_file: str = None, session_id: uuid.UUID = None, db_only: bool = False):
         self.config_file = config_file or get_config_path()
-        self.config = load_config(self.config_file)
+        # In DB-only mode, defer config loading until a tenant is known
+        self.config = None if db_only else load_config(self.config_file)
         self.logger = Logger()
         self.session_id = session_id or uuid.uuid4()
 
@@ -49,6 +50,16 @@ class SimulationRunner:
         self, scenario: str, session_id=None
     ) -> SimulationApplication:
         """Create a new simulation application instance"""
+        # If config not yet loaded (DB-only), attempt to load using tenant context
+        if self.config is None:
+            try:
+                from carla_simulator.utils.paths import get_config_path
+                from carla_simulator.utils.config import load_config
+                self.config_file = get_config_path()
+                self.config = load_config(self.config_file)
+            except Exception:
+                # Best-effort: keep None; SimulationApplication will raise if needed
+                pass
         return SimulationApplication(
             self.config_file,
             scenario=scenario,
@@ -186,11 +197,15 @@ class SimulationRunner:
             scenarios: List of scenarios to run
             debug: Whether to enable debug logging
         """
-        # Create reports directory
+        # Respect DB-only/report-toggle: only generate when explicitly enabled
+        if os.getenv("ENABLE_FILE_REPORTS", "false").lower() != "true":
+            # Fallback: just run scenarios without file report
+            self.run_scenarios(scenarios)
+            return
+
         reports_dir = Path("reports")
         reports_dir.mkdir(exist_ok=True)
 
-        # Configure pytest arguments
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_report = reports_dir / f"scenario_report_{timestamp}.html"
 

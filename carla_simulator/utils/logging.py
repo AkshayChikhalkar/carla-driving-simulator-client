@@ -7,6 +7,7 @@ import logging
 import traceback
 from datetime import datetime
 from typing import Optional, Any, Dict
+from contextvars import ContextVar
 from pathlib import Path
 
 from ..metrics import SimulationMetricsData
@@ -187,12 +188,24 @@ class Logger:
         )
 
     def _db_log(self, level: str, message: str, include_trace: bool = False) -> None:
-        """Best-effort DB log sink per tenant when CONFIG_TENANT_ID is set."""
+        """Best-effort DB log sink per tenant.
+        Resolution order for tenant id:
+        1) Per-request context var (set by web middleware)
+        2) CONFIG_TENANT_ID env (legacy)
+        """
         try:
-            tenant_env = os.environ.get("CONFIG_TENANT_ID")
-            if not tenant_env:
-                return
-            tenant_id = int(tenant_env)
+            # Try request-scoped tenant first
+            try:
+                tenant_ctx: Optional[int] = CURRENT_TENANT_ID.get()  # type: ignore
+            except Exception:
+                tenant_ctx = None
+
+            tenant_id: Optional[int] = tenant_ctx
+            if tenant_id is None:
+                tenant_env = os.environ.get("CONFIG_TENANT_ID")
+                if not tenant_env:
+                    return
+                tenant_id = int(tenant_env)
             # Include session and scenario if present
             extra = {
                 "session_id": str(getattr(self, "_session_id", "") or ""),
@@ -202,7 +215,11 @@ class Logger:
                 extra["trace"] = traceback.format_exc()
             from carla_simulator.database.db_manager import DatabaseManager
             dbm = DatabaseManager()
-            AppLog.write(dbm, level=level, message=message, tenant_id=tenant_id, extra=extra)
+            AppLog.write(dbm, level=level, message=message, tenant_id=int(tenant_id), extra=extra)
         except Exception:
             # Never fail logging due to DB issues
             pass
+
+
+# Per-request tenant context var (set by web backend middleware)
+CURRENT_TENANT_ID: ContextVar[Optional[int]] = ContextVar("CURRENT_TENANT_ID", default=None)

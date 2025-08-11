@@ -4,19 +4,19 @@ from datetime import datetime
 from pathlib import Path
 
 
-def pytest_configure(config):
-    """Configure pytest"""
-    # Create reports directory if it doesn't exist
-    reports_dir = Path("reports")
-    reports_dir.mkdir(exist_ok=True)
+# def pytest_configure(config):
+#     """Configure pytest"""
+#     # Create reports directory if it doesn't exist
+#     reports_dir = Path("reports")
+#     reports_dir.mkdir(exist_ok=True)
 
-    # Configure HTML report
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    html_report = reports_dir / f"scenario_report_{timestamp}.html"
-    config.option.htmlpath = str(html_report)
+#     # Configure HTML report
+#     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#     html_report = reports_dir / f"scenario_report_{timestamp}.html"
+#     config.option.htmlpath = str(html_report)
 
-    # Add custom markers
-    config.addinivalue_line("markers", "scenario: mark test as a scenario test")
+#     # Add custom markers
+#     config.addinivalue_line("markers", "scenario: mark test as a scenario test")
 
 
 @pytest.hookimpl(hookwrapper=True)
