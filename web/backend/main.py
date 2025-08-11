@@ -575,10 +575,11 @@ def transition_to_next_scenario(runner, next_scenario):
 # Initialize FastAPI app and logger
 logger = Logger()
 
-# Enable CORS
+# Enable CORS (env-driven allowlist; default allows all for dev)
+allowed_origins = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

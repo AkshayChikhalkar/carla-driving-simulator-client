@@ -13,10 +13,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from jwt import ExpiredSignatureError
 
-# JWT Configuration
-JWT_SECRET_KEY = "your-secret-key-change-in-production"
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
+# JWT Configuration (env-driven with secure defaults)
+import os
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-insecure-change-me")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 
 # Password configuration
 PASSWORD_MIN_LENGTH = 8

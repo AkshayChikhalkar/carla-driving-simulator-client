@@ -11,6 +11,7 @@ import {
   LocationOn as LocationIcon,
   Assessment as AssessmentIcon
 } from '@mui/icons-material';
+import { fetchJson } from '../utils/fetchJson';
 
 // Prefer same-origin Grafana if proxied, else fallback to env
 const API_BASE_URL = '/api';
@@ -26,7 +27,7 @@ const useGrafanaBaseUrl = () => {
         const headers = {};
         const storedTenant = localStorage.getItem('tenant_id');
         if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
-        const resp = await fetch(`${API_BASE_URL}/config`, { headers });
+        const resp = await fetchJson(`${API_BASE_URL}/config`, { headers });
         const data = await resp.json();
         if (data && data.analytics && data.analytics.grafana_base_url) {
           setGrafanaBaseUrl(data.analytics.grafana_base_url);

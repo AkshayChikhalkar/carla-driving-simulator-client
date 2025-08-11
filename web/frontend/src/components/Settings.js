@@ -23,6 +23,7 @@ import logger from '../utils/logger';
 import { APP_SETTINGS_CATEGORIES, SIM_SETTINGS_CATEGORIES, getValue, setValue } from '../utils/settingsSchema';
 import Ajv from 'ajv';
 import { buildSchemaFromCategories } from '../utils/buildSchema';
+import { fetchJson } from '../utils/fetchJson';
 
 const API_BASE_URL = '/api';
 
@@ -75,10 +76,7 @@ function Settings() {
     const load = async () => {
       try {
         logger.info('Fetching current simulation configuration');
-        const headers = {};
-        const storedTenant = localStorage.getItem('tenant_id');
-        if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
-        const res = await fetch(`${API_BASE_URL}/config`, { headers });
+        const res = await fetchJson(`${API_BASE_URL}/config`);
         const data = await res.json();
         setConfig(data);
         setEditedConfig(data);
@@ -92,10 +90,7 @@ function Settings() {
     // Load defaults for resetField hints without mutating server state
     const loadDefaults = async () => {
       try {
-        const headers = {};
-        const storedTenant = localStorage.getItem('tenant_id');
-        if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
-        const res = await fetch(`${API_BASE_URL}/config/defaults`, { headers });
+        const res = await fetchJson(`${API_BASE_URL}/config/defaults`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.config) setDefaults(data.config);
@@ -147,14 +142,9 @@ function Settings() {
         return;
       }
 
-      const res = await fetch(`${API_BASE_URL}/config`, {
+      const res = await fetchJson(`${API_BASE_URL}/config`, {
         method: 'POST',
-        headers: (() => {
-          const h = { 'Content-Type': 'application/json' };
-          const storedTenant = localStorage.getItem('tenant_id');
-          if (storedTenant) h['X-Tenant-Id'] = storedTenant;
-          return h;
-        })(),
+        headers: { 'Content-Type': 'application/json' },
         // Persist the full edited configuration so out-of-schema keys are not lost
         body: JSON.stringify({ app_config, sim_config: editedConfig })
       });
@@ -186,10 +176,7 @@ function Settings() {
         return;
       }
       logger.info('Resetting configuration to defaults from DB');
-      const headers = { 'Content-Type': 'application/json' };
-      const storedTenant = localStorage.getItem('tenant_id');
-      if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
-      const res = await fetch(`${API_BASE_URL}/config/reset`, { method: 'POST', headers, body: JSON.stringify({}) });
+      const res = await fetchJson(`${API_BASE_URL}/config/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       if (!res.ok) {
         let errMsg = `HTTP ${res.status}`;
         try { const err = await res.json(); errMsg = err?.detail || JSON.stringify(err); } catch {}
