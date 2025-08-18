@@ -303,23 +303,29 @@ class SensorManager:
             logger.debug("[SensorManager] Starting sensor cleanup...")
 
             # First detach all observers
-            for sensor in self.sensors.values():
+            for sensor in list(self.sensors.values()):
                 if sensor:
                     sensor.detach_all()
 
             # Then destroy each sensor
-            for sensor_type, sensor in self.sensors.items():
-                if sensor.sensor is not None and sensor.sensor.is_alive:
-                    try:
-                        logger.debug(
-                            f"[SensorManager] Destroying sensor: {sensor_type}"
-                        )
-                        sensor.destroy()
-                        time.sleep(0.1)  # Small delay between sensor destruction
-                    except Exception as e:
-                        logger.error(
-                            f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}"
-                        )
+            for sensor_type, sensor in list(self.sensors.items()):
+                try:
+                    # Attempt to stop sensor stream if supported to avoid callbacks during teardown
+                    if hasattr(sensor, 'sensor') and sensor.sensor is not None:
+                        try:
+                            if hasattr(sensor.sensor, 'stop'):
+                                sensor.sensor.stop()
+                        except Exception:
+                            pass
+                    if hasattr(sensor, 'sensor') and sensor.sensor is not None and getattr(sensor.sensor, 'is_alive', True):
+                        try:
+                            logger.debug(f"[SensorManager] Destroying sensor: {sensor_type}")
+                            sensor.destroy()
+                            time.sleep(0.05)  # Small delay between sensor destruction
+                        except Exception as e:
+                            logger.error(f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}")
+                except Exception as e:
+                    logger.error(f"[SensorManager] Error during sensor '{sensor_type}' teardown: {str(e)}")
 
             # Clear the sensors dictionary
             self.sensors.clear()

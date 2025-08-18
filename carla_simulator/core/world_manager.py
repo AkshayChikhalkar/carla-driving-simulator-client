@@ -9,7 +9,7 @@ import time
 import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from ..utils.logging import Logger
+from ..utils.logging import Logger, CURRENT_TENANT_ID
 from ..utils.config import WorldConfig, VehicleConfig
 from carla_simulator.core.interfaces import IWorldManager
 from ..utils.default_config import SIMULATION_CONFIG
@@ -51,7 +51,8 @@ class WorldManager(IWorldManager):
         self._scenario_actors: List[carla.Actor] = []  # Track scenario-specific actors
         self._sensor_actors: List[carla.Actor] = []  # Track sensor actors
         self.traffic_manager = None
-        self.traffic_manager_port = 8001  # Default port for traffic manager
+        # Default Traffic Manager port aligns with CARLA default; can be overridden per-tenant
+        self.traffic_manager_port = 8000
         self.max_reconnect_attempts = 3
         self.reconnect_delay = 2.0  # seconds
 
@@ -188,12 +189,19 @@ class WorldManager(IWorldManager):
             # Get the world
             self.world = self.client.get_world()
 
-            # Set synchronous mode if configured
+            # Apply synchronous/asynchronous mode based on config
+            settings = self.world.get_settings()
             if self.synchronous_mode:
-                settings = self.world.get_settings()
                 settings.synchronous_mode = True
                 settings.fixed_delta_seconds = self.fixed_delta_seconds
-                self.world.apply_settings(settings)
+            else:
+                settings.synchronous_mode = False
+                try:
+                    # Clear fixed delta to let server drive real-time when async
+                    settings.fixed_delta_seconds = None
+                except Exception:
+                    pass
+            self.world.apply_settings(settings)
 
             # Get blueprint library
             self.blueprint_library = self.world.get_blueprint_library()
@@ -523,12 +531,33 @@ class WorldManager(IWorldManager):
         if self.traffic_manager is not None:
             return  # Traffic manager already initialized
 
-        # Use provided port or default
-        self.traffic_manager_port = tm_port or self.traffic_manager_port
+        # Resolve Traffic Manager port with per-tenant isolation if possible
+        port_to_use = tm_port or self.traffic_manager_port
+        try:
+            # Allow base to be configured; default to 8000
+            import os
+            base = int(os.getenv("CARLA_TM_PORT_BASE", "8000"))
+            # If tenant context is bound, derive a stable per-tenant port offset
+            tenant_id = None
+            try:
+                tenant_id = CURRENT_TENANT_ID.get()
+            except Exception:
+                tenant_id = None
+            if tenant_id is not None and tm_port is None:
+                # Keep within a reasonable range to avoid privileged/used ports
+                port_to_use = base + (int(tenant_id) % 1000)
+        except Exception:
+            # Fallback to provided/default port
+            pass
+        self.traffic_manager_port = int(port_to_use)
 
         # Get traffic manager with specific port
         self.traffic_manager = self.client.get_trafficmanager(self.traffic_manager_port)
-        self.traffic_manager.set_synchronous_mode(True)
+        # Keep TM sync mode aligned with world sync
+        try:
+            self.traffic_manager.set_synchronous_mode(bool(self.synchronous_mode))
+        except Exception:
+            pass
         self.traffic_manager.set_global_distance_to_leading_vehicle(3.5)
         self.traffic_manager.global_percentage_speed_difference(15.0)
         self.traffic_manager.set_random_device_seed(0)
@@ -672,51 +701,115 @@ class WorldManager(IWorldManager):
             destroyed_actors = 0
             failed_destroy_actors = 0
             
-            # Destroy all actors
-            if self.vehicle and self.vehicle.is_alive:
-                try:
-                    self.logger.debug(f"Destroying vehicle: {self.vehicle.type_id} (ID: {self.vehicle.id})")
-                    self.vehicle.destroy()
-                    destroyed_actors += 1
-                except Exception as e:
-                    self.logger.warning(f"Error destroying vehicle: {str(e)}")
-                    failed_destroy_actors += 1
+            # Prepare ordered destruction: sensors -> scenario/traffic -> vehicle, using batch API
+            sensors = [a for a in self._sensor_actors if a is not None]
+            scenario = [a for a in self._scenario_actors if a is not None]
+            traffic = [a for a in self._traffic_actors if a is not None]
+            ego_list = [self.vehicle] if self.vehicle is not None else []
 
-            # Safely destroy traffic and scenario actors
-            all_actors = self._traffic_actors + self._scenario_actors + self._sensor_actors
-            self.logger.debug(f"Found {len(all_actors)} actors to destroy: {len(self._traffic_actors)} traffic, {len(self._scenario_actors)} scenario, {len(self._sensor_actors)} sensors")
-            
-            for actor in all_actors:
-                try:
-                    if actor and actor.is_alive:
-                        self.logger.debug(f"Destroying actor: {actor.type_id} (ID: {actor.id})")
-                        actor.destroy()
-                        destroyed_actors += 1
-                    elif actor:
-                        self.logger.debug(f"Actor already destroyed: {actor.type_id} (ID: {actor.id})")
-                except Exception as e:
-                    self.logger.warning(f"Error destroying actor {actor.type_id if actor else 'Unknown'} (ID: {actor.id if actor else 'Unknown'}): {str(e)}")
-                    failed_destroy_actors += 1
+            self.logger.debug(
+                f"Found {len(traffic)+len(scenario)+len(sensors)} actors to destroy: {len(traffic)} traffic, {len(scenario)} scenario, {len(sensors)} sensors"
+            )
 
-            # Clear the lists
+            # Best-effort: disable autopilot before destroy to avoid TM races
+            try:
+                for veh in [a for a in traffic + ego_list if hasattr(a, 'set_autopilot')]:
+                    try:
+                        veh.set_autopilot(False)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Put TM back to async to avoid strict sync during teardown
+            try:
+                if self.traffic_manager is not None:
+                    self.traffic_manager.set_synchronous_mode(False)
+            except Exception:
+                pass
+
+            def _destroy_batch(actors):
+                nonlocal destroyed_actors, failed_destroy_actors
+                if not actors:
+                    return
+                # Filter alive actors and collect ids
+                actor_ids = []
+                for a in actors:
+                    try:
+                        if a and getattr(a, 'is_alive', False):
+                            actor_ids.append(a.id)
+                        else:
+                            # Already gone
+                            if a is not None:
+                                self.logger.debug(f"Actor already destroyed: {getattr(a, 'type_id', 'unknown')} (ID: {getattr(a, 'id', 'unknown')})")
+                    except Exception:
+                        # If is_alive access fails, try to destroy anyway
+                        try:
+                            actor_ids.append(a.id)
+                        except Exception:
+                            pass
+                if not actor_ids:
+                    return
+                try:
+                    cmds = [carla.command.DestroyActor(aid) for aid in actor_ids]
+                    results = self.client.apply_batch_sync(cmds, True)
+                    # Count results
+                    for res in results:
+                        if res.error:
+                            failed_destroy_actors += 1
+                            self.logger.debug(f"Destroy error: {res.error}")
+                        else:
+                            destroyed_actors += 1
+                except Exception as e:
+                    self.logger.warning(f"Batch destroy failed: {e}. Falling back to per-actor destroy.")
+                    for a in actors:
+                        try:
+                            if a and getattr(a, 'is_alive', False):
+                                a.destroy()
+                                destroyed_actors += 1
+                        except Exception as e2:
+                            failed_destroy_actors += 1
+                            self.logger.debug(f"Per-actor destroy failed: {e2}")
+
+            # Destroy in safe order
+            _destroy_batch(sensors)
+            _destroy_batch(scenario)
+            _destroy_batch(traffic)
+            _destroy_batch(ego_list)
+
+            # Clear the lists and references
             self._traffic_actors.clear()
             self._scenario_actors.clear()
             self._sensor_actors.clear()
+            self.vehicle = None
             
             # Add a small delay to ensure actors are destroyed
             time.sleep(0.2)
             
-            # Verify cleanup by checking if any actors are still alive
+            # Flush destroy operations with a couple of world ticks to ensure the server processes removals
+            try:
+                if self.world is not None:
+                    for _ in range(2):
+                        try:
+                            self.world.tick()
+                        except Exception:
+                            break
+            except Exception:
+                pass
+
+            # Verify cleanup by checking if any actors are still alive (best-effort)
             remaining_alive = 0
-            for actor in all_actors:
-                if actor and hasattr(actor, 'is_alive') and actor.is_alive:
-                    remaining_alive += 1
-                    self.logger.warning(f"Actor still alive after destroy: {actor.type_id} (ID: {actor.id})")
+            for actor in sensors + scenario + traffic + ego_list:
+                try:
+                    if actor and hasattr(actor, 'is_alive') and actor.is_alive:
+                        remaining_alive += 1
+                        self.logger.warning(f"Actor still alive after destroy: {actor.type_id} (ID: {actor.id})")
+                except Exception:
+                    continue
             
             self.logger.info(f"World manager cleanup completed: {destroyed_actors} actors destroyed, {failed_destroy_actors} failed, {remaining_alive} still alive")
 
-            # Reset world reference
-            self.world = None
+            # Do not reload the world here to avoid native crashes during teardown; the next setup will ensure a clean world
 
         except Exception as e:
             self.logger.error(f"Error during cleanup: {str(e)}")

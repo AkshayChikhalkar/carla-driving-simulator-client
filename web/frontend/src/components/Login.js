@@ -53,14 +53,16 @@ const Login = ({ onLogin }) => {
       const data = await response.json();
 
       if (response.ok) {
-        // Store tokens
-        localStorage.setItem('access_token', data.access_token);
-        localStorage.setItem('session_token', data.session_token);
-        localStorage.setItem('user', JSON.stringify(data.user));
+        // Store tokens in per-tab storage for strict isolation
+        sessionStorage.setItem('access_token', data.access_token);
+        sessionStorage.setItem('session_token', data.session_token);
+        sessionStorage.setItem('user', JSON.stringify(data.user));
         // Persist tenant id for this session if returned
         if (data.user && data.user.tenant_id) {
-          localStorage.setItem('tenant_id', String(data.user.tenant_id));
+          sessionStorage.setItem('tenant_id', String(data.user.tenant_id));
         }
+        // Notify listeners (e.g., WebSocket hook) to rebuild connection with new token/tenant
+        window.dispatchEvent(new Event('auth-changed'));
         
         // Call onLogin callback
         if (onLogin) {

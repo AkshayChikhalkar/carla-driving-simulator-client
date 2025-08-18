@@ -1,9 +1,15 @@
 import os
 import logging
+import functools
 if "XDG_RUNTIME_DIR" not in os.environ:
     os.environ["XDG_RUNTIME_DIR"] = "/tmp/xdg"
     if not os.path.exists("/tmp/xdg"):
         os.makedirs("/tmp/xdg", exist_ok=True)
+
+# Ensure headless-friendly SDL drivers for pygame on servers without display/audio, and hide support prompt
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +19,7 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from jsonschema import validate as js_validate, Draft7Validator
 import jsonschema
-from typing import List, Optional
+from typing import List, Optional, Dict
 import sys
 import os
 from pathlib import Path
@@ -83,10 +89,30 @@ async def tenant_context_middleware(request: Request, call_next):
                 except Exception:
                     tenant_id_ctx = tenant_id_ctx
     token = CURRENT_TENANT_ID.set(tenant_id_ctx)
+    # Also set user id context if a valid bearer token exists
+    user_token = None
+    try:
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            jwt_token = auth_header.split(" ", 1)[1]
+            payload = verify_jwt_token(jwt_token)
+            if isinstance(payload, dict):
+                uid = payload.get("user_id") or payload.get("id")
+                if uid is not None:
+                    from carla_simulator.utils.logging import CURRENT_USER_ID as _CUID
+                    user_token = _CUID.set(int(uid))
+    except Exception:
+        user_token = None
     try:
         response = await call_next(request)
     finally:
         CURRENT_TENANT_ID.reset(token)
+        try:
+            if user_token is not None:
+                from carla_simulator.utils.logging import CURRENT_USER_ID as _CUID
+                _CUID.reset(user_token)
+        except Exception:
+            pass
     return response
 
 # Serve React production build
@@ -137,6 +163,8 @@ API_REQUEST_DURATION_HISTOGRAM = Histogram('carla_api_request_duration_seconds',
 SIMULATION_STATUS_GAUGE = Gauge('carla_simulation_status', 'Current simulation status (0=stopped, 1=running, 2=paused)')
 ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE = Gauge('carla_active_websocket_connections', 'Number of active WebSocket connections')
 SCENARIO_PROGRESS_GAUGE = Gauge('carla_scenario_progress', 'Current scenario progress (0-100)')
+CARLA_POOL_IN_USE_GAUGE = Gauge('carla_pool_in_use', 'Number of CARLA endpoints/containers in use')
+CARLA_POOL_RUNNING_GAUGE = Gauge('carla_pool_running_total', 'Number of CARLA containers/endpoints available/running')
 
 # Info
 APP_INFO = Info('carla_app', 'Application information')
@@ -175,9 +203,10 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from carla_simulator.core.simulation_runner import SimulationRunner
+from .runner_registry import RunnerRegistry
+from .carla_pool import CarlaContainerManager
 from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
 from carla_simulator.utils.config import Config, load_config, save_config
-from carla_simulator.visualization.display_manager import DisplayManager
 from carla_simulator.utils.logging import Logger
 from carla_simulator.utils.paths import get_project_root
 from carla_simulator.core.scenario_results_manager import ScenarioResultsManager
@@ -248,6 +277,8 @@ class ThreadSafeState:
             "is_transitioning": False,  # Flag to track scenario transitions
             "last_state_update": datetime.now(),  # Track when state was last updated
             "setup_complete": False,  # Flag to track if setup is complete
+            "tenant_id": None,  # Active tenant id for the running simulation (if any)
+            "status_message": "Ready to Start",
         }
 
     def __getitem__(self, key):
@@ -299,9 +330,9 @@ class ThreadSafeState:
 # Thread-safe queue for scenario transitions
 scenario_queue = queue.Queue()
 
-# Thread synchronization primitives
-setup_event = Event()  # Signals when setup is complete
-simulation_ready = Event()  # Signals when simulation thread is ready
+# Global primitives kept for legacy single-tenant flow, but per-tenant events live on TenantRunner
+setup_event = Event()
+simulation_ready = Event()
 
 
 # Utility functions
@@ -368,32 +399,39 @@ def cleanup_resources():
     try:
         logger.debug("Cleaning up resources...")
 
-        # Only clean up if we have an app instance
-        if hasattr(runner, "app") and runner.app:
-            try:
-                # First, stop any running simulation
-                if hasattr(runner.app, "state"):
-                    runner.app.state.is_running = False
-
-                # Get cleanup results first
-                if hasattr(runner.app, "get_cleanup_results"):
-                    completed, success = runner.app.get_cleanup_results()
-                    # Only perform cleanup if results are not cached
-                    if completed is None:
-                        if hasattr(runner.app, "cleanup"):
-                            # Perform general cleanup
-                            runner.app.cleanup()
-                else:
-                    # Fallback to direct cleanup if get_cleanup_results is not available
+        # Prefer per-tenant cleanup to avoid cross-tenant interference using the
+        # in-module registry created below.
+        try:
+            for tid, tenant_runner in list(registry._tenant_to_runner.items()):
+                try:
+                    app = getattr(tenant_runner.runner, "app", None)
+                    if app is None:
+                        continue
+                    # Stop the loop
+                    if hasattr(app, "state"):
+                        app.state.is_running = False
+                    # Perform cleanup once
+                    if hasattr(app, "get_cleanup_results"):
+                        completed, _ = app.get_cleanup_results()
+                        if not completed and hasattr(app, "cleanup"):
+                            app.cleanup()
+                    elif hasattr(app, "cleanup"):
+                        app.cleanup()
+                    # Drop reference
+                    tenant_runner.runner.app = None
+                except Exception as e:
+                    logger.error(f"Error cleaning tenant {tid}: {e}")
+        except Exception:
+            # Fallback: legacy single-runner cleanup
+            if hasattr(runner, "app") and runner.app:
+                try:
+                    if hasattr(runner.app, "state"):
+                        runner.app.state.is_running = False
                     if hasattr(runner.app, "cleanup"):
-                        # Perform general cleanup
                         runner.app.cleanup()
-
-            except Exception as e:
-                logger.error(f"Error during app cleanup: {str(e)}")
-
-        # Clear the app instance
-        runner.app = None
+                except Exception as e:
+                    logger.error(f"Error during app cleanup: {str(e)}")
+                runner.app = None
 
         logger.debug("Cleanup completed successfully")
     except Exception as e:
@@ -427,10 +465,9 @@ def setup_simulation_components(runner, app, max_retries=3):
                     logger.warning(
                         f"Vehicle spawn attempt {attempt + 1} failed, retrying..."
                     )
-                    # Clean up before retry
-                    cleanup_resources()
-                    # Wait a bit before retrying
-                    # time.sleep(2)
+                    # IMPORTANT: Do not invoke global cleanup here, it may disrupt other tenants.
+                    # Per-tenant cleanup below will be handled by the tenant's world manager during retry/setup.
+                    # Consider small backoff if needed.
                 else:
                     logger.error("All vehicle spawn attempts failed")
                     raise RuntimeError(
@@ -471,21 +508,70 @@ def handle_file_operation(file_path, operation):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def run_simulation_thread(runner, scenario):
+def run_simulation_thread(runner, scenario, tenant_events=None):
     """Thread-safe simulation runner with proper synchronization"""
-    global setup_event, simulation_ready
+    # Use per-tenant events if provided; fall back to globals for legacy
+    per_setup_event = None
+    per_sim_ready = None
+    if tenant_events is not None:
+        per_setup_event = tenant_events.get("setup_event")
+        per_sim_ready = tenant_events.get("simulation_ready")
+    
+    # Add tenant identification for debugging
+    tenant_id = None
+    if hasattr(runner, "state") and runner.state:
+        tenant_id = runner.state.get("tenant_id")
+    
+    logger.debug(f"Simulation thread started for tenant {tenant_id}, scenario: {scenario}")
     
     try:
-        logger.debug("Simulation thread started, waiting for setup completion...")
+        # Bind tenant context for this thread so DB logs and metrics are isolated
+        _tenant_token = None
+        try:
+            tid = None
+            if hasattr(runner, "state"):
+                tid = runner.state.get("tenant_id")
+            if tid is not None:
+                _tenant_token = CURRENT_TENANT_ID.set(int(tid))
+                logger.debug(f"Bound tenant context for thread: {tid}")
+        except Exception:
+            _tenant_token = None
+
+        logger.debug(f"Simulation thread started, waiting for setup completion... (tenant: {tenant_id})")
         
         # Signal that simulation thread is ready
-        simulation_ready.set()
+        # CRITICAL FIX: Only use per-tenant events when provided, never fall back to globals
+        if per_sim_ready is not None:
+            per_sim_ready.set()
+            logger.debug(f"Set per-tenant simulation_ready event for tenant {tenant_id}")
+        elif tenant_events is None:
+            # Only use global events for legacy single-tenant flow
+            simulation_ready.set()
+            logger.debug("Set global simulation_ready event (legacy mode)")
+        else:
+            # If tenant_events is provided but per_sim_ready is None, this is an error
+            logger.error("Per-tenant events provided but simulation_ready is None")
+            return
         
         # Wait for setup to complete before starting simulation
-        if setup_event.wait(timeout=600):  # 120 second timeout (2 minutes)
-            logger.debug("Setup completed, starting simulation loop")
+        # CRITICAL FIX: Only use per-tenant events when provided, never fall back to globals
+        if per_setup_event is not None:
+            wait_event = per_setup_event
+            logger.debug(f"Using per-tenant setup_event for tenant {tenant_id}")
+        elif tenant_events is None:
+            # Only use global events for legacy single-tenant flow
+            wait_event = setup_event
+            logger.debug("Using global setup_event (legacy mode)")
         else:
-            logger.error("Setup timeout - simulation thread exiting")
+            # If tenant_events is provided but per_setup_event is None, this is an error
+            logger.error("Per-tenant events provided but setup_event is None")
+            return
+            
+        logger.debug(f"Waiting for setup completion... (tenant: {tenant_id})")
+        if wait_event.wait(timeout=600):
+            logger.debug(f"Setup completed, starting simulation loop (tenant: {tenant_id})")
+        else:
+            logger.error(f"Setup timeout - simulation thread exiting (tenant: {tenant_id})")
             return
         
         # Mark setup as complete
@@ -493,24 +579,25 @@ def run_simulation_thread(runner, scenario):
         
         # Clear the starting flag now that simulation is actually running
         runner.state["is_starting"] = False
-        logger.debug("Cleared is_starting flag - simulation is now running")
-        logger.debug(f"State after clearing is_starting: is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
+        runner.state["status_message"] = "Simulation running"
+        logger.debug(f"Cleared is_starting flag - simulation is now running (tenant: {tenant_id})")
+        logger.debug(f"State after clearing is_starting: is_running={runner.state['is_running']}, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']} (tenant: {tenant_id})")
         
-        logger.debug("Simulation loop started")
+        logger.debug(f"Simulation loop started (tenant: {tenant_id})")
         
         try:
             # Start the simulation
             runner.app.run()
-            logger.debug("Simulation app.run() completed normally")
+            logger.debug(f"Simulation app.run() completed normally (tenant: {tenant_id})")
         except Exception as e:
-            logger.error(f"Exception in runner.app.run(): {str(e)}")
+            logger.error(f"Exception in runner.app.run() for tenant {tenant_id}: {str(e)}")
             logger.error(f"Exception type: {type(e).__name__}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
         
     except Exception as e:
-        logger.error(f"Error in simulation thread: {str(e)}")
+        logger.error(f"Error in simulation thread for tenant {tenant_id}: {str(e)}")
         logger.error(f"Exception type: {type(e).__name__}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -525,7 +612,14 @@ def run_simulation_thread(runner, scenario):
         if hasattr(runner, "app") and runner.app and hasattr(runner.app, "state"):
             runner.app.state.is_running = False
     finally:
-        logger.debug("Simulation thread ending")
+        # Reset bound tenant context for this thread if set
+        try:
+            if '_tenant_token' in locals() and _tenant_token is not None:
+                CURRENT_TENANT_ID.reset(_tenant_token)
+                logger.debug(f"Reset tenant context for thread (tenant: {tenant_id})")
+        except Exception:
+            pass
+        logger.debug(f"Simulation thread ending (tenant: {tenant_id})")
         # Reset setup complete flag
         runner.state["setup_complete"] = False
         # Clear starting flag when thread ends
@@ -542,8 +636,38 @@ def transition_to_next_scenario(runner, next_scenario):
         )
         new_app._config.web_mode = True
 
+        # Preserve CARLA endpoint (host:port) from current app to avoid reconnecting to defaults
+        try:
+            prev_app = getattr(runner, "app", None)
+            if prev_app is not None and hasattr(prev_app, "_config") and hasattr(prev_app._config, "server_config"):
+                prev_host = getattr(prev_app._config.server_config, "host", None)
+                prev_port = getattr(prev_app._config.server_config, "port", None)
+                if prev_host is not None and prev_port is not None:
+                    try:
+                        new_app._config.server_config.host = prev_host
+                        new_app._config.server_config.port = int(prev_port)
+                    except Exception:
+                        pass
+            # Also mirror onto the new connection manager config
+            if hasattr(new_app, "connection") and hasattr(new_app.connection, "config"):
+                if prev_host is not None and prev_port is not None:
+                    try:
+                        new_app.connection.config.host = prev_host
+                        new_app.connection.config.port = int(prev_port)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # Connect to CARLA server
         logger.debug("Connecting to CARLA server...")
+        try:
+            h = getattr(new_app._config.server_config, 'host', None)
+            p = getattr(new_app._config.server_config, 'port', None)
+            if h is not None and p is not None:
+                logger.debug(f"Connecting to CARLA server at {h}:{p} ...")
+        except Exception:
+            pass
         if not new_app.connection.connect():
             logger.error("Failed to connect to CARLA server")
             return False
@@ -588,9 +712,13 @@ app.add_middleware(
 # Use robust project root
 project_root = get_project_root()
 
-# Initialize simulation runner in DB-only mode (defer YAML load)
+# Initialize default single runner for backward compatibility (used if no tenant header)
 runner = SimulationRunner(db_only=True)
 runner.state = ThreadSafeState()
+
+# Initialize per-tenant registry and CARLA pool
+registry = RunnerRegistry()
+carla_pool = CarlaContainerManager()
 
 # Web frontend log file handle
 web_log_file = None
@@ -601,7 +729,13 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    try:
+        import traceback
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        logger.critical(f"Uncaught exception: {exc_type.__name__}: {exc_value}\n{tb_str}")
+    except Exception:
+        # Fallback if formatting fails
+        logger.critical(f"Uncaught exception: {exc_type.__name__}: {exc_value}")
 
 sys.excepthook = handle_uncaught_exception
 
@@ -639,6 +773,12 @@ sys.excepthook = handle_uncaught_exception
 async def health_check():
     """Health check endpoint - always returns 200 if process is alive"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
+# Minimal root endpoint for Docker healthchecks (returns 200)
+@app.get("/")
+async def root_ok():
+    return {"status": "ok", "service": "carla-backend", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/metrics")
@@ -681,6 +821,14 @@ async def metrics():
             logger.error(f"Error updating scenario progress gauge: {str(e)}")
             SCENARIO_PROGRESS_GAUGE.set(0)  # Default to 0 on error
         
+        # Update CARLA pool metrics
+        try:
+            st = carla_pool.status()
+            CARLA_POOL_IN_USE_GAUGE.set(int(st.get("in_use", 0)))
+            running_total = int(st.get("running_total", st.get("capacity", 0) or 0))
+            CARLA_POOL_RUNNING_GAUGE.set(running_total)
+        except Exception:
+            pass
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
         
     except Exception as e:
@@ -846,44 +994,62 @@ async def update_config(request: Request, config_update: ConfigUpdate, tenant_id
 
 
 @app.post("/api/simulation/skip")
-async def skip_scenario():
+async def skip_scenario(request: Request, current_user: dict = Depends(get_current_user)):
     """Skip the current scenario and move to the next one with improved reliability"""
     try:
+        # Enforce tenant scoping: only allow the tenant that started the simulation to control it
+        effective_tid: Optional[int] = None
+        header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+        if header_tid:
+            try:
+                effective_tid = int(header_tid)
+            except ValueError:
+                effective_tid = None
+        # Resolve tenant-specific runner
+        tenant_runner = registry.get(effective_tid) if effective_tid is not None else None
+        if tenant_runner is None:
+            raise HTTPException(status_code=400, detail="No active simulation for this tenant")
+        if tenant_runner.runner.state.get("tenant_id") is not None and effective_tid is not None:
+            if int(tenant_runner.runner.state.get("tenant_id")) != int(effective_tid):
+                raise HTTPException(status_code=403, detail="Operation not permitted for this tenant")
+
         # Check if simulation is running
-        if not runner.state["is_running"]:
+        if not tenant_runner.runner.state["is_running"]:
             logger.warning("Attempted to skip scenario while simulation is not running")
             return {"success": False, "message": "Simulation is not running"}
 
         # Check if we're already transitioning
-        if runner.state["is_transitioning"]:
+        if tenant_runner.runner.state["is_transitioning"]:
             logger.warning("Attempted to skip scenario while transition is in progress")
             return {"success": False, "message": "Scenario transition already in progress"}
         
         # Set skipping flag for immediate UX feedback
-        runner.state["is_skipping"] = True
+        tenant_runner.runner.state["is_skipping"] = True
+        logger.debug(f"Skip operation started for tenant {effective_tid}, current scenario: {tenant_runner.runner.state.get('current_scenario')}")
         
         # Track metrics
         SIMULATION_SKIP_COUNTER.inc()
         
         # Only set is_transitioning for actual scenario transitions
-        current_index = runner.state["current_scenario_index"]
-        total_scenarios = len(runner.state["scenarios_to_run"])
+        current_index = tenant_runner.runner.state["current_scenario_index"]
+        total_scenarios = len(tenant_runner.runner.state["scenarios_to_run"])
         if current_index < total_scenarios - 1:
-            runner.state["is_transitioning"] = True
+            tenant_runner.runner.state["is_transitioning"] = True
+            logger.debug(f"Set is_transitioning=True for tenant {effective_tid}")
         try:
-            current_scenario = runner.state["current_scenario"]
+            current_scenario = tenant_runner.runner.state["current_scenario"]
             if current_scenario:
                 record_scenario_result(
-                    runner,
+                    tenant_runner.runner,
                     current_scenario,
                     "Failed",
                     "Skipped",
-                    datetime.now() - runner.state["scenario_start_time"],
+                    datetime.now() - tenant_runner.runner.state["scenario_start_time"],
                 )
 
             # If there are more scenarios, prepare for next one
             if current_index < total_scenarios - 1:
-                next_scenario = runner.state["scenarios_to_run"][current_index + 1]
+                next_scenario = tenant_runner.runner.state["scenarios_to_run"][current_index + 1]
                 logger.info("================================")
                 logger.info(
                     f"Starting scenario {current_index + 2}/{total_scenarios}: {next_scenario}"
@@ -891,28 +1057,50 @@ async def skip_scenario():
                 logger.info("================================")
 
                 # Stop current scenario but keep is_running true during transition
-                if hasattr(runner.app, "state"):
-                    runner.app.state.is_running = False
+                if hasattr(tenant_runner.runner, "app") and tenant_runner.runner.app and hasattr(tenant_runner.runner.app, "state"):
+                    tenant_runner.runner.app.state.is_running = False
                     logger.debug("Set app.state.is_running = False for transition")
 
-                # Wait for cleanup using utility function with increased timeout
-                logger.debug("Waiting for cleanup before scenario transition...")
-                await wait_for_cleanup(runner.app, max_wait_time=20)
+                # Begin cleanup in background to reduce transition blocking; do not await full 20s
+                logger.debug("Initiating cleanup before scenario transition (non-blocking)...")
+                if hasattr(tenant_runner.runner, "app") and tenant_runner.runner.app:
+                    import threading as _t
+                    app_ref = tenant_runner.runner.app
+                    def _bg_cleanup():
+                        try:
+                            if hasattr(app_ref, "is_cleanup_complete"):
+                                app_ref.is_cleanup_complete = False
+                            if hasattr(app_ref, "state"):
+                                app_ref.state.is_running = False
+                            if hasattr(app_ref, "cleanup"):
+                                app_ref.cleanup()
+                        except Exception as e:
+                            logger.error(f"Background cleanup error during skip (tenant {effective_tid}): {e}")
+                    _t.Thread(target=_bg_cleanup, daemon=True).start()
 
                 # Transition to next scenario
-                if transition_to_next_scenario(runner, next_scenario):
-                    # Start simulation in background
-                    logger.debug("Starting simulation thread...")
+                if transition_to_next_scenario(tenant_runner.runner, next_scenario):
+                    # Prepare per-tenant events for the new run and mark setup complete
+                    tenant_runner.setup_event.clear()
+                    tenant_runner.simulation_ready.clear()
+
+                    # Start simulation in background with per-tenant events
+                    logger.debug(f"Starting simulation thread for tenant {effective_tid} with per-tenant events...")
+                    tenant_events = {"setup_event": tenant_runner.setup_event, "simulation_ready": tenant_runner.simulation_ready}
                     simulation_thread = threading.Thread(
                         target=run_simulation_thread,
-                        args=(runner, next_scenario),
+                        args=(tenant_runner.runner, next_scenario, tenant_events),
                         daemon=True,
                     )
+                    # For transition we already connected and set up components; let thread proceed
+                    tenant_runner.setup_event.set()
                     simulation_thread.start()
 
-                    # Reset transition flag
-                    runner.state["is_transitioning"] = False
-                    runner.state["is_skipping"] = False  # Clear skipping flag after successful skip
+                    # Reset transition flag and clear skipping flag immediately for better UX
+                    tenant_runner.runner.state["is_transitioning"] = False
+                    tenant_runner.runner.state["is_skipping"] = False
+                    tenant_runner.runner.state["status_message"] = f"Transitioned to: {next_scenario}"
+                    logger.debug(f"Cleared is_skipping flag immediately after starting new scenario thread for tenant {effective_tid}")
 
                     return {
                         "success": True,
@@ -923,8 +1111,8 @@ async def skip_scenario():
                         "total_scenarios": total_scenarios,
                     }
                 else:
-                    runner.state["is_running"] = False
-                    runner.state["is_transitioning"] = False
+                    tenant_runner.runner.state["is_running"] = False
+                    tenant_runner.runner.state["is_transitioning"] = False
                     return {
                         "success": False,
                         "message": "Failed to transition to next scenario",
@@ -936,7 +1124,7 @@ async def skip_scenario():
                 logger.info("================================")
 
                 # Call stop_simulation to handle the cleanup properly
-                stop_result = await stop_simulation()
+                stop_result = await stop_simulation(request)
                 return {
                     "success": True,
                     "message": f"Skipped {current_scenario} ({current_index + 1}/{total_scenarios}). Simulation complete.",
@@ -948,55 +1136,82 @@ async def skip_scenario():
         except Exception as e:
             logger.error(f"Error during scenario skip process: {str(e)}")
             # Reset state on error
-            runner.state["is_running"] = False
-            runner.state["is_stopping"] = False  # Reset stopping flag on error
-            runner.state["is_transitioning"] = False
-            runner.state["is_skipping"] = False  # Reset skipping flag on error
+            tenant_runner.runner.state["is_running"] = False
+            tenant_runner.runner.state["is_stopping"] = False  # Reset stopping flag on error
+            tenant_runner.runner.state["is_transitioning"] = False
+            tenant_runner.runner.state["is_skipping"] = False  # Reset skipping flag on error
             raise
 
     except Exception as e:
         logger.error(f"Error skipping scenario: {str(e)}")
         # Ensure is_running is set to false on error
-        runner.state["is_running"] = False
-        runner.state["is_stopping"] = False  # Reset stopping flag on error
-        runner.state["is_transitioning"] = False
-        runner.state["is_skipping"] = False  # Reset skipping flag on error
+        try:
+            tenant_runner = registry.get(effective_tid) if effective_tid is not None else None
+            if tenant_runner is not None:
+                tenant_runner.runner.state["is_running"] = False
+                tenant_runner.runner.state["is_stopping"] = False  # Reset stopping flag on error
+                tenant_runner.runner.state["is_transitioning"] = False
+                tenant_runner.runner.state["is_skipping"] = False  # Reset skipping flag on error
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/simulation/start")
-async def start_simulation(request: SimulationRequest, http_request: Request):
-    """Start simulation with given parameters"""
+async def start_simulation(request: SimulationRequest, http_request: Request, current_user: dict = Depends(get_current_user)):
+    """Start simulation with given parameters (per-tenant)."""
     global setup_event, simulation_ready
     
     try:
-        # Check if simulation is already running
-        if runner.state["is_running"]:
-            logger.warning("Attempted to start simulation while already running")
+        # Resolve effective tenant id: header > body > JWT
+        effective_tid: Optional[int] = None
+        header_tid = http_request.headers.get("x-tenant-id") or http_request.headers.get("X-Tenant-Id")
+        if header_tid:
+            try:
+                effective_tid = int(header_tid)
+            except ValueError:
+                effective_tid = None
+        if effective_tid is None and request.tenant_id is not None:
+            effective_tid = int(request.tenant_id)
+        if effective_tid is None:
+            try:
+                claim_tid = current_user.get("tenant_id")
+                if claim_tid is not None:
+                    effective_tid = int(claim_tid)
+            except Exception:
+                effective_tid = None
+        if effective_tid is None:
+            raise HTTPException(status_code=400, detail="Tenant context required to start simulation")
+
+        tenant_runner = registry.get_or_create(effective_tid)
+
+        # Check if already running for this tenant
+        if tenant_runner.runner.state.get("is_running"):
+            logger.warning("Attempted to start simulation while already running (tenant)")
             return {"success": False, "message": "Simulation is already running"}
 
-        # Check if we're already transitioning
-        if runner.state["is_transitioning"]:
-            logger.warning("Attempted to start simulation while transition is in progress")
+        if tenant_runner.runner.state.get("is_transitioning"):
+            logger.warning("Attempted to start simulation while transition is in progress (tenant)")
             return {"success": False, "message": "Simulation transition already in progress"}
 
         # Set transition flag to prevent race conditions
-        runner.state["is_transitioning"] = True
-        runner.state["is_starting"] = True  # Set starting flag for immediate UX feedback
-        logger.info(f"State is_starting: {runner.state['is_starting']}")
+        tenant_runner.runner.state["is_transitioning"] = True
+        tenant_runner.runner.state["is_starting"] = True  # Set starting flag for immediate UX feedback
+        tenant_runner.runner.state["status_message"] = "Hang on,\nLoading Simulation..."
+        logger.info(f"State is_starting: {tenant_runner.runner.state['is_starting']}")
         logger.info(
             f"Starting simulation with scenarios: {request.scenarios}, debug: {request.debug}, report: {request.report}"
         )
 
-        # Reset synchronization events
-        setup_event.clear()
-        simulation_ready.clear()
+        # Reset per-tenant synchronization events
+        tenant_runner.setup_event.clear()
+        tenant_runner.simulation_ready.clear()
 
         # Register scenarios first
         ScenarioRegistry.register_all()
 
         # Setup logger
-        runner.setup_logger(request.debug)
+        tenant_runner.runner.setup_logger(request.debug)
 
         try:
             # Create and store the app instance
@@ -1012,7 +1227,8 @@ async def start_simulation(request: SimulationRequest, http_request: Request):
             session_id = uuid.uuid4()
 
             # Update state atomically
-            runner.state.set_state(
+            # Update state
+            tenant_runner.runner.state.update(
                 {
                     "scenarios_to_run": scenarios_to_run,
                     "current_scenario_index": 0,
@@ -1023,143 +1239,169 @@ async def start_simulation(request: SimulationRequest, http_request: Request):
                     "is_stopping": False,  # Reset stopping flag when starting
                     "session_id": session_id,
                     "setup_complete": False,  # Reset setup flag
+                    "tenant_id": effective_tid,
+                    "status_message": "Hang on,\nLoading Simulation...",
                 }
             )
-            logger.debug(f"Updated state: is_running=True, is_starting={runner.state['is_starting']}, is_transitioning={runner.state['is_transitioning']}")
-            runner.state["scenario_results"].clear_results()
+            logger.debug(f"Updated state: is_running=True, is_starting={tenant_runner.runner.state['is_starting']}, is_transitioning={tenant_runner.runner.state['is_transitioning']}")
+            tenant_runner.runner.state["scenario_results"].clear_results()
 
             # Resolve effective tenant for this run: header > body > env
-            effective_tid = None
-            header_tid = http_request.headers.get("x-tenant-id") or http_request.headers.get("X-Tenant-Id")
-            if header_tid:
-                try:
-                    effective_tid = int(header_tid)
-                except ValueError:
-                    effective_tid = None
-            if effective_tid is None and request.tenant_id is not None:
-                effective_tid = int(request.tenant_id)
-            if effective_tid is None:
-                env_tid = os.getenv("CONFIG_TENANT_ID")
-                if env_tid:
-                    try:
-                        effective_tid = int(env_tid)
-                    except ValueError:
-                        effective_tid = None
+            # Do NOT mutate process-wide environment for tenant selection; we'll bind
+            # the tenant context to the simulation thread via ContextVar instead.
 
-            # Persist tenant selection to env for background threads (logging, etc.)
-            if effective_tid is None:
-                # Try request-scoped context
-                try:
-                    ctx_tid = CURRENT_TENANT_ID.get()
-                except Exception:
-                    ctx_tid = None
-                if ctx_tid is not None:
-                    effective_tid = int(ctx_tid)
-            if effective_tid is not None:
-                os.environ["CONFIG_TENANT_ID"] = str(effective_tid)
-
-            runner.app = runner.create_application(
+            # Create application instance up front
+            tenant_runner.runner.app = tenant_runner.runner.create_application(
                 scenarios_to_run[0], session_id=session_id
             )
 
             # Set web mode in configuration
-            runner.app._config.web_mode = True
+            tenant_runner.runner.app._config.web_mode = True
             # Set report flag in configuration if requested
             if request.report:
-                setattr(runner.app._config, "report", True)
-
-            # Connect to CARLA server
-            logger.debug("Connecting to CARLA server...")
-            if not runner.app.connection.connect():
-                logger.error("Failed to connect to CARLA server")
-                runner.state["is_running"] = False
-                runner.state["is_transitioning"] = False
-                return {
-                    "success": False,
-                    "message": "Failed to connect to CARLA server",
-                }
+                setattr(tenant_runner.runner.app._config, "report", True)
 
             # Start simulation thread FIRST (it will wait for setup completion)
-            logger.debug("Starting simulation thread (will wait for setup completion)...")
+            logger.debug(f"Starting simulation thread for tenant {effective_tid} (will wait for setup completion)...")
+            tenant_events = {"setup_event": tenant_runner.setup_event, "simulation_ready": tenant_runner.simulation_ready}
             simulation_thread = threading.Thread(
                 target=run_simulation_thread,
-                args=(runner, scenarios_to_run[0]),
+                args=(tenant_runner.runner, scenarios_to_run[0], tenant_events),
                 daemon=True,
             )
             simulation_thread.start()
 
-            # Wait for simulation thread to be ready
-            if not simulation_ready.wait(timeout=10):
-                logger.error("Simulation thread failed to start within timeout")
-                runner.state["is_running"] = False
-                runner.state["is_transitioning"] = False
-                return {
-                    "success": False,
-                    "message": "Simulation thread failed to start",
-                }
+            # Run heavy setup in background to avoid blocking HTTP request and event loop
+            def _bg_heavy_setup():
+                try:
+                    # Bind tenant context in this background thread for per-tenant behavior (e.g., TM port)
+                    _tenant_token = None
+                    try:
+                        _tenant_token = CURRENT_TENANT_ID.set(int(effective_tid))
+                    except Exception:
+                        _tenant_token = None
+                    tenant_runner.runner.state["status_message"] = "Allocating CARLA server..."
+                    # Acquire CARLA endpoint (may create container)
+                    carla_host, carla_port = carla_pool.acquire(effective_tid)
+                    try:
+                        username = current_user.get("username") if isinstance(current_user, dict) else None
+                    except Exception:
+                        username = None
+                    from carla_simulator.utils.logging import Logger as _L
+                    _L().info(f"Tenant {effective_tid} (user={username}) assigned CARLA endpoint {carla_host}:{carla_port}")
 
-            # Setup components using utility function with retry logic
-            try:
-                setup_simulation_components(runner, runner.app)
-                logger.debug("Simulation components setup completed")
-            except RuntimeError as e:
-                if "Failed to create vehicle" in str(e):
-                    runner.state["is_running"] = False
-                    runner.state["is_transitioning"] = False
-                    # Return HTTP 500 error instead of 200 OK
-                    raise HTTPException(status_code=500, detail="Failed to create vehicle after multiple attempts. Please try again.")
-                raise
+                    tenant_runner.runner.state["status_message"] = "Connecting to CARLA server..."
+                    # Inject tenant CARLA host/port
+                    try:
+                        if hasattr(tenant_runner.runner.app._config, 'server_config'):
+                            tenant_runner.runner.app._config.server_config.host = carla_host
+                            tenant_runner.runner.app._config.server_config.port = int(carla_port)
+                        if hasattr(tenant_runner.runner.app, 'connection') and hasattr(tenant_runner.runner.app.connection, 'config'):
+                            tenant_runner.runner.app.connection.config.host = carla_host
+                            tenant_runner.runner.app.connection.config.port = int(carla_port)
+                    except Exception:
+                        pass
 
-            # Wait a moment to ensure all setup is stable
-            logger.debug("Waiting for setup to stabilize...")
-            time.sleep(0.5)
+                    # Connect to CARLA server
+                    logger.info(f"Connecting to CARLA server for tenant {effective_tid} at {carla_host}:{carla_port} ...")
+                    if not tenant_runner.runner.app.connection.connect():
+                        logger.error("Failed to connect to CARLA server")
+                        tenant_runner.runner.state["is_running"] = False
+                        tenant_runner.runner.state["is_transitioning"] = False
+                        tenant_runner.runner.state["is_starting"] = False
+                        tenant_runner.runner.state["status_message"] = "Failed to connect to CARLA server"
+                        return
 
-            # Signal that setup is complete - simulation thread can now start
-            logger.debug("Signaling setup completion to simulation thread...")
-            setup_event.set()
+                    # Setup components with retry
+                    tenant_runner.runner.state["status_message"] = "Setting up world and sensors..."
+                    try:
+                        setup_simulation_components(tenant_runner.runner, tenant_runner.runner.app)
+                        logger.debug("Simulation components setup completed")
+                    except RuntimeError as e:
+                        if "Failed to create vehicle" in str(e):
+                            tenant_runner.runner.state["is_running"] = False
+                            tenant_runner.runner.state["is_transitioning"] = False
+                            logger.error("Failed to create vehicle after multiple attempts. Please try again.")
+                            tenant_runner.runner.state["status_message"] = "Failed to create vehicle"
+                            return
+                        raise
 
-            # Reset transition flag after successful start
-            runner.state["is_transitioning"] = False
-            # Don't clear is_starting flag here - let the simulation thread clear it when actually running
+                    # Stabilize briefly
+                    tenant_runner.runner.state["status_message"] = "Starting simulation..."
+                    time.sleep(0.5)
 
-            logger.debug(f"Reset is_transitioning=False, is_starting={runner.state['is_starting']}")
-            logger.info("Simulation started successfully")
-            
-            # Track metrics
-            SIMULATION_START_COUNTER.inc()
-            SIMULATION_STATUS_GAUGE.set(1)  # Running
-            
+                    # Signal setup complete so simulation thread can enter run()
+                    logger.debug("Signaling setup completion to simulation thread...")
+                    tenant_runner.setup_event.set()
+
+                    # Reset transition flag after successful start
+                    tenant_runner.runner.state["is_transitioning"] = False
+                    tenant_runner.runner.state["status_message"] = "Simulation running"
+                    logger.debug(f"Reset is_transitioning=False, is_starting={tenant_runner.runner.state['is_starting']}")
+                    logger.info("Simulation started successfully")
+                    SIMULATION_START_COUNTER.inc()
+                    SIMULATION_STATUS_GAUGE.set(1)
+                except Exception as e:
+                    logger.error(f"Error during background setup: {e}")
+                    tenant_runner.runner.state["is_running"] = False
+                    tenant_runner.runner.state["is_transitioning"] = False
+                    tenant_runner.runner.state["is_starting"] = False
+                    tenant_runner.runner.state["status_message"] = f"Start failed: {str(e)}"
+                finally:
+                    # Reset tenant context for this thread, if set
+                    try:
+                        if '_tenant_token' in locals() and _tenant_token is not None:
+                            CURRENT_TENANT_ID.reset(_tenant_token)
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_bg_heavy_setup, daemon=True).start()
+
+            # Return immediately; background thread will complete setup and start simulation
             return {
                 "success": True,
-                "message": "Simulation started successfully",
-                "session_id": str(session_id),  # Return session_id as string to client
+                "message": "Starting simulation...",
+                "session_id": str(session_id),
             }
         except Exception as e:
             logger.error(f"Error during simulation setup: {str(e)}")
-            runner.state["is_running"] = False
-            runner.state["is_stopping"] = False  # Reset stopping flag on error
-            runner.state["is_transitioning"] = False
-            runner.state["is_starting"] = False  # Clear starting flag on error
+            tenant_runner.runner.state["is_running"] = False
+            tenant_runner.runner.state["is_stopping"] = False  # Reset stopping flag on error
+            tenant_runner.runner.state["is_transitioning"] = False
+            tenant_runner.runner.state["is_starting"] = False  # Clear starting flag on error
             cleanup_resources()
-            raise e
+            # Surface error to client
+            raise HTTPException(status_code=500, detail=str(e))
 
     except Exception as e:
         logger.error(f"Error in start_simulation: {str(e)}")
         import traceback
 
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # Reset state on error
-        runner.state["is_running"] = False
-        runner.state["is_stopping"] = False  # Reset stopping flag on error
-        runner.state["is_transitioning"] = False
-        runner.state["is_starting"] = False  # Clear starting flag on error
+        # Best effort: nothing else to do; per-tenant runner will be reset by caller
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/simulation/stop")
-async def stop_simulation():
+async def stop_simulation(request: Request, current_user: dict = Depends(get_current_user)):
     """Stop the current simulation with improved reliability"""
     try:
+        # Enforce tenant scoping: only allow the tenant that started the simulation to control it
+        effective_tid: Optional[int] = None
+        if request is not None:
+            header_tid = request.headers.get("x-tenant-id") or request.headers.get("X-Tenant-Id")
+            if header_tid:
+                try:
+                    effective_tid = int(header_tid)
+                except ValueError:
+                    effective_tid = None
+        tenant_runner = registry.get(effective_tid) if effective_tid is not None else None
+        if tenant_runner is None:
+            return {"success": True, "message": "Simulation is not running"}
+        if tenant_runner.runner.state.get("tenant_id") is not None and effective_tid is not None:
+            if int(tenant_runner.runner.state.get("tenant_id")) != int(effective_tid):
+                raise HTTPException(status_code=403, detail="Operation not permitted for this tenant")
+
         logger.info("================================")
         logger.info("Stopping simulation")
         logger.info("================================")
@@ -1169,56 +1411,55 @@ async def stop_simulation():
         SIMULATION_STATUS_GAUGE.set(0)  # Stopped
 
         # Check if simulation is actually running
-        if not runner.state["is_running"]:
+        if not tenant_runner.runner.state.get("is_running"):
             logger.debug("Simulation is not running, returning success")
             return {"success": True, "message": "Simulation is not running"}
         
         # Synchronize the two state objects immediately
-        runner.state["is_running"] = False      # tell WebSocket on next tick
-        runner.state["is_stopping"] = True      # new explicit flag
+        tenant_runner.runner.state["is_running"] = False      # tell WebSocket on next tick
+        tenant_runner.runner.state["is_stopping"] = True      # new explicit flag
 
-        if hasattr(runner, "app") and runner.app:
-            runner.app.state.is_running = False  # halt frame producer
+        if hasattr(tenant_runner.runner, "app") and tenant_runner.runner.app:
+            tenant_runner.runner.app.state.is_running = False  # halt frame producer
         try:
-            current_scenario = runner.state["current_scenario"]
+            current_scenario = tenant_runner.runner.state.get("current_scenario")
             
             # Record scenario result
             if current_scenario:
                 record_scenario_result(
-                    runner,
+                    tenant_runner.runner,
                     current_scenario,
                     "Failed",
                     "Stopped",
-                    datetime.now() - runner.state["scenario_start_time"],
+                    datetime.now() - tenant_runner.runner.state["scenario_start_time"],
                 )
 
-            # Stop the simulation application first
-            if hasattr(runner, "app") and runner.app:
-                try:
-                    if hasattr(runner.app, "is_cleanup_complete"):
-                        runner.app.is_cleanup_complete = False
-                    if hasattr(runner.app, "state"):
-                        runner.app.state.is_running = False
-                    await wait_for_cleanup(runner.app, max_wait_time=20)
-                except Exception as e:
-                    logger.error(f"Error during app cleanup: {str(e)}")
-            generate_final_report(runner)
+            # Start cleanup in a background thread (non-blocking per-tenant stop)
+            if hasattr(tenant_runner.runner, "app") and tenant_runner.runner.app:
+                import threading as _t
+                app_ref = tenant_runner.runner.app
+                def _bg_cleanup():
+                    try:
+                        if hasattr(app_ref, "is_cleanup_complete"):
+                            app_ref.is_cleanup_complete = False
+                        if hasattr(app_ref, "state"):
+                            app_ref.state.is_running = False
+                        if hasattr(app_ref, "cleanup"):
+                            app_ref.cleanup()
+                    except Exception as e:
+                        logger.error(f"Background cleanup error (tenant {effective_tid}): {e}")
+                _t.Thread(target=_bg_cleanup, daemon=True).start()
+            generate_final_report(tenant_runner.runner)
         except Exception as e:
             logger.error(f"Error during simulation stop process: {str(e)}")
             # Continue with cleanup even if there's an error
 
         finally:
-            # Always reset simulation state
-            runner.state["is_running"] = False
-            runner.state["is_stopping"] = False  # Reset stopping flag
-            runner.state["is_transitioning"] = False
-            runner.state["is_skipping"] = False  # Reset skipping flag
-            runner.state["current_scenario"] = None
-            runner.state["current_scenario_index"] = 0
-            runner.state["scenarios_to_run"] = []
-            
-            # Clear the app instance
-            runner.app = None
+            # Always reset simulation flags (do not clear tenant binding here)
+            tenant_runner.runner.state["is_running"] = False
+            tenant_runner.runner.state["is_stopping"] = False
+            tenant_runner.runner.state["is_transitioning"] = False
+            tenant_runner.runner.state["is_skipping"] = False
             
             logger.debug("Simulation state reset completed")
 
@@ -1228,10 +1469,10 @@ async def stop_simulation():
     except Exception as e:
         logger.error(f"Error stopping simulation: {str(e)}")
         # Ensure state is reset on error
-        runner.state["is_running"] = False
-        runner.state["is_stopping"] = False  # Reset stopping flag on error
-        runner.state["is_transitioning"] = False
-        runner.state["is_skipping"] = False  # Reset skipping flag on error
+        tenant_runner.runner.state["is_running"] = False
+        tenant_runner.runner.state["is_stopping"] = False  # Reset stopping flag on error
+        tenant_runner.runner.state["is_transitioning"] = False
+        tenant_runner.runner.state["is_skipping"] = False  # Reset skipping flag on error
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1239,6 +1480,30 @@ async def stop_simulation():
 @app.websocket("/ws/simulation-view")
 async def websocket_endpoint(websocket: WebSocket):
     try:
+        # Authenticate and scope by tenant via query params
+        query = websocket.query_params
+        token_q = query.get("token")
+        q_tid = query.get("tenant_id")
+        conn_tenant_id: Optional[int] = None
+        if q_tid is not None:
+            try:
+                conn_tenant_id = int(q_tid)
+            except ValueError:
+                conn_tenant_id = None
+        jwt_payload = None
+        if token_q:
+            try:
+                jwt_payload = verify_jwt_token(token_q)
+            except Exception:
+                jwt_payload = None
+        if conn_tenant_id is None and isinstance(jwt_payload, dict):
+            try:
+                claim_tid = jwt_payload.get("tenant_id")
+                if claim_tid is not None:
+                    conn_tenant_id = int(claim_tid)
+            except Exception:
+                conn_tenant_id = None
+
         await websocket.accept()
         
         # Track metrics
@@ -1246,42 +1511,91 @@ async def websocket_endpoint(websocket: WebSocket):
         ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE.inc()
         logger.debug("WebSocket connection established")
         last_sent_state = None
-        last_frame_hash = [None]
+        last_frame_obj = [None]
         async def send_video_frames():
+            loop = asyncio.get_running_loop()
+            last_send_ts = 0.0
+            last_hud_ts = 0.0
+            # Per-connection FPS limit (env-configurable); default disabled (0 = no throttle)
+            try:
+                max_fps = float(os.getenv("WEB_VIDEO_MAX_FPS", "0"))
+            except Exception:
+                max_fps = 0.0
+            # When max_fps <= 0, disable throttling entirely
+            min_interval = 1.0 / max_fps if max_fps > 0 else 0.0
             while True:
                 try:
-                    state = runner.state if hasattr(runner, 'state') else None
-                    app = runner.app if hasattr(runner, 'app') else None
+                    state = None
+                    app = None
+                    if conn_tenant_id is not None:
+                        tr = registry.get(conn_tenant_id)
+                        if tr is not None:
+                            state = tr.runner.state
+                            app = getattr(tr.runner, 'app', None)
+                    else:
+                        # Fallback to global runner for backward compatibility
+                        state = runner.state
+                        app = getattr(runner, 'app', None)
+                    # Enforce tenant: only stream frames if WS tenant matches runner state tenant (when set)
                     if (app and getattr(app, 'display_manager', None) and state and
-                        state["is_running"] and not state["is_transitioning"] and
-                        not state["is_stopping"] and not state["is_skipping"] and not state["is_starting"]):
+                        (state.get("tenant_id") is None or conn_tenant_id is None or int(state.get("tenant_id")) == int(conn_tenant_id)) and
+                        not state.get("is_stopping", False) and
+                        not state.get("is_transitioning", False) and
+                        not state.get("is_skipping", False)):
                         frame = app.display_manager.get_current_frame()
                         if frame is not None:
-                            frame_bytes = frame.tobytes()
-                            frame_hash = hash(frame_bytes)
-                            if frame_hash != last_frame_hash[0]:
-                                _, buffer = cv2.imencode('.jpg', frame)
-                                frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                            # Dedupe by object identity to avoid expensive hashing of raw bytes
+                            if frame is not last_frame_obj[0]:
                                 try:
-                                    await websocket.send_text(frame_base64)
-                                    last_frame_hash[0] = frame_hash
-                                except asyncio.CancelledError:
-                                    break
+                                    # Offload JPEG encoding to threadpool to prevent event-loop blocking
+                                    # Apply moderate JPEG quality to reduce CPU
+                                    ok, buffer = await loop.run_in_executor(
+                                        None,
+                                        functools.partial(cv2.imencode, '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                                    )
                                 except Exception as e:
-                                    error_str = str(e).lower()
-                                    if any(pattern in error_str for pattern in [
-                                        "1001", "1005", "1006", "1011", "1012",
-                                        "going away", "no status code", "no close frame received or sent",
-                                        "connection closed", "connection reset", "connection aborted",
-                                        "connection refused", "connection timed out", "broken pipe",
-                                        "websocket is closed", "websocket connection is closed",
-                                        "remote end closed connection", "connection lost",
-                                        "peer closed connection", "socket is not connected"
-                                    ]):
+                                    logger.error(f"Error encoding video frame: {e}")
+                                    await asyncio.sleep(0.0167)
+                                    continue
+                                if not ok:
+                                    await asyncio.sleep(0.0167)
+                                    continue
+                                # Throttle send to avoid saturating event loop/CPU
+                                now = time.time()
+                                if (now - last_send_ts) >= min_interval:
+                                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                                    try:
+                                        await websocket.send_text(frame_base64)
+                                        last_frame_obj[0] = frame
+                                        last_send_ts = now
+                                    except asyncio.CancelledError:
                                         break
-                                    else:
-                                        logger.error(f"Error sending video frame: {str(e)}")
-                                        break
+                                    except Exception as e:
+                                        error_str = str(e).lower()
+                                        if any(pattern in error_str for pattern in [
+                                            "1001", "1005", "1006", "1011", "1012",
+                                            "going away", "no status code", "no close frame received or sent",
+                                            "connection closed", "connection reset", "connection aborted",
+                                            "connection refused", "connection timed out", "broken pipe",
+                                            "websocket is closed", "websocket connection is closed",
+                                            "remote end closed connection", "connection lost",
+                                            "peer closed connection", "socket is not connected"
+                                        ]):
+                                            break
+                                        else:
+                                            logger.error(f"Error sending video frame: {str(e)}")
+                                            break
+                            # Send HUD roughly at 5 Hz
+                            try:
+                                if hasattr(app, 'get_hud_payload'):
+                                    now2 = time.time()
+                                    if (now2 - last_hud_ts) >= 0.2:
+                                        hud = app.get_hud_payload()
+                                        if isinstance(hud, dict):
+                                            await websocket.send_json({"type": "hud", "payload": hud})
+                                        last_hud_ts = now2
+                            except Exception:
+                                pass
                     await asyncio.sleep(0.0167)
                 except asyncio.CancelledError:
                     break
@@ -1291,7 +1605,19 @@ async def websocket_endpoint(websocket: WebSocket):
         video_task = asyncio.create_task(send_video_frames())
         try:
             while True:
-                state = runner.state if hasattr(runner, 'state') else None
+                state = None
+                if conn_tenant_id is not None:
+                    tr = registry.get(conn_tenant_id)
+                    if tr is not None:
+                        state = tr.runner.state
+                        # Debug: Log state changes for this tenant
+                        if state and (state.get("is_skipping") or state.get("is_transitioning") or state.get("is_stopping")):
+                            logger.debug(f"WebSocket state update for tenant {conn_tenant_id}: is_skipping={state.get('is_skipping')}, is_transitioning={state.get('is_transitioning')}, is_stopping={state.get('is_stopping')}")
+                            if state.get("is_transitioning") or state.get("is_skipping"):
+                                logger.debug(f"Pausing video frame sending for tenant {conn_tenant_id} due to transition/skip state")
+                else:
+                    # Fallback to global runner for backward compatibility
+                    state = runner.state
                 state_info = {
                     "type": "status",
                     "is_running": False,
@@ -1307,23 +1633,56 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
                 if state:
                     try:
-                        status_message = "Ready to Start"
-                        if state["is_starting"]:
+                        # If tenant mismatch, inform client and close
+                        if state.get("tenant_id") is not None and conn_tenant_id is not None and int(state.get("tenant_id")) != int(conn_tenant_id):
+                            await websocket.send_json({
+                                "type": "status",
+                                "is_running": False,
+                                "is_starting": False,
+                                "is_stopping": False,
+                                "is_skipping": False,
+                                "current_scenario": None,
+                                "scenario_index": 0,
+                                "total_scenarios": 0,
+                                "is_transitioning": False,
+                                "status_message": "Not authorized for this tenant",
+                                "timestamp": datetime.now().isoformat(),
+                            })
+                            await websocket.close(code=1008)
+                            break
+                        # Prefer backend-provided status_message when available
+                        status_message = state.get("status_message") or "Ready to Start"
+                        if state["is_starting"] and not state.get("status_message"):
                             status_message = "Hang on,\nLoading Simulation..."
-                        elif state["is_stopping"]:
+                        elif state["is_stopping"] and not state.get("status_message"):
                             status_message = "Stopping simulation..."
-                        elif state["is_skipping"]:
+                        elif state["is_skipping"] and not state.get("status_message"):
                             current_index = state["current_scenario_index"]
                             total_scenarios = len(state["scenarios_to_run"])
-                            if current_index >= total_scenarios - 1:
-                                status_message = "Stopping simulation..."
+
+                            if current_index + 1 < total_scenarios:
+                                next_scenario = state["scenarios_to_run"][current_index + 1]
+                                status_message = f"Skipping scenario {current_index + 1}/{total_scenarios}...\nPreparing: {next_scenario}"
                             else:
-                                status_message = "Skipping scenario..."
+                                status_message = f"Skipping scenario {current_index + 1}/{total_scenarios}...\nSimulation complete"
                         elif state["is_running"]:
-                            if state["is_transitioning"]:
-                                status_message = "Transitioning between scenarios..."
+                            # Prioritize starting state over transitioning state to show correct status during startup
+                            if state["is_starting"]:
+                                status_message = state.get("status_message") or "Hang on,\nLoading Simulation..."
+                            # elif state["is_transitioning"]:
+                            #     # Don't show "Transitioning between scenarios..." - just show the current scenario or default message
+                            #     current = state.get("current_scenario")
+                            #     if current:
+                            #         status_message = f"Running: {current}"
+                            #     else:
+                            #         status_message = state.get("status_message") or "Simulation running"
                             else:
-                                status_message = "Simulation running"
+                                # Prefer showing the running scenario name
+                                current = state.get("current_scenario")
+                                if current:
+                                    status_message = f"Running: {current}"
+                                else:
+                                    status_message = state.get("status_message") or "Simulation running"
                         state_info.update({
                             "is_running": state["is_running"],
                             "is_starting": state["is_starting"],
@@ -2073,6 +2432,60 @@ async def change_password(payload: dict, current_user: dict = Depends(get_curren
 async def get_version():
     version = os.environ.get("VERSION", "dev")
     return {"version": version}
+
+
+# ---- Admin endpoints for CARLA pool and runners ----
+@app.get("/api/carla/pool/status")
+async def get_carla_pool_status(current_user: dict = Depends(get_current_user)):
+    require_admin(current_user)
+    try:
+        return carla_pool.status()
+    except Exception as e:
+        logger.error(f"Error getting CARLA pool status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/carla/pool/housekeeping")
+async def run_carla_pool_housekeeping(current_user: dict = Depends(get_current_user)):
+    require_admin(current_user)
+    try:
+        carla_pool.housekeeping()
+        return {"message": "Housekeeping executed"}
+    except Exception as e:
+        logger.error(f"Error running housekeeping: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/runners")
+async def list_runners(current_user: dict = Depends(get_current_user)):
+    require_admin(current_user)
+    try:
+        data = []
+        try:
+            data.append({
+                "tenant_id": None,
+                "is_running": runner.state.get("is_running"),
+                "current_scenario": runner.state.get("current_scenario"),
+                "scenarios_to_run": runner.state.get("scenarios_to_run"),
+            })
+        except Exception:
+            pass
+        try:
+            for tid, tr in registry._tenant_to_runner.items():  # type: ignore[attr-defined]
+                r = tr.runner
+                rs = getattr(r, 'state', {})
+                data.append({
+                    "tenant_id": tid,
+                    "is_running": bool(rs.get("is_running")),
+                    "current_scenario": rs.get("current_scenario"),
+                    "scenarios_to_run": rs.get("scenarios_to_run"),
+                })
+        except Exception:
+            pass
+        return {"runners": data}
+    except Exception as e:
+        logger.error(f"Error listing runners: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

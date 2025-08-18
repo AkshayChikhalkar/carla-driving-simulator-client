@@ -422,17 +422,63 @@ class SimulationConfig:
         world = self.config.get("world")
         if not world:
             raise ValueError("Missing required 'world' configuration section")
+        # Sanitize unknown keys (e.g., 'walkers') and nested extras to match dataclass
+        allowed_world_keys = {
+            "map",
+            "weather",
+            "physics",
+            "traffic",
+            "fixed_delta_seconds",
+            "target_distance",
+            "num_vehicles",
+            "enable_collision",
+            "synchronous_mode",
+        }
+        world_filtered = {k: v for k, v in world.items() if k in allowed_world_keys}
+
+        # Filter nested blocks
+        weather_block = world_filtered.get("weather", world.get("weather", {})) or {}
+        physics_block = world_filtered.get("physics", world.get("physics", {})) or {}
+        traffic_block = world_filtered.get("traffic", world.get("traffic", {})) or {}
+
+        if isinstance(weather_block, dict):
+            allowed_weather_keys = {
+                "cloudiness",
+                "precipitation",
+                "precipitation_deposits",
+                "sun_altitude_angle",
+                "sun_azimuth_angle",
+                "wind_intensity",
+                "fog_density",
+                "fog_distance",
+                "fog_falloff",
+                "wetness",
+            }
+            weather_block = {k: v for k, v in weather_block.items() if k in allowed_weather_keys}
+
+        if isinstance(physics_block, dict):
+            allowed_physics_keys = {"max_substep_delta_time", "max_substeps"}
+            physics_block = {k: v for k, v in physics_block.items() if k in allowed_physics_keys}
+
+        if isinstance(traffic_block, dict):
+            allowed_traffic_keys = {
+                "distance_to_leading_vehicle",
+                "speed_difference_percentage",
+                "ignore_lights_percentage",
+                "ignore_signs_percentage",
+            }
+            traffic_block = {k: v for k, v in traffic_block.items() if k in allowed_traffic_keys}
 
         return WorldConfig(
-            map=world["map"],
-            weather=world.get("weather", {}),
-            physics=world.get("physics", {}),
-            traffic=world.get("traffic", {}),
-            fixed_delta_seconds=world["fixed_delta_seconds"],
-            target_distance=world["target_distance"],
-            num_vehicles=world["num_vehicles"],
-            enable_collision=world["enable_collision"],
-            synchronous_mode=world["synchronous_mode"],
+            map=world_filtered["map"],
+            weather=weather_block,
+            physics=physics_block,
+            traffic=traffic_block,
+            fixed_delta_seconds=world_filtered["fixed_delta_seconds"],
+            target_distance=world_filtered["target_distance"],
+            num_vehicles=world_filtered["num_vehicles"],
+            enable_collision=world_filtered["enable_collision"],
+            synchronous_mode=world_filtered["synchronous_mode"],
         )
 
     def _create_simulation_config(self) -> SimConfig:

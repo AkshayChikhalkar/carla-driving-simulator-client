@@ -2,21 +2,29 @@ services:
   carla-driving-simulator-client:
     build:
       context: ../..
-      dockerfile: deployment/docker/Dockerfile.dev
-    image: carla-simulator-client:dev
+      dockerfile: deployment/docker/Dockerfile
+    image: carla-simulator-client:dev_vMT1.5
     environment:
       - PYTHONPATH=/app
       - REACT_APP_API_URL=http://localhost:8000
       # Database URL can be provided directly or via parts below
-      - DATABASE_URL=${DATABASE_URL}
-      - DB_HOST=${DB_HOST}
-      - DB_HOSTIP=${DB_HOSTIP}
-      - DB_PORT=${DB_PORT}
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      # Optional tenant context for multitenant config
-      - CONFIG_TENANT_ID=${CONFIG_TENANT_ID}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator}
+      - DB_HOST=${DB_HOST:-193.16.126.186}
+      - DB_HOSTIP=${DB_HOSTIP:-}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-carla_simulator}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      # Tenant context (prefer header/JWT; env is fallback for background threads)
+      - CONFIG_TENANT_ID=${CONFIG_TENANT_ID:-}
+      # Auth and CORS
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-insecure-change-me}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-24}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      # File logging and reports toggles (off by default)
+      - WEB_FILE_LOGS_ENABLED=${WEB_FILE_LOGS_ENABLED:-false}
+      - ENABLE_FILE_REPORTS=${ENABLE_FILE_REPORTS:-false}
     volumes:
       - ../../logs:/app/logs
       - ../../reports:/app/reports

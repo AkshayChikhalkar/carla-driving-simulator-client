@@ -382,16 +382,23 @@ class AutopilotController(ControllerStrategy):
         ignore_signs = traffic_config.get("ignore_signs_percentage", 0)
 
         # Apply traffic settings
-        self.traffic_manager.set_global_distance_to_leading_vehicle(distance_to_leading)
-        self.traffic_manager.vehicle_percentage_speed_difference(
-            self.vehicle, speed_diff
-        )  # Set speed difference once
+        try:
+            # Keep TM and world in sync; each tenant uses its own TM port
+            self.traffic_manager.set_synchronous_mode(True)
+            self.traffic_manager.set_global_distance_to_leading_vehicle(distance_to_leading)
+            # Negative value means faster than limit in CARLA TM
+            self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle, speed_diff)
+        except Exception:
+            pass
         self.traffic_manager.ignore_lights_percentage(self.vehicle, ignore_lights)
         self.traffic_manager.ignore_signs_percentage(self.vehicle, ignore_signs)
-        self.traffic_manager.set_synchronous_mode(True)
 
         # Enable autopilot
-        self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+        try:
+            # Engage autopilot on the ego with the TM's port
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+        except Exception:
+            pass
 
         # Initialize control
         self._control = VehicleControl()

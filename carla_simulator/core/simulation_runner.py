@@ -12,13 +12,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from carla_simulator.core.simulation_application import SimulationApplication
-from carla_simulator.core.world_manager import WorldManager
-from carla_simulator.core.sensors import SensorManager
-from carla_simulator.control.controller import (
-    VehicleController,
-    KeyboardController,
-    AutopilotController,
-)
+# Lazy-import modules that indirectly import pygame to avoid initializing SDL at web startup
+# (FastAPI imports this module when the container starts)
 from carla_simulator.utils.logging import Logger
 from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
 from carla_simulator.utils.paths import get_config_path
@@ -70,6 +65,15 @@ class SimulationRunner:
     def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
         """Setup simulation components and return them"""
         # Create and setup components with required arguments
+        # Import here to avoid eager pygame import at process start
+        from carla_simulator.core.world_manager import WorldManager
+        from carla_simulator.core.sensors import SensorManager
+        from carla_simulator.control.controller import (
+            VehicleController,
+            KeyboardController,
+            AutopilotController,
+        )
+
         world_manager = WorldManager(
             client=app.connection.client,
             config=app.world_config,
@@ -87,10 +91,8 @@ class SimulationRunner:
 
         # Create controller based on config type
         controller_type = getattr(app.controller_config, "type", "autopilot")
-        self.logger.debug(f"Creating controller with type: {controller_type}")
-
-        # Check if we're in web mode
         is_web_mode = getattr(app._config, "web_mode", False)
+        self.logger.debug(f"Creating controller with type: {controller_type}")
         vehicle_controller = VehicleController(
             app.controller_config, headless=is_web_mode
         )
@@ -103,6 +105,11 @@ class SimulationRunner:
             controller = AutopilotController(
                 vehicle, app.controller_config, app.connection.client, world_manager
             )
+            # Ensure autopilot is engaged and traffic manager in sync
+            try:
+                vehicle.set_autopilot(True, world_manager.get_traffic_manager().get_port())
+            except Exception:
+                pass
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 

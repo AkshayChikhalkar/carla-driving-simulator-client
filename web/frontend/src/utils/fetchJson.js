@@ -1,10 +1,10 @@
 export async function fetchJson(url, options = {}) {
   const headers = new Headers(options.headers || {});
-  const token = localStorage.getItem('access_token');
+  const token = sessionStorage.getItem('access_token');
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const tenant = localStorage.getItem('tenant_id');
+  const tenant = sessionStorage.getItem('tenant_id');
   if (tenant && !headers.has('X-Tenant-Id')) {
     headers.set('X-Tenant-Id', tenant);
   }

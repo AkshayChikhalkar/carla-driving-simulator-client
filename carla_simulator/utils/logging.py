@@ -199,6 +199,10 @@ class Logger:
                 tenant_ctx: Optional[int] = CURRENT_TENANT_ID.get()  # type: ignore
             except Exception:
                 tenant_ctx = None
+            try:
+                user_ctx: Optional[int] = CURRENT_USER_ID.get()  # type: ignore
+            except Exception:
+                user_ctx = None
 
             tenant_id: Optional[int] = tenant_ctx
             if tenant_id is None:
@@ -211,6 +215,8 @@ class Logger:
                 "session_id": str(getattr(self, "_session_id", "") or ""),
                 "scenario_id": getattr(self, "_scenario_id", None),
             }
+            if user_ctx is not None:
+                extra["user_id"] = int(user_ctx)
             if include_trace:
                 extra["trace"] = traceback.format_exc()
             from carla_simulator.database.db_manager import DatabaseManager
@@ -223,3 +229,5 @@ class Logger:
 
 # Per-request tenant context var (set by web backend middleware)
 CURRENT_TENANT_ID: ContextVar[Optional[int]] = ContextVar("CURRENT_TENANT_ID", default=None)
+# Per-request user context for DB logs filtering
+CURRENT_USER_ID: ContextVar[Optional[int]] = ContextVar("CURRENT_USER_ID", default=None)

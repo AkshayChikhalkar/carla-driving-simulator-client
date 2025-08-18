@@ -2,6 +2,11 @@
 Display management system using the facade pattern.
 """
 
+import os
+# Ensure headless-friendly SDL defaults even if backend didn't set them yet
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
 import pygame
 import numpy as np
 import carla
@@ -201,14 +206,6 @@ class CameraView(SensorObserver):
                     self.logger.warning("Received empty camera data")
                     return
 
-                # Debug: Log camera data reception
-                if hasattr(self, '_frame_count'):
-                    self._frame_count += 1
-                else:
-                    self._frame_count = 1
-                
-                if self._frame_count % 30 == 0:  # Log every 30 frames
-                    self.logger.debug(f"Camera view: Received frame with shape {array.shape}")
 
                 # Convert from RGB to BGR if needed
                 if array.shape[2] == 3:  # Ensure it's a color image
@@ -304,26 +301,28 @@ class DisplayManager:
         self.camera_view = None
         self.current_frame = None
         self.frame_buffer = None
+        self.closed = False
 
-        # Initialize pygame
-        pygame.init()
-
+        # Initialize pygame conditionally for web/CLI
         if web_mode:
-            # Set environment variables for headless mode
-            os.environ["SDL_VIDEODRIVER"] = "dummy"
-            os.environ["SDL_AUDIODRIVER"] = "dummy"
-            # Create a surface for rendering without a window
-            self.screen = pygame.Surface((config.width, config.height))
+            # Lightweight init for headless mode; avoid creating full window/font stacks
+            try:
+                pygame.init()
+            except Exception:
+                pass
+            self.screen = None
+            self.clock = None
+            self.font = None
         else:
+            pygame.init()
             # Create a window for CLI mode
             pygame.display.set_caption("CARLA Driving Simulator")
             self.screen = pygame.display.set_mode(
                 (config.width, config.height),
                 pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE,
             )
-
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, 24)
+            self.clock = pygame.time.Clock()
+            self.font = pygame.font.Font(None, 24)
 
         # Initialize components with config
         self.hud = HUD(config)
@@ -371,6 +370,9 @@ class DisplayManager:
     ) -> bool:
         """Render the display"""
         try:
+            # If pygame was quit during cleanup or not initialized, skip rendering
+            if self.closed or not pygame.get_init() or not pygame.font.get_init():
+                return False
             # Process events first if not in web mode
             if not self.web_mode and not self.process_events():
                 return False
@@ -380,16 +382,40 @@ class DisplayManager:
                 return True
 
             # Clear the screen first
-            self.screen.fill((0, 0, 0))
+            if self.web_mode:
+                frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
+            else:
+                self.screen.fill((0, 0, 0))
 
             # Update camera view first (as background)
-            self._update_camera()
+            if self.web_mode:
+                if self.camera_view and getattr(self.camera_view, 'last_frame', None) is not None:
+                    cam = self.camera_view.last_frame
+                    try:
+                        # cam is stored as (width, height, 3) in RGB for pygame rendering.
+                        # For web streaming we need (height, width, 3) BGR for OpenCV encoding.
+                        frame_rgb_hwc = cam.swapaxes(0, 1)
+                        frame = frame_rgb_hwc[:, :, ::-1]  # RGB -> BGR
+                        if frame.shape[0] != self.config.height or frame.shape[1] != self.config.width:
+                            try:
+                                import cv2
+                                frame = cv2.resize(frame, (self.config.width, self.config.height))
+                            except Exception:
+                                pass
+                    except Exception:
+                        frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
+                else:
+                    frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
+            else:
+                self._update_camera()
 
             # Update HUD
-            self._update_hud(vehicle_state)
+            if not self.web_mode:
+                self._update_hud(vehicle_state)
 
             # Update minimap
-            self._update_minimap(vehicle_state, target_position)
+            if not self.web_mode:
+                self._update_minimap(vehicle_state, target_position)
 
             # Update FPS counter for both CLI and web UI modes
             current_time = time.time()
@@ -409,13 +435,18 @@ class DisplayManager:
                 self._last_fps_update = current_time
 
             # Render FPS counter
-            fps_text = self.font.render(
-                f"FPS: {self._current_fps:.1f}", True, (255, 255, 255)
-            )
-            # Position FPS text at bottom left with 10px padding
-            fps_rect = fps_text.get_rect()
-            fps_rect.bottomleft = (10, self.screen.get_height() - 10)
-            self.screen.blit(fps_text, fps_rect)
+            if not self.web_mode:
+                # Guard font rendering
+                try:
+                    fps_text = self.font.render(
+                        f"FPS: {self._current_fps:.1f}", True, (255, 255, 255)
+                    )
+                except Exception:
+                    return False
+                # Position FPS text at bottom left with 10px padding
+                fps_rect = fps_text.get_rect()
+                fps_rect.bottomleft = (10, self.screen.get_height() - 10)
+                self.screen.blit(fps_text, fps_rect)
 
             # Update the display and tick clock if not in web mode
             if not self.web_mode:
@@ -424,25 +455,20 @@ class DisplayManager:
 
             # Store frame for web UI
             try:
-                frame = pygame.surfarray.array3d(self.screen)
-                frame = frame.swapaxes(0, 1)  # Swap axes for correct orientation
-
-                # Convert to BGR if in web mode
                 if self.web_mode:
-                    frame = frame[:, :, ::-1]
-
-                self.last_frame = frame
-                
-                # Debug logging for web mode
-                if self.web_mode and self._frame_count % 30 == 0:  # Log every 30 frames
-                    self.logger.debug(f"Web mode: Captured frame with shape {frame.shape}")
-                    
+                    # Store BGR(HxW) for the websocket encoder
+                    self.last_frame = frame
+                else:
+                    frame_np = pygame.surfarray.array3d(self.screen)
+                    frame_np = frame_np.swapaxes(0, 1)
+                    self.last_frame = frame_np
+                if self.web_mode and self._frame_count % 30 == 0:
+                    self.logger.debug(f"Web mode: Captured frame with shape {self.last_frame.shape}")
             except Exception as e:
                 self.logger.error(f"Error capturing frame for web UI: {str(e)}")
-                # Create a fallback frame if capture fails
                 if self.web_mode:
                     fallback_frame = np.zeros((self.config.height, self.config.width, 3), dtype=np.uint8)
-                    fallback_frame.fill(32)  # Dark gray
+                    fallback_frame.fill(32)
                     self.last_frame = fallback_frame
 
             return True
@@ -490,8 +516,12 @@ class DisplayManager:
     def cleanup(self) -> None:
         """Clean up display resources"""
         try:
+            self.closed = True
             if self.camera_view:
                 self.camera_view.cleanup()
-            pygame.quit()
+            # In web/headless mode we keep SDL around for the process to avoid
+            # race conditions where other threads still reference pygame
+            if not self.web_mode:
+                pygame.quit()
         except Exception as e:
             self.logger.error("Error during cleanup", exc_info=e)
