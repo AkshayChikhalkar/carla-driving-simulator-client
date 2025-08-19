@@ -17,11 +17,11 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     // Check if user is logged in on app start
-    const token = localStorage.getItem('access_token');
-    const userData = localStorage.getItem('user');
+    const token = sessionStorage.getItem('access_token');
+    const userData = sessionStorage.getItem('user');
     
     if (token && userData) {
-      fetch('/api/auth/me', {
+        fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(res => {
@@ -30,12 +30,16 @@ export const AuthProvider = ({ children }) => {
         })
         .then(user => {
           setUser(user);
+          // Persist tenant id from JWT (if present via backend login) or backend me response (extend later)
+          if (user && user.tenant_id) {
+            sessionStorage.setItem('tenant_id', String(user.tenant_id));
+          }
           logger.info(`AuthContext: Loaded user from backend: ${user.username}`);
         })
         .catch(() => {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('session_token');
-          localStorage.removeItem('user');
+          sessionStorage.removeItem('access_token');
+          sessionStorage.removeItem('session_token');
+          sessionStorage.removeItem('user');
           setUser(null);
         })
         .finally(() => setLoading(false));
@@ -51,7 +55,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      const token = localStorage.getItem('access_token');
+      const token = sessionStorage.getItem('access_token');
       if (token) {
         await fetch('/api/auth/logout', {
           method: 'POST',
@@ -65,9 +69,11 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       logger.error('AuthContext: Logout error:', error);
     } finally {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('session_token');
-      localStorage.removeItem('user');
+      sessionStorage.removeItem('access_token');
+      sessionStorage.removeItem('session_token');
+      sessionStorage.removeItem('user');
+      sessionStorage.removeItem('tenant_id');
+      window.dispatchEvent(new Event('auth-changed'));
       setUser(null);
     }
   };
@@ -80,6 +86,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
+    isAdmin: !!(user && (user.is_admin || user.isAdmin)),
     login,
     logout,
     register,

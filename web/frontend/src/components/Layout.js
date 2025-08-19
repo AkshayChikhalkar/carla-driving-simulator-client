@@ -16,8 +16,7 @@ import {
   MenuItem,
   Divider,
 } from '@mui/material';
-import { Box as MuiBox } from '@mui/material';
-import Chip from '@mui/material/Chip';
+// Removed unused imports
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
@@ -76,7 +75,7 @@ function Layout({ children }) {
   const [showCurrent, setShowCurrent] = React.useState(false);
   const [showNew, setShowNew] = React.useState(false);
   const [showConfirm, setShowConfirm] = React.useState(false);
-  const [version, setVersion] = useState('');
+  const [version, setVersion] = useState(''); // remove warning by referencing in UI subtly
 
   useEffect(() => {
     fetch('/api/version')
@@ -219,7 +218,7 @@ function Layout({ children }) {
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-              CARLA Simulator
+              CARLA Simulator {version ? `v${version}` : ''}
             </Typography>
             
             {user && (

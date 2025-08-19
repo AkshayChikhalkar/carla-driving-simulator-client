@@ -96,15 +96,14 @@ setup(
         "Documentation": "https://carla-driving-simulator-client.readthedocs.io/",
         "Source Code": "https://github.com/akshaychikhalkar/carla-driving-simulator-client",
     },
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
+    packages=find_packages(),
     install_requires=install_requires,
     extras_require=extras_require,
     python_requires="==3.11.*",
     entry_points={
         "console_scripts": [
-            "carla-simulator-client=src.main:main",
-            "csc=src.main:main",
+            "carla-simulator-client=carla_simulator.cli:main",
+            "csc=carla_simulator.cli:main",
         ],
     },
     classifiers=[

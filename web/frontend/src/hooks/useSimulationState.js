@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { fetchJson } from '../utils/fetchJson';
 
-const API_BASE_URL = window.location.hostname === 'localhost' ? '/api' : `http://${window.location.hostname}:8081/api`;
+// Always use relative '/api' and rely on proxy in dev and same-origin in prod
+const API_BASE_URL = '/api';
 
 export const useSimulationState = () => {
   // Local transition states
@@ -108,12 +109,19 @@ export const useSimulationState = () => {
     setError(null);
     
     try {
-      await axios.post(`${API_BASE_URL}/simulation/start`, {
-        scenarios,
-        debug,
-        report
+      const resp = await fetchJson(`${API_BASE_URL}/simulation/start`, {
+        method: 'POST',
+        body: JSON.stringify({
+          scenarios,
+          debug,
+          report
+        })
       });
-      return true;
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.success === false) {
+        throw new Error(data?.message || 'Failed to start simulation');
+      }
+      return !!(data?.success ?? true);
     } catch (e) {
       setIsStarting(false);
       setStatus('Ready to Start');
@@ -133,8 +141,10 @@ export const useSimulationState = () => {
     // The frame state will be reset by the WebSocket connection after a delay
     
     try {
-      await axios.post(`${API_BASE_URL}/simulation/stop`);
-      return true;
+      const resp = await fetchJson(`${API_BASE_URL}/simulation/stop`, { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.success === false) throw new Error(data?.message || 'stop failed');
+      return !!(data?.success ?? true);
     } catch (e) {
       setIsStopping(false);
       setStatus('Ready to Start');
@@ -152,8 +162,10 @@ export const useSimulationState = () => {
     setError(null);
     
     try {
-      await axios.post(`${API_BASE_URL}/simulation/skip`);
-      return true;
+      const resp = await fetchJson(`${API_BASE_URL}/simulation/skip`, { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.success === false) throw new Error(data?.message || 'skip failed');
+      return !!(data?.success ?? true);
     } catch (e) {
       setIsSkipping(false);
       setStatus('Ready to Start');

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Tabs,
@@ -11,41 +11,35 @@ import {
   LocationOn as LocationIcon,
   Assessment as AssessmentIcon
 } from '@mui/icons-material';
+import { fetchJson } from '../utils/fetchJson';
 
-const GRAFANA_BASE_URL = 'http://193.16.126.186:3005/d';
+// Prefer same-origin Grafana if proxied, else fallback to env
+const API_BASE_URL = '/api';
 const GRAFANA_PARAMS = '?orgId=1&kiosk';
 
-// Dashboard configurations - Using actual dashboard UIDs from your Grafana setup
-const dashboardConfigs = [
-  {
-    id: 'metrics',
-    label: 'Simulator Metrics',
-    icon: <AssessmentIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-simulator-metrics/carla-simulator-metrics${GRAFANA_PARAMS}`,
-    description: 'Vehicle speed, navigation metrics, position, and controls'
-  },
-  {
-    id: 'performance',
-    label: 'Performance Monitor',
-    icon: <SpeedIcon />,
-    url: `${GRAFANA_BASE_URL}/carla-dgx-performance/carla-dgx-a100-performance-monitor${GRAFANA_PARAMS}`,
-    description: 'DGX A100 GPU utilization, memory usage, CPU and system performance'
-  },
-  {
-    id: 'power',
-    label: 'Power & Performance',
-    icon: <TimelineIcon />,
-    url: `${GRAFANA_BASE_URL}/power-and-other/power-and-other${GRAFANA_PARAMS}`,
-    description: 'DGX A100 power consumption, GPU utilization and temperature monitoring'
-  },
-  {
-    id: 'services',
-    label: 'Services Monitor',
-    icon: <LocationIcon />,
-    url: `${GRAFANA_BASE_URL}/logging/logging${GRAFANA_PARAMS}`,
-    description: 'Log monitoring, error tracking, and service health for CARLA components'
-  }
-];
+// Read Grafana base URL from backend config at runtime
+// Fallbacks: REACT_APP_GRAFANA_BASE_URL env, then proxied same-origin path
+const useGrafanaBaseUrl = () => {
+  const [grafanaBaseUrl, setGrafanaBaseUrl] = useState(process.env.REACT_APP_GRAFANA_BASE_URL || '/grafana/d');
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const headers = {};
+        const storedTenant = localStorage.getItem('tenant_id');
+        if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
+        const resp = await fetchJson(`${API_BASE_URL}/config`, { headers });
+        const data = await resp.json();
+        if (data && data.analytics && data.analytics.grafana_base_url) {
+          setGrafanaBaseUrl(data.analytics.grafana_base_url);
+        }
+      } catch (_) {
+        // keep default fallback
+      }
+    };
+    fetchConfig();
+  }, []);
+  return grafanaBaseUrl;
+};
 
 function TabPanel({ children, value, index, ...other }) {
   return (
@@ -67,11 +61,42 @@ function TabPanel({ children, value, index, ...other }) {
 
 const Analytics = () => {
   const [selectedTab, setSelectedTab] = useState(0);
+  const grafanaBaseUrl = useGrafanaBaseUrl();
 
   const handleTabChange = (event, newValue) => {
     setSelectedTab(newValue);
   };
 
+  const dashboardConfigs = [
+    {
+      id: 'metrics',
+      label: 'Simulator Metrics',
+      icon: <AssessmentIcon />,
+      url: `${grafanaBaseUrl}/carla-simulator-metrics/carla-simulator-metrics${GRAFANA_PARAMS}`,
+      description: 'Vehicle speed, navigation metrics, position, and controls'
+    },
+    {
+      id: 'performance',
+      label: 'Performance Monitor',
+      icon: <SpeedIcon />,
+      url: `${grafanaBaseUrl}/carla-dgx-performance/carla-dgx-a100-performance-monitor${GRAFANA_PARAMS}`,
+      description: 'DGX A100 GPU utilization, memory usage, CPU and system performance'
+    },
+    {
+      id: 'power',
+      label: 'Power & Performance',
+      icon: <TimelineIcon />,
+      url: `${grafanaBaseUrl}/power-and-other/power-and-other${GRAFANA_PARAMS}`,
+      description: 'DGX A100 power consumption, GPU utilization and temperature monitoring'
+    },
+    {
+      id: 'services',
+      label: 'Services Monitor',
+      icon: <LocationIcon />,
+      url: `${grafanaBaseUrl}/logging/logging${GRAFANA_PARAMS}`,
+      description: 'Log monitoring, error tracking, and service health for CARLA components'
+    }
+  ];
   return (
     <Box sx={{ p: 0.5 }}>
       <Paper sx={{ mb: 0.5 }}>

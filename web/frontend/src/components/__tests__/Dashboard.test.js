@@ -102,7 +102,8 @@ describe('Dashboard Component', () => {
     render(<Dashboard />);
     
     await waitFor(() => {
-      expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost:8000/ws/simulation-view');
+      const expected = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/simulation-view`;
+      expect(global.WebSocket).toHaveBeenCalledWith(expected);
     });
   });
 }); 

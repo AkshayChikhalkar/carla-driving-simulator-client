@@ -1,16 +1,20 @@
-import { useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import logger from '../utils/logger';
 
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE_URL = window.location.hostname === 'localhost'
-  ? `${WS_PROTOCOL}://localhost:8000/ws/simulation-view`
-  : `${WS_PROTOCOL}://${window.location.hostname}:8081/ws/simulation-view`;
+// Build WS URL using per-tab storage for strict isolation between tabs/tenants
+const getWebSocketUrl = () => {
+  const base = `${WS_PROTOCOL}://${window.location.host}/ws/simulation-view`;
+  const params = new URLSearchParams();
+  const token = sessionStorage.getItem('access_token');
+  const tenant = sessionStorage.getItem('tenant_id');
+  if (tenant) params.set('tenant_id', tenant);
+  if (token) params.set('token', token);
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+};
 
-const API_BASE_URL = window.location.hostname === 'localhost' ? '/api' : `http://${window.location.hostname}:8081/api`;
-
-// Global flag to prevent multiple WebSocket initializations
-let globalWebSocketInitialized = false;
+// In development, rely on setupProxy to forward '/api' to backend
 
 export const useWebSocketConnection = ({
   setStatus,
@@ -23,11 +27,14 @@ export const useWebSocketConnection = ({
   setIsSkipping,
   isSkipping,
   backendState,
+  setHudData,
+  canvasRef,
 }) => {
   const wsRef = useRef(null);
   const backendStateRef = useRef(backendState);
   const isSkippingRef = useRef(isSkipping);
   const connectionEstablishedRef = useRef(false); // Track if connection is already established
+  const [authVersion, setAuthVersion] = useState(0); // Bump when auth/tenant changes in this tab
 
   // Keep refs updated with latest values
   useEffect(() => {
@@ -76,7 +83,12 @@ export const useWebSocketConnection = ({
       setIsStarting(false);
       setIsSkipping(false);
       setIsRunning(false);
-      // Don't reset hasReceivedFrame immediately - let it fade out smoothly
+      // Clear HUD data when simulation stops to prevent showing stale data
+      if (setHudData) {
+        setHudData(null);
+      }
+      // Only clear hasReceivedFrame when simulation is completely stopped (not during transitions)
+      // This keeps the last frame visible until new frames arrive or simulation actually stops
       setTimeout(() => {
         setHasReceivedFrame(false);
       }, 6000); // Keep last frame visible for 4 seconds after stop for smoother transition
@@ -126,11 +138,11 @@ export const useWebSocketConnection = ({
 
     // Update isRunning based on backend state
     setIsRunning(data.is_running || false);
-  }, [setBackendState, setIsStopping, setIsStarting, setIsSkipping, setIsRunning, setHasReceivedFrame, setStatus]);
+  }, [setBackendState, setIsStopping, setIsStarting, setIsSkipping, setIsRunning, setHasReceivedFrame, setStatus, setHudData]);
 
   const handleVideoFrame = useCallback((frameData) => {
-    // Don't block drawing during transitions - let frames come through for smoother experience
-    // Only mark frame received if not in any transition
+    // Always mark frame received during transitions to keep canvas visible and prevent freezing
+    // This ensures other users don't see frozen views when one user skips
     const currentIsSkipping = isSkippingRef.current;
     const currentBackendState = backendStateRef.current;
     
@@ -143,7 +155,7 @@ export const useWebSocketConnection = ({
     // Always draw frames during transitions to keep canvas updated
     const img = new Image();
     img.onload = () => {
-      const canvas = document.getElementById('simulationCanvas'); // Get canvas by ID
+      const canvas = (canvasRef && canvasRef.current) ? canvasRef.current : document.getElementById('simulationCanvas');
       if (canvas) {
         const ctx = canvas.getContext('2d');
         canvas.width = img.width;
@@ -154,91 +166,68 @@ export const useWebSocketConnection = ({
     };
     img.src = `data:image/jpeg;base64,${frameData}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setHasReceivedFrame]); // canvasRef is stable, so we can disable the warning
+  }, [setHasReceivedFrame, canvasRef]);
+
+  // Optional HUD payloads (if backend sends them)
+  const handleHudMessage = useCallback((data) => {
+    try {
+      if (setHudData) {
+        // Only update HUD data if we're actively receiving frames
+        // This prevents showing stale HUD data when simulation is stopped
+        const currentBackendState = backendStateRef.current;
+        if (currentBackendState.is_running || currentBackendState.is_skipping || currentBackendState.is_starting) {
+          setHudData(data.payload);
+        }
+      }
+    } catch (_) {}
+  }, [setHudData]);
 
   useEffect(() => {
-    // Prevent multiple initializations across component re-renders
-    if (globalWebSocketInitialized) {
-      return;
-    }
-    
     let ws;
     let isUnmounted = false;
     let connectionAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
-    let setupCompleted = false; // Prevent multiple setups
 
-    const setupWebSocket = () => {
-      // Prevent multiple setups
-      if (setupCompleted) {
-        return;
-      }
-      
-      // Prevent multiple connections - check if already connected or connecting
+    const openWebSocket = () => {
+      // Close any existing connection before opening a new one
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-        return;
+        try { wsRef.current.close(); } catch (_) {}
       }
-      
-      // Prevent excessive reconnection attempts
-      if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        logger.warn('Max WebSocket reconnection attempts reached');
-        return;
-      }
-      
-      // Prevent duplicate connections if already established
-      if (connectionEstablishedRef.current) {
-        return;
-      }
-      
-      setupCompleted = true; // Mark setup as completed
-      connectionAttempts++;
       try {
-        ws = new WebSocket(WS_BASE_URL);
+        ws = new WebSocket(getWebSocketUrl());
         wsRef.current = ws;
         logger.info('WebSocket connection attempt started');
         ws.onopen = () => {
-          connectionAttempts = 0; // Reset on successful connection
-          connectionEstablishedRef.current = true; // Mark as established
-          globalWebSocketInitialized = true; // Mark as globally initialized
-          // Only show connected message if simulation is not running
+          connectionAttempts = 0;
+          connectionEstablishedRef.current = true;
           if (!backendStateRef.current.is_running) {
             setStatus('Connected to simulation server');
           }
         };
-
         ws.onclose = (e) => {
-          connectionEstablishedRef.current = false; // Mark as disconnected
-          globalWebSocketInitialized = false; // Reset global flag
+          connectionEstablishedRef.current = false;
           logger.info('WebSocket connection closed', e);
-          // Only show disconnected message if simulation is not running
           if (!backendStateRef.current.is_running) {
             setStatus('Disconnected from simulation server');
           }
-          // Attempt to reconnect after 2 seconds, but only if not unmounted
           if (!isUnmounted && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+            connectionAttempts += 1;
             setTimeout(() => {
-              if (!isUnmounted) {
-                setupWebSocket();
-              }
+              if (!isUnmounted) openWebSocket();
             }, 2000);
           }
         };
-
         ws.onerror = (e) => {
           logger.error('WebSocket error', e);
           setStatus('Error in simulation connection');
         };
-
         ws.onmessage = (event) => {
           try {
-            // If it's a status message (JSON)
-            if (event.data.startsWith('{')) {
+            if (typeof event.data === 'string' && event.data.startsWith('{')) {
               const data = JSON.parse(event.data);
-              if (data.type === 'status') {
-                handleStatusMessage(data);
-              }
+              if (data.type === 'status') handleStatusMessage(data);
+              else if (data.type === 'hud') handleHudMessage(data);
             } else {
-              // It's a video frame (base64 string)
               handleVideoFrame(event.data);
             }
           } catch (e) {
@@ -250,19 +239,23 @@ export const useWebSocketConnection = ({
       }
     };
 
-    setupWebSocket();
+    openWebSocket();
+
+    // Listen for explicit auth change events to rebuild WS with new token/tenant
+    const onAuthChanged = () => setAuthVersion((v) => v + 1);
+    window.addEventListener('auth-changed', onAuthChanged);
 
     return () => {
       isUnmounted = true;
-      connectionEstablishedRef.current = false; // Reset connection state
-      globalWebSocketInitialized = false; // Reset global flag
+      window.removeEventListener('auth-changed', onAuthChanged);
       if (wsRef.current) {
-        wsRef.current.close();
+        try { wsRef.current.close(); } catch (_) {}
         logger.info('WebSocket connection closed by component unmount');
       }
     };
+    // Recreate socket when authVersion changes (login/logout/tenant switch)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleStatusMessage, handleVideoFrame, setStatus]); // Empty dependency array - only run once on mount
+  }, [handleStatusMessage, handleVideoFrame, setStatus, authVersion, setHudData]);
 
   return { wsRef };
 }; 
