@@ -215,7 +215,13 @@ class SimulationMetrics:
 
     def generate_html_report(self, scenario_results, start_time, end_time):
         """Generate a pytest-html style HTML report for multiple scenarios in the reports directory at the project root."""
+        # Do not generate empty reports
+        if not scenario_results or len(scenario_results) == 0:
+            return
         import platform
+        from carla_simulator.database.config import SessionLocal
+        from carla_simulator.database.models import SimulationReport
+        import os
 
         total = len(scenario_results)
         passed = sum(1 for s in scenario_results if s["result"].lower() == "passed")
@@ -309,16 +315,39 @@ class SimulationMetrics:
         </body>
         </html>
         """
-        # Save to 'reports' directory at project root
-        reports_dir = Path(__file__).parent.parent.parent / "reports"
-        reports_dir.mkdir(exist_ok=True)
-        report_path = (
-            reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
-        )
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        if self.logger:
-            self.logger.info(f"HTML report generated: {report_path}")
+        # Save report only when explicitly enabled via env
+        if os.getenv("ENABLE_FILE_REPORTS", "false").lower() == "true":
+            reports_dir = Path(__file__).parent.parent.parent / "reports"
+            reports_dir.mkdir(exist_ok=True)
+            report_path = (
+                reports_dir / f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html"
+            )
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            if self.logger:
+                self.logger.info(f"HTML report generated: {report_path}")
+
+        # Also store report in DB if tenant context is present (prefer request-scoped)
+        try:
+            from carla_simulator.utils.logging import CURRENT_TENANT_ID
+            tenant_ctx = None
+            try:
+                tenant_ctx = CURRENT_TENANT_ID.get()
+            except Exception:
+                tenant_ctx = None
+            tenant_id = tenant_ctx
+            if tenant_id is None:
+                tenant_env = os.environ.get("CONFIG_TENANT_ID")
+                if tenant_env:
+                    tenant_id = int(tenant_env)
+            if tenant_id is not None:
+                report_name = (locals().get('report_path').name if 'report_path' in locals() else f"simulation_report_{end_time.strftime('%Y%m%d_%H%M%S')}.html")
+                from carla_simulator.database.db_manager import DatabaseManager
+                dbm = DatabaseManager()
+                SimulationReport.create(dbm, name=report_name, html=html_content, tenant_id=int(tenant_id))
+        except Exception:
+            # Don't fail simulation if report DB save fails
+            pass
             # self.logger.info(f"Report directory: {reports_dir.absolute()}")
 
 
@@ -354,15 +383,18 @@ class SimulationConfig:
         self.scenario_config = self._main_config.scenarios
 
     def _load_config(self, config_path: str, scenario: str = None) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+        """Load configuration, preferring DB when CONFIG_TENANT_ID is set; fallback to YAML."""
         try:
+            from carla_simulator.utils.config import _load_config_dict
+
+            # Resolve relative path to absolute for YAML fallback resolution
             if not os.path.isabs(config_path):
                 config_path = os.path.join(
                     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                     config_path,
                 )
-            with open(config_path, "r") as f:
-                config = yaml.safe_load(f) or {}
+
+            config = _load_config_dict(config_path) or {}
 
             # Use scenario from argument
             if scenario:
@@ -370,7 +402,7 @@ class SimulationConfig:
 
             return config
         except Exception as e:
-            raise RuntimeError(f"Failed to load config file {config_path}: {str(e)}")
+            raise RuntimeError(f"Failed to load config: {str(e)}")
 
     def _create_server_config(self) -> ServerConfig:
         """Create ServerConfig object from configuration"""
@@ -390,17 +422,63 @@ class SimulationConfig:
         world = self.config.get("world")
         if not world:
             raise ValueError("Missing required 'world' configuration section")
+        # Sanitize unknown keys (e.g., 'walkers') and nested extras to match dataclass
+        allowed_world_keys = {
+            "map",
+            "weather",
+            "physics",
+            "traffic",
+            "fixed_delta_seconds",
+            "target_distance",
+            "num_vehicles",
+            "enable_collision",
+            "synchronous_mode",
+        }
+        world_filtered = {k: v for k, v in world.items() if k in allowed_world_keys}
+
+        # Filter nested blocks
+        weather_block = world_filtered.get("weather", world.get("weather", {})) or {}
+        physics_block = world_filtered.get("physics", world.get("physics", {})) or {}
+        traffic_block = world_filtered.get("traffic", world.get("traffic", {})) or {}
+
+        if isinstance(weather_block, dict):
+            allowed_weather_keys = {
+                "cloudiness",
+                "precipitation",
+                "precipitation_deposits",
+                "sun_altitude_angle",
+                "sun_azimuth_angle",
+                "wind_intensity",
+                "fog_density",
+                "fog_distance",
+                "fog_falloff",
+                "wetness",
+            }
+            weather_block = {k: v for k, v in weather_block.items() if k in allowed_weather_keys}
+
+        if isinstance(physics_block, dict):
+            allowed_physics_keys = {"max_substep_delta_time", "max_substeps"}
+            physics_block = {k: v for k, v in physics_block.items() if k in allowed_physics_keys}
+
+        if isinstance(traffic_block, dict):
+            allowed_traffic_keys = {
+                "distance_to_leading_vehicle",
+                "speed_difference_percentage",
+                "ignore_lights_percentage",
+                "ignore_signs_percentage",
+            }
+            traffic_block = {k: v for k, v in traffic_block.items() if k in allowed_traffic_keys}
 
         return WorldConfig(
-            map=world["map"],
-            weather=world.get("weather", {}),
-            physics=world.get("physics", {}),
-            traffic=world.get("traffic", {}),
-            fixed_delta_seconds=world["fixed_delta_seconds"],
-            target_distance=world["target_distance"],
-            num_vehicles=world["num_vehicles"],
-            enable_collision=world["enable_collision"],
-            synchronous_mode=world["synchronous_mode"],
+            map=world_filtered["map"],
+            weather=weather_block,
+            physics=physics_block,
+            traffic=traffic_block,
+            fixed_delta_seconds=world_filtered["fixed_delta_seconds"],
+            target_distance=world_filtered["target_distance"],
+            num_vehicles=world_filtered["num_vehicles"],
+            enable_collision=world_filtered["enable_collision"],
+            synchronous_mode=world_filtered["synchronous_mode"],
         )
 
     def _create_simulation_config(self) -> SimConfig:
@@ -427,10 +505,7 @@ class SimulationConfig:
             raise ValueError("Missing required 'logging' configuration section")
 
         return LoggingConfig(
-            simulation_file=logging["simulation_file"],
-            operations_file=logging["operations_file"],
             log_level=logging["log_level"],
-            format=logging.get("format", {}),
             enabled=logging["enabled"],
             directory=logging["directory"],
         )

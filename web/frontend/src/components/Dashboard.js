@@ -23,6 +23,7 @@ import { useWebSocketConnection } from '../hooks/useWebSocketConnection';
 import { useSimulationState } from '../hooks/useSimulationState';
 import { useScenarioSelection } from '../hooks/useScenarioSelection';
 import { getInstructionMessage } from '../utils/uiHelpers';
+import { useAuth } from '../contexts/AuthContext';
 
 // Memoized style computations for better performance
 const computeButtonStates = ({
@@ -397,15 +398,48 @@ const ControlPanel = React.memo(({
 });
 
 // Memoized Simulation View Component
-const SimulationView = React.memo(({
+const SimulationView = React.memo(({ 
   canvasRef,
   canvasStyle,
   overlayStyle,
   loadingImageStyle,
   error,
   status,
-  instructionMessage
+  instructionMessage,
+  hudData,
+  hudEnabled = true,
+  hasReceivedFrame
 }) => {
+  const renderHud = () => {
+    // Only show HUD if we have data AND we're actively receiving frames
+    // This prevents showing stale HUD data when simulation is stopped
+    if (!hudEnabled || !hudData || !hasReceivedFrame) return null;
+    
+    const { speedKmh, gear, controlType, scenarioName, fps } = hudData;
+    return (
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          background: 'rgba(0,0,0,0.5)',
+          color: '#fff',
+          p: 1,
+          borderRadius: '6px',
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          zIndex: 3,
+          minWidth: 220
+        }}
+      >
+        <div>Scenario: {scenarioName || 'N/A'}</div>
+        <div>Speed: {Number(speedKmh || 0).toFixed(1)} km/h</div>
+        <div>Control: {controlType || 'Autopilot'}</div>
+        <div>Gear: {gear ?? 1}</div>
+        {typeof fps === 'number' && <div>FPS: {fps.toFixed(1)}</div>}
+      </Box>
+    );
+  };
   return (
         <Box
           sx={{
@@ -430,6 +464,7 @@ const SimulationView = React.memo(({
             ref={canvasRef}
         style={canvasStyle}
       />
+      {renderHud()}
       <Box sx={overlayStyle}>
             <img
               src="/wavy_logo_loading.gif"
@@ -498,8 +533,10 @@ const LoadingSpinner = React.memo(() => (
 ));
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
+  const { isAdmin } = useAuth();
   const [debug, setDebug] = useState(false);
   const [report, setReport] = useState(false);
+  const [hudData, setHudData] = useState(null);
   const canvasRef = useRef(null);
   
   // Use existing hooks for state management
@@ -542,6 +579,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setIsRunning,
     setIsPaused,
     setBackendState,
+    setHudData,
     setHasReceivedFrame,
     setIsStarting,
     setIsStopping,
@@ -673,6 +711,32 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         margin: 0,
         padding: 0
       }}>
+        {isAdmin && (
+          <Box sx={{ position: 'absolute', top: 8, right: 12, zIndex: 2 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={async () => {
+                try {
+                  const token = sessionStorage.getItem('access_token');
+                  const res = await fetch('/api/admin/seed-default-config', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': token ? `Bearer ${token}` : ''
+                    }
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data?.detail || 'Failed');
+                  alert(`Seeded defaults for tenant ${data.tenant_id}`);
+                } catch (e) {
+                  alert(`Seeding failed: ${e.message || e}`);
+                }
+              }}
+            >
+              Seed Default Config
+            </Button>
+          </Box>
+        )}
         <ControlPanel
           scenarios={scenarios}
           selectedScenarios={selectedScenarios}
@@ -702,6 +766,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           canvasStyle={canvasStyle}
           overlayStyle={overlayStyle}
           loadingImageStyle={loadingImageStyle}
+          hudData={hudData}
+          hasReceivedFrame={hasReceivedFrame}
           error={error}
           status={status}
           instructionMessage={instructionMessage}

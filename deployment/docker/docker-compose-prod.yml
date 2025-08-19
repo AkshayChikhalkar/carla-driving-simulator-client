@@ -15,16 +15,40 @@ services:
     environment:
       - PYTHONPATH=/app
       - REACT_APP_API_URL=http://localhost:8000
-      - DATABASE_URL=postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator
+      # Database URL can be provided directly or via parts below
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@193.16.126.186:5432/carla_simulator}
+      - DB_HOST=${DB_HOST:-193.16.126.186}
+      - DB_HOSTIP=${DB_HOSTIP:-}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-carla_simulator}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      # Tenant context (prefer header/JWT; env is fallback for background threads)
+      - CONFIG_TENANT_ID=${CONFIG_TENANT_ID:-}
+      # Auth and CORS
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-insecure-change-me}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-24}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      # File logging and reports toggles (off by default)
+      - WEB_FILE_LOGS_ENABLED=${WEB_FILE_LOGS_ENABLED:-false}
+      - ENABLE_FILE_REPORTS=${ENABLE_FILE_REPORTS:-false}
       - NVIDIA_VISIBLE_DEVICES=all
       - DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-1.0.0}
       - VERSION=${VERSION:-1.0.0}
       - BUILD_TIME=${BUILD_TIME:-2025-07-14T19:52:37Z}
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
+      - CARLA_POOL_MODE=static
+      - CARLA_STATIC_ENDPOINTS=carla-server-1:2000,carla-server-2:2000,carla-server-3:2000,carla-server-4:2000
+      - CARLA_MAX_USERS=10
+      - CARLA_KEEP_WARM=1
+      - CARLA_IDLE_STOP_SECONDS=600
+      - SDL_VIDEODRIVER=dummy
+      - SDL_AUDIODRIVER=dummy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 30s
       retries: 3
@@ -44,7 +68,7 @@ services:
       - ../../reports:/app/reports
       - ../../config:/app/config
     depends_on:
-      carla-server:
+      carla-server-1:
         condition: service_healthy
     networks:
       - carla-network
@@ -54,13 +78,9 @@ services:
         max-size: "100m"
         max-file: "5"
 
-  carla-server:
+  carla-server-1:
     image: carlasim/carla:0.10.0
-    container_name: carla-server
-    privileged: true
     runtime: nvidia
-    ports:
-      - "2000-2002:2000-2002"
     shm_size: "32g"
     ipc: host
     ulimits:
@@ -71,14 +91,108 @@ services:
         soft: 67108864
         hard: 67108864
     command: >
-      ./CarlaUnreal.sh
-      -RenderOffScreen
-      -quality-level=High
-      -fps=60
-      -ResX=1920 -ResY=1080
-      -opengl
+      ./CarlaUnreal.sh -RenderOffScreen -quality-level=High -fps=60 -ResX=1920 -ResY=1080 -opengl
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - carla-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "3"
+
+  carla-server-2:
+    image: carlasim/carla:0.10.0
+    runtime: nvidia
+    shm_size: "32g"
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    command: >
+      ./CarlaUnreal.sh -RenderOffScreen -quality-level=High -fps=60 -ResX=1920 -ResY=1080 -opengl
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - carla-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "3"
+
+  carla-server-3:
+    image: carlasim/carla:0.10.0
+    runtime: nvidia
+    shm_size: "32g"
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    command: >
+      ./CarlaUnreal.sh -RenderOffScreen -quality-level=High -fps=60 -ResX=1920 -ResY=1080 -opengl
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "CarlaUnreal"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - carla-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "3"
+
+  carla-server-4:
+    image: carlasim/carla:0.10.0
+    runtime: nvidia
+    shm_size: "32g"
+    ipc: host
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    command: >
+      ./CarlaUnreal.sh -RenderOffScreen -quality-level=High -fps=60 -ResX=1920 -ResY=1080 -opengl
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=3
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
     healthcheck:
       test: ["CMD", "pgrep", "-f", "CarlaUnreal"]

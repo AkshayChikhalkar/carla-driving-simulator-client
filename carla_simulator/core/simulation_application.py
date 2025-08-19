@@ -16,7 +16,7 @@ from carla_simulator.core.interfaces import (
 )
 from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
 from carla_simulator.utils.config import LoggingConfig
-from carla_simulator.visualization.display_manager import DisplayManager, VehicleState
+# Lazy-import DisplayManager/VehicleState to avoid pygame initialization at app startup
 import threading
 from carla_simulator.database.config import SessionLocal
 from carla_simulator.database.models import Scenario, VehicleData, SensorData
@@ -28,7 +28,6 @@ class SimulationApplication:
 
     # Class-level cleanup tracking
     cleanup_lock = threading.Lock()
-    is_cleanup_complete = False
 
     def __init__(self, config_path: str, scenario: str, session_id, logger: ILogger):
         # Initialize configuration
@@ -49,16 +48,22 @@ class SimulationApplication:
         self.vehicle_controller: Optional[IVehicleController] = None
         self.sensor_manager: Optional[ISensorManager] = None
         self.current_scenario: Optional[IScenario] = None
-        self.display_manager: Optional[DisplayManager] = None
+        self.display_manager = None  # type: ignore[assignment]
 
         # Add results cache
         self._cleanup_results = None
         self._cleanup_results_lock = threading.Lock()
+        # HUD snapshot shared with websocket
+        self._hud_payload = None
+        self._hud_lock = threading.Lock()
 
         # Require session_id to be provided
         if session_id is None:
             raise ValueError("session_id must be provided by SimulationRunner.")
         self.session_id = session_id
+
+        # Instance-level cleanup tracking (not shared across instances)
+        self.is_cleanup_complete = False
 
         # Do not connect here; connect only in setup()
 
@@ -117,9 +122,9 @@ class SimulationApplication:
         # Initialize display manager
         self.logger.debug("[SimulationApplication] Initializing display manager...")
         is_web_mode = getattr(self._config, "web_mode", False)
-        self.display_manager = DisplayManager(
-            self._config.display_config, web_mode=is_web_mode
-        )
+        # Import here to ensure SDL envs are set beforehand
+        from carla_simulator.visualization.display_manager import DisplayManager
+        self.display_manager = DisplayManager(self._config.display_config, web_mode=is_web_mode)
         self.logger.debug("[SimulationApplication] Display manager initialized")
 
         # Attach camera view to sensor manager
@@ -216,7 +221,8 @@ class SimulationApplication:
             self.logger.warning(f"Error setting up scenario: {str(e)}")
             # Ensure current_scenario is None if setup fails
             self.current_scenario = None
-            # raise RuntimeError(f"Failed to setup scenario: {str(e)}")
+            # Propagate failure so HTTP start returns 500 and UI doesn't show success
+            raise RuntimeError(f"Failed to setup scenario: {str(e)}")
 
     def run(self) -> None:
         """Run the simulation loop"""
@@ -258,13 +264,18 @@ class SimulationApplication:
             world = self.connection.client.get_world()
             frame_count = 0
             
+            # Determine if we are in web mode to adjust workload (DB writes, rendering)
+            is_web_mode = getattr(self._config, "web_mode", False)
+            # Throttle DB writes to once per second (time-based, independent of FPS)
+            last_db_write_ts = time.time()
+
             while self.state.is_running and not self.current_scenario.is_completed():
                 frame_count += 1
                 loop_start = time.time()
 
-                # Debug: Log every 30 frames to track progress
-                if frame_count % 30 == 0:
-                    self.logger.debug(f"Simulation frame {frame_count}: is_running={self.state.is_running}, scenario_completed={self.current_scenario.is_completed()}")
+                # # Debug: Log every 30 frames to track progress
+                # if frame_count % 30 == 0:
+                #     self.logger.debug(f"Simulation frame {frame_count}: is_running={self.state.is_running}, scenario_completed={self.current_scenario.is_completed()}")
 
                 if self.state.is_paused:
                     time.sleep(0.1)
@@ -307,54 +318,76 @@ class SimulationApplication:
                     self.logger.error(f"Error getting vehicle state: {str(e)}")
                     continue
 
-                # --- DB: Write vehicle data ---
+                # --- DB: Write vehicle and sensor data (once per second) ---
                 try:
-                    db = SessionLocal()
-                    db.add(
-                        VehicleData(
-                            scenario_id=scenario_id,
-                            session_id=self.session_id,
-                            timestamp=datetime.utcnow(),
-                            position_x=vehicle_state["location"].x,
-                            position_y=vehicle_state["location"].y,
-                            position_z=vehicle_state["location"].z,
-                            velocity=vehicle_state["velocity"].length(),
-                            acceleration=vehicle_state["acceleration"].length(),
-                            steering_angle=vehicle_state["transform"].rotation.yaw,
-                            throttle=getattr(vehicle, "throttle", 0.0),
-                            brake=getattr(vehicle, "brake", 0.0),
-                        )
-                    )
-                    db.commit()
-                    db.close()
-                except Exception as e:
-                    self.logger.error(f"Error writing vehicle data to DB: {str(e)}")
-                # --- End DB vehicle data ---
-
-                # --- DB: Write sensor data ---
-                try:
-                    db = SessionLocal()
-                    for sensor_type, sdata in (
-                        sensor_data.items() if isinstance(sensor_data, dict) else []
-                    ):
-                        db.add(
-                            SensorData(
-                                scenario_id=scenario_id,
-                                session_id=self.session_id,
-                                timestamp=datetime.utcnow(),
-                                sensor_type=sensor_type,
-                                data=sdata,
+                    now_ts = time.time()
+                    if (now_ts - last_db_write_ts) >= 1.0:
+                        db = SessionLocal()
+                        try:
+                            db.add(
+                                VehicleData(
+                                    scenario_id=scenario_id,
+                                    session_id=self.session_id,
+                                    timestamp=datetime.utcnow(),
+                                    position_x=vehicle_state["location"].x,
+                                    position_y=vehicle_state["location"].y,
+                                    position_z=vehicle_state["location"].z,
+                                    velocity=vehicle_state["velocity"].length(),
+                                    acceleration=vehicle_state["acceleration"].length(),
+                                    steering_angle=vehicle_state["transform"].rotation.yaw,
+                                    throttle=getattr(vehicle, "throttle", 0.0),
+                                    brake=getattr(vehicle, "brake", 0.0),
+                                )
                             )
-                        )
-                    db.commit()
-                    db.close()
+                            # Write latest sensor data snapshot in same transaction
+                            for sensor_type, sdata in (
+                                sensor_data.items() if isinstance(sensor_data, dict) else []
+                            ):
+                                db.add(
+                                    SensorData(
+                                        scenario_id=scenario_id,
+                                        session_id=self.session_id,
+                                        timestamp=datetime.utcnow(),
+                                        sensor_type=sensor_type,
+                                        data=sdata,
+                                    )
+                                )
+                            db.commit()
+                            last_db_write_ts = now_ts
+                        finally:
+                            db.close()
                 except Exception as e:
-                    self.logger.error(f"Error writing sensor data to DB: {str(e)}")
-                # --- End DB sensor data ---
+                    self.logger.error(f"Error writing data to DB (1 Hz): {str(e)}")
+                # --- End DB write ---
+
+                # (Sensor data write moved above into the 1 Hz combined write)
 
                 try:
-                    # Update scenario
+                    # Update scenario and autopilot movement
                     self.current_scenario.update()
+                    # Nudge traffic manager each tick to ensure autopilot moves
+                    try:
+                        vc = self.vehicle_controller
+                        if vc and hasattr(vc, "_strategy") and vc._strategy:
+                            # Ensure autopilot strategy sync
+                            if hasattr(vc._strategy, "process_input"):
+                                vc._strategy.process_input()
+                    except Exception:
+                        pass
+                    # Update HUD snapshot (best-effort)
+                    try:
+                        ctrl = vehicle.get_control()
+                        payload = {
+                            "scenarioName": getattr(self.current_scenario, "name", "Unknown"),
+                            "speedKmh": float(vehicle_state["velocity"].length() * 3.6) if isinstance(vehicle_state.get("velocity"), carla.Vector3D) else 0.0,
+                            "gear": int(getattr(ctrl, "gear", 1)),
+                            "controlType": "Autopilot",
+                            "fps": float(self.metrics.metrics.get("fps", 0.0)) if self.metrics else 0.0,
+                        }
+                        with self._hud_lock:
+                            self._hud_payload = payload
+                    except Exception:
+                        pass
                 except Exception as e:
                     self.logger.error("Exception in scenario update", exc_info=e)
 
@@ -373,7 +406,8 @@ class SimulationApplication:
 
                 try:
                     # Render display
-                    if self.display_manager:
+                    if self.display_manager and self.state.is_running:
+                        from carla_simulator.visualization.display_manager import VehicleState
                         display_state = VehicleState(
                             speed=vehicle_state["velocity"].length(),
                             position=(
@@ -543,9 +577,7 @@ class SimulationApplication:
                     # Add a small delay to ensure actors are destroyed
                     time.sleep(0.5)
                     
-                    # Force cleanup as fallback to ensure all actors are destroyed
-                    if hasattr(self.world_manager, 'force_cleanup_all_actors'):
-                        self.world_manager.force_cleanup_all_actors()
+                    # Avoid calling force_cleanup_all_actors to prevent native crashes in libcarla
                 except Exception as e:
                     self.logger.error(f"Error cleaning up world manager: {str(e)}")
 
@@ -607,6 +639,14 @@ class SimulationApplication:
             if self._cleanup_results is None:
                 return False, False
             return self._cleanup_results
+
+    def get_hud_payload(self) -> Optional[dict]:
+        """Get the latest HUD payload (thread-safe)."""
+        try:
+            with self._hud_lock:
+                return dict(self._hud_payload) if isinstance(self._hud_payload, dict) else None
+        except Exception:
+            return None
 
     @property
     def logging_config(self):

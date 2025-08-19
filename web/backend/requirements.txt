@@ -27,6 +27,9 @@ PyJWT>=2.8.0
 # Monitoring
 prometheus-client>=0.17.0
 
+# Validation
+jsonschema>=4.17.3
+
 # Testing
 pytest>=6.0.0
 pytest-asyncio>=0.21.0

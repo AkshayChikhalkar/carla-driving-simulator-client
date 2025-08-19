@@ -6,6 +6,17 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
 import yaml
 import os
+import json
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge override into base and return a new dict."""
+    result = dict(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
 
 
 @dataclass
@@ -179,18 +190,13 @@ class SimulationConfig:
 class LoggingConfig:
     """Logging configuration parameters"""
 
-    simulation_file: str
-    operations_file: str
     log_level: str
-    format: Dict[str, str]
     enabled: bool = True
     directory: str = "logs"
 
     def __post_init__(self):
-        """Ensure log files are in the configured directory"""
-        if self.directory:
-            self.simulation_file = os.path.join(self.directory, self.simulation_file)
-            self.operations_file = os.path.join(self.directory, self.operations_file)
+        # No file paths to normalize anymore
+        pass
 
 
 @dataclass
@@ -352,10 +358,140 @@ class Config:
     web_mode: bool = False
 
 
+def _load_config_dict(config_path: str) -> Dict[str, Any]:
+    """Load config strictly from DB for the current tenant (no file fallback).
+
+    Resolution order for tenant id:
+    1) Request-scoped ContextVar (CURRENT_TENANT_ID)
+    2) CONFIG_TENANT_ID environment variable (legacy)
+
+    If no tenant id is available or no active config is found in DB, raise a RuntimeError.
+    """
+    # Resolve tenant id from request-scoped context first
+    tenant_id: Optional[int] = None
+    try:
+        from carla_simulator.utils.logging import CURRENT_TENANT_ID  # lazy import to avoid cycles
+        ctx_tid = CURRENT_TENANT_ID.get()
+        if ctx_tid is not None:
+            tenant_id = int(ctx_tid)
+    except Exception:
+        tenant_id = tenant_id
+
+    # Fallback to env var if context not present
+    if tenant_id is None:
+        env_tid = os.environ.get("CONFIG_TENANT_ID")
+        if env_tid is not None:
+            try:
+                tenant_id = int(env_tid)
+            except ValueError:
+                tenant_id = None
+
+    if tenant_id is None:
+        raise RuntimeError("Tenant context required to load configuration from DB (no file fallback)")
+
+    # Load strictly from DB for this tenant, with fallback to global default
+    from carla_simulator.database.db_manager import DatabaseManager
+    from carla_simulator.database.models import TenantConfig
+
+    db = DatabaseManager()
+    config_from_db = TenantConfig.get_active_config(db, int(tenant_id))
+    if not config_from_db:
+        # Fallback to global-default tenant by slug, or to metadata if not present
+        try:
+            # Resolve global-default tenant id
+            default_tid = None
+            try:
+                tenant_row = Tenant.get_by_slug(db, "global-default")  # type: ignore
+                if tenant_row:
+                    default_tid = int(tenant_row["id"]) if isinstance(tenant_row, dict) else None
+            except Exception:
+                default_tid = None
+            default_cfg = None
+            if default_tid is not None:
+                default_cfg = TenantConfig.get_active_config(db, default_tid)
+            if not default_cfg:
+                # Fallback to metadata
+                from carla_simulator.database.db_manager import DatabaseManager as _DBM
+                md = _DBM()
+                default_cfg = md.get_carla_metadata("simulation_defaults")
+        except Exception:
+            default_cfg = None
+        if not isinstance(default_cfg, dict) or len(default_cfg) == 0:
+            raise RuntimeError(
+                f"No active configuration found for tenant {tenant_id} and no global default present"
+            )
+        # Seed this tenant with the default config so subsequent loads are fast
+        try:
+            TenantConfig.upsert_active_config(db, int(tenant_id), default_cfg)
+        except Exception:
+            pass
+        return default_cfg
+
+    return config_from_db
+
+
 def load_config(config_path: str) -> Config:
-    """Load configuration from YAML file"""
-    with open(config_path, "r") as f:
-        config_dict = yaml.safe_load(f)
+    """Load configuration, with optional multi-tenant DB source."""
+    config_dict = _load_config_dict(config_path)
+
+    # Sanitize logging block to accept only supported keys
+    logging_block = config_dict.get("logging", {}) or {}
+    allowed_logging_keys = {"log_level", "enabled", "directory"}
+    logging_filtered = {k: v for k, v in logging_block.items() if k in allowed_logging_keys}
+
+    # Sanitize world block to drop unknown keys (e.g., 'walkers') and nested extras
+    world_block = config_dict.get("world", {}) or {}
+    allowed_world_keys = {
+        "map",
+        "weather",
+        "physics",
+        "traffic",
+        "fixed_delta_seconds",
+        "target_distance",
+        "num_vehicles",
+        "enable_collision",
+        "synchronous_mode",
+    }
+    # Filter nested weather/physics/traffic to their known fields
+    weather_block = (world_block.get("weather") or {}) if isinstance(world_block.get("weather"), dict) else world_block.get("weather")
+    physics_block = (world_block.get("physics") or {}) if isinstance(world_block.get("physics"), dict) else world_block.get("physics")
+    traffic_block = (world_block.get("traffic") or {}) if isinstance(world_block.get("traffic"), dict) else world_block.get("traffic")
+
+    if isinstance(weather_block, dict):
+        allowed_weather_keys = {
+            "cloudiness",
+            "precipitation",
+            "precipitation_deposits",
+            "sun_altitude_angle",
+            "sun_azimuth_angle",
+            "wind_intensity",
+            "fog_density",
+            "fog_distance",
+            "fog_falloff",
+            "wetness",
+        }
+        weather_block = {k: v for k, v in weather_block.items() if k in allowed_weather_keys}
+
+    if isinstance(physics_block, dict):
+        allowed_physics_keys = {"max_substep_delta_time", "max_substeps"}
+        physics_block = {k: v for k, v in physics_block.items() if k in allowed_physics_keys}
+
+    if isinstance(traffic_block, dict):
+        allowed_traffic_keys = {
+            "distance_to_leading_vehicle",
+            "speed_difference_percentage",
+            "ignore_lights_percentage",
+            "ignore_signs_percentage",
+        }
+        traffic_block = {k: v for k, v in traffic_block.items() if k in allowed_traffic_keys}
+
+    world_filtered = {k: v for k, v in world_block.items() if k in allowed_world_keys}
+    if isinstance(weather_block, dict) or weather_block is not None:
+        world_filtered["weather"] = weather_block
+    if isinstance(physics_block, dict) or physics_block is not None:
+        world_filtered["physics"] = physics_block
+    if isinstance(traffic_block, dict) or traffic_block is not None:
+        world_filtered["traffic"] = traffic_block
 
     config = Config(
         server=ServerConfig(
@@ -364,9 +500,9 @@ def load_config(config_path: str) -> Config:
             timeout=config_dict["server"]["timeout"],
             connection=ConnectionConfig(**config_dict["server"]["connection"]),
         ),
-        world=WorldConfig(**config_dict["world"]),
+        world=WorldConfig(**world_filtered),
         simulation=SimulationConfig(**config_dict["simulation"]),
-        logging=LoggingConfig(**config_dict["logging"]),
+        logging=LoggingConfig(**logging_filtered),
         display=DisplayConfig(**config_dict["display"]),
         sensors=SensorConfig(
             camera=CameraConfig(**config_dict["sensors"]["camera"]),
@@ -392,7 +528,7 @@ def load_config(config_path: str) -> Config:
 
 
 def save_config(config: Config, config_path: str) -> None:
-    """Save configuration to YAML file"""
+    """Save configuration to file (JSON when path ends with .json, otherwise YAML)."""
     config_dict = {
         "server": {
             "host": config.server.host,
@@ -445,10 +581,7 @@ def save_config(config: Config, config_path: str) -> None:
             "max_collision_force": config.simulation.max_collision_force,
         },
         "logging": {
-            "simulation_file": config.logging.simulation_file,
-            "operations_file": config.logging.operations_file,
             "log_level": config.logging.log_level,
-            "format": config.logging.format,
             "enabled": config.logging.enabled,
             "directory": config.logging.directory,
         },
@@ -549,8 +682,11 @@ def save_config(config: Config, config_path: str) -> None:
         "web_mode": config.web_mode,
     }
 
-    with open(config_path, "w") as f:
-        yaml.dump(config_dict, f, default_flow_style=False)
+    with open(config_path, "w", encoding="utf-8") as f:
+        if config_path.lower().endswith(".json"):
+            json.dump(config_dict, f, indent=2)
+        else:
+            yaml.dump(config_dict, f, default_flow_style=False)
 
 
 class ConfigLoader:

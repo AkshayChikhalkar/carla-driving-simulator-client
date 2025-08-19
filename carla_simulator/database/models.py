@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List
 from .config import Base
 from .db_manager import DatabaseManager
 from carla_simulator.metrics import SimulationMetricsData
+from psycopg2.extras import Json
 
 
 def log_error(message: str, error: Exception) -> None:
@@ -28,6 +29,193 @@ def log_error(message: str, error: Exception) -> None:
 
     Logger().error(f"{message}: {error}")
 
+
+class Tenant(Base):
+    """Tenant model for multi-tenant separation"""
+
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(150), unique=True, nullable=False)
+    slug = Column(String(150), unique=True, nullable=False, index=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def get_by_slug(cls, db: DatabaseManager, slug: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = db.execute_query("SELECT * FROM tenants WHERE slug = %(slug)s", {"slug": slug})
+            return res[0] if res else None
+        except Exception as e:
+            log_error("Error fetching tenant by slug", e)
+            return None
+
+    @classmethod
+    def create_if_not_exists(cls, db: DatabaseManager, name: str, slug: str, is_active: bool = True) -> Optional[Dict[str, Any]]:
+        try:
+            existing = cls.get_by_slug(db, slug)
+            if existing:
+                return existing
+            res = db.execute_query(
+                """
+                INSERT INTO tenants (name, slug, is_active)
+                VALUES (%(name)s, %(slug)s, %(is_active)s)
+                RETURNING *
+                """,
+                {"name": name, "slug": slug, "is_active": is_active},
+            )
+            return res[0] if res else None
+        except Exception as e:
+            log_error("Error creating tenant", e)
+            return None
+
+
+class TenantConfig(Base):
+    """Stores a versioned JSON configuration blob per tenant"""
+
+    __tablename__ = "tenant_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    config = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def get_active_config(cls, db: DatabaseManager, tenant_id: int) -> Optional[Dict[str, Any]]:
+        """Return the active config JSON for a tenant as a dict."""
+        try:
+            query = """
+                SELECT config FROM tenant_configs
+                WHERE tenant_id = %(tenant_id)s AND is_active = TRUE
+                ORDER BY version DESC, created_at DESC
+                LIMIT 1
+            """
+            result = db.execute_query(query, {"tenant_id": tenant_id})
+            return result[0]["config"] if result else None
+        except Exception as e:
+            log_error("Error fetching active tenant config", e)
+            return None
+
+    @classmethod
+    def upsert_active_config(cls, db: DatabaseManager, tenant_id: int, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Deactivate current active config and insert new active config with incremented version."""
+        try:
+            # Get current version
+            get_version_q = """
+                SELECT COALESCE(MAX(version), 0) AS v
+                FROM tenant_configs WHERE tenant_id = %(tenant_id)s
+            """
+            version_row = db.execute_query(get_version_q, {"tenant_id": tenant_id})
+            next_version = (version_row[0]["v"] if version_row else 0) + 1
+
+            queries = [
+                ("UPDATE tenant_configs SET is_active = FALSE WHERE tenant_id = %(tenant_id)s AND is_active = TRUE",
+                 {"tenant_id": tenant_id}),
+                ("""
+                    INSERT INTO tenant_configs (tenant_id, version, is_active, config)
+                    VALUES (%(tenant_id)s, %(version)s, TRUE, %(config)s)
+                """,
+                 {"tenant_id": tenant_id, "version": next_version, "config": Json(config)}),
+            ]
+            db.execute_transaction(queries)
+            return {"tenant_id": tenant_id, "version": next_version, "config": config}
+        except Exception as e:
+            log_error("Error upserting tenant config", e)
+            return None
+
+
+class CarlaMetadata(Base):
+    """Stores CARLA catalogs/metadata (maps, blueprints, etc.) per version"""
+
+    __tablename__ = "carla_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(String(32), nullable=False, unique=True, index=True)
+    data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def get_by_version(cls, db: DatabaseManager, version: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = db.execute_query(
+                "SELECT version, data, created_at, updated_at FROM carla_metadata WHERE version = %(v)s",
+                {"v": version},
+            )
+            return res[0] if res else None
+        except Exception as e:
+            log_error("Error fetching CARLA metadata", e)
+            return None
+
+    @classmethod
+    def upsert(cls, db: DatabaseManager, version: str, data: Dict[str, Any]) -> bool:
+        try:
+            queries = [
+                ("DELETE FROM carla_metadata WHERE version = %(v)s", {"v": version}),
+                ("""
+                    INSERT INTO carla_metadata (version, data, created_at, updated_at)
+                    VALUES (%(v)s, %(data)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, {"v": version, "data": Json(data)}),
+            ]
+            db.execute_transaction(queries)
+            return True
+        except Exception as e:
+            log_error("Error upserting CARLA metadata", e)
+            return False
+
+class AppLog(Base):
+    """Application logs stored per tenant"""
+
+    __tablename__ = "app_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
+    level = Column(String(20), nullable=False)
+    message = Column(String, nullable=False)
+    extra = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def write(cls, db: DatabaseManager, level: str, message: str, tenant_id: Optional[int] = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        try:
+            query = """
+                INSERT INTO app_logs (tenant_id, level, message, extra)
+                VALUES (%(tenant_id)s, %(level)s, %(message)s, %(extra)s)
+            """
+            params = {"tenant_id": tenant_id, "level": level, "message": message, "extra": Json(extra) if isinstance(extra, dict) else extra}
+            db.execute_query(query, params)
+            return True
+        except Exception as e:
+            log_error("Error writing app log", e)
+            return False
+
+
+class SimulationReport(Base):
+    """Stores generated HTML reports per tenant"""
+
+    __tablename__ = "simulation_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    html = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @classmethod
+    def create(cls, db: DatabaseManager, name: str, html: str, tenant_id: Optional[int] = None) -> Optional[int]:
+        try:
+            query = """
+                INSERT INTO simulation_reports (tenant_id, name, html)
+                VALUES (%(tenant_id)s, %(name)s, %(html)s)
+                RETURNING id
+            """
+            res = db.execute_query(query, {"tenant_id": tenant_id, "name": name, "html": html})
+            return res[0]["id"] if res else None
+        except Exception as e:
+            log_error("Error creating simulation report", e)
+            return None
 
 class User(Base):
     """Model for storing user authentication data"""

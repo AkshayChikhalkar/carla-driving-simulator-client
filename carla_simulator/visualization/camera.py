@@ -3,6 +3,9 @@ Camera visualization module for the CARLA Driving Simulator.
 Handles camera setup, image processing, and display.
 """
 
+import os
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import carla
 import pygame
 import numpy as np

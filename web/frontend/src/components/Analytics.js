@@ -11,19 +11,23 @@ import {
   LocationOn as LocationIcon,
   Assessment as AssessmentIcon
 } from '@mui/icons-material';
+import { fetchJson } from '../utils/fetchJson';
 
 // Prefer same-origin Grafana if proxied, else fallback to env
 const API_BASE_URL = '/api';
 const GRAFANA_PARAMS = '?orgId=1&kiosk';
 
-// Read Grafana base URL from backend config (simulation.yaml) at runtime
-// Fallback to a proxied same-origin path
+// Read Grafana base URL from backend config at runtime
+// Fallbacks: REACT_APP_GRAFANA_BASE_URL env, then proxied same-origin path
 const useGrafanaBaseUrl = () => {
-  const [grafanaBaseUrl, setGrafanaBaseUrl] = useState('/grafana/d');
+  const [grafanaBaseUrl, setGrafanaBaseUrl] = useState(process.env.REACT_APP_GRAFANA_BASE_URL || '/grafana/d');
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const resp = await fetch(`${API_BASE_URL}/config`);
+        const headers = {};
+        const storedTenant = localStorage.getItem('tenant_id');
+        if (storedTenant) headers['X-Tenant-Id'] = storedTenant;
+        const resp = await fetchJson(`${API_BASE_URL}/config`, { headers });
         const data = await resp.json();
         if (data && data.analytics && data.analytics.grafana_base_url) {
           setGrafanaBaseUrl(data.analytics.grafana_base_url);

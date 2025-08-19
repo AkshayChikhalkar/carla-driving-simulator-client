@@ -18,6 +18,7 @@ import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import DeleteIcon from '@mui/icons-material/Delete';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import Link from '@mui/material/Link';
+import { fetchJson } from '../utils/fetchJson';
 
 const API_BASE_URL = process.env.NODE_ENV === 'production' ? window.location.origin : '';
 
@@ -60,7 +61,7 @@ function Reports() {
     // Fetch the list of reports from the backend
     const fetchReports = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/reports`);
+        const response = await fetchJson(`${API_BASE_URL}/api/reports`);
         if (!response.ok) throw new Error('Failed to fetch reports');
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
@@ -87,7 +88,7 @@ function Reports() {
   const handleDelete = async (filename) => {
     if (!window.confirm(`Delete report "${filename}"?`)) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/reports/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      const response = await fetchJson(`${API_BASE_URL}/api/reports/${encodeURIComponent(filename)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete');
       setReports(reports => reports.filter(r => r.filename !== filename));
     } catch (err) {

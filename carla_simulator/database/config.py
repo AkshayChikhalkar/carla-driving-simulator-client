@@ -24,9 +24,42 @@ def _load_database_url_from_yaml(default_url: str) -> str:
     return default_url
 
 
-# Database configuration: strictly from YAML, fallback to local default
-DATABASE_URL = _load_database_url_from_yaml(
-    "postgresql://postgres:postgres@localhost:5432/carla_simulator"
+def _build_url_from_env() -> str | None:
+    """Construct DATABASE_URL from discrete env vars if available.
+
+    Recognized envs: DATABASE_URL (direct), or DB_HOST/DB_HOSTIP, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+    and common Postgres variable names POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD.
+    """
+    # Direct url wins
+    env_url = os.environ.get("DATABASE_URL")
+    if env_url:
+        return env_url
+
+    host = os.environ.get("DB_HOST") or os.environ.get("DB_HOSTIP")
+    name = os.environ.get("DB_NAME") or os.environ.get("POSTGRES_DB")
+    user = os.environ.get("DB_USER") or os.environ.get("POSTGRES_USER")
+    password = os.environ.get("DB_PASSWORD") or os.environ.get("POSTGRES_PASSWORD")
+    port = os.environ.get("DB_PORT")
+
+    if host or name or user or password or port:
+        host = host or "localhost"
+        name = name or "carla_simulator"
+        user = user or "postgres"
+        password = password or "postgres"
+        port = port or "5432"
+        return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+
+    return None
+
+
+# Database configuration resolution order:
+# 1) env DATABASE_URL
+# 2) env parts (DB_HOST/DB_HOSTIP, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+# 3) YAML database.url
+# 4) local default
+DATABASE_URL = (
+    _build_url_from_env()
+    or _load_database_url_from_yaml("postgresql://postgres:postgres@localhost:5432/carla_simulator")
 )
 
 # Create SQLAlchemy engine with schema

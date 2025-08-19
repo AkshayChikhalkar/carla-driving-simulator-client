@@ -157,10 +157,23 @@ class CameraSensor(SensorSubject):
         if not bp:
             return
 
-        # Use third-person chase view values for camera position
+        # Defaults; will be overridden by advanced attributes if present
         bp.set_attribute("image_size_x", str(1280))
         bp.set_attribute("image_size_y", str(720))
         bp.set_attribute("fov", str(90))
+
+        # Apply advanced sensor attributes if provided in configuration
+        try:
+            if world_manager and hasattr(world_manager, 'app') and hasattr(world_manager.app, '_config'):
+                adv = getattr(world_manager.app._config, 'advanced', None) or {}
+                attrs = (adv.get('sensor', {}) or {}).get('attributes', {})
+                for k, v in attrs.items():
+                    try:
+                        bp.set_attribute(str(k), str(v))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         spawn_point = carla.Transform(
             carla.Location(x=-6.0, y=0.0, z=3.0), carla.Rotation(pitch=-15)
@@ -290,23 +303,29 @@ class SensorManager:
             logger.debug("[SensorManager] Starting sensor cleanup...")
 
             # First detach all observers
-            for sensor in self.sensors.values():
+            for sensor in list(self.sensors.values()):
                 if sensor:
                     sensor.detach_all()
 
             # Then destroy each sensor
-            for sensor_type, sensor in self.sensors.items():
-                if sensor.sensor is not None and sensor.sensor.is_alive:
-                    try:
-                        logger.debug(
-                            f"[SensorManager] Destroying sensor: {sensor_type}"
-                        )
-                        sensor.destroy()
-                        time.sleep(0.1)  # Small delay between sensor destruction
-                    except Exception as e:
-                        logger.error(
-                            f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}"
-                        )
+            for sensor_type, sensor in list(self.sensors.items()):
+                try:
+                    # Attempt to stop sensor stream if supported to avoid callbacks during teardown
+                    if hasattr(sensor, 'sensor') and sensor.sensor is not None:
+                        try:
+                            if hasattr(sensor.sensor, 'stop'):
+                                sensor.sensor.stop()
+                        except Exception:
+                            pass
+                    if hasattr(sensor, 'sensor') and sensor.sensor is not None and getattr(sensor.sensor, 'is_alive', True):
+                        try:
+                            logger.debug(f"[SensorManager] Destroying sensor: {sensor_type}")
+                            sensor.destroy()
+                            time.sleep(0.05)  # Small delay between sensor destruction
+                        except Exception as e:
+                            logger.error(f"[SensorManager] Error destroying sensor {sensor_type}: {str(e)}")
+                except Exception as e:
+                    logger.error(f"[SensorManager] Error during sensor '{sensor_type}' teardown: {str(e)}")
 
             # Clear the sensors dictionary
             self.sensors.clear()

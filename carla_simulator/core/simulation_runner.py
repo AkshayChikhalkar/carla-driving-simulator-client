@@ -12,13 +12,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from carla_simulator.core.simulation_application import SimulationApplication
-from carla_simulator.core.world_manager import WorldManager
-from carla_simulator.core.sensors import SensorManager
-from carla_simulator.control.controller import (
-    VehicleController,
-    KeyboardController,
-    AutopilotController,
-)
+# Lazy-import modules that indirectly import pygame to avoid initializing SDL at web startup
+# (FastAPI imports this module when the container starts)
 from carla_simulator.utils.logging import Logger
 from carla_simulator.scenarios.scenario_registry import ScenarioRegistry
 from carla_simulator.utils.paths import get_config_path
@@ -29,9 +24,10 @@ from carla_simulator.utils.config import load_config
 class SimulationRunner:
     """Class to handle simulation execution and management"""
 
-    def __init__(self, config_file: str = None, session_id: uuid.UUID = None):
+    def __init__(self, config_file: str = None, session_id: uuid.UUID = None, db_only: bool = False):
         self.config_file = config_file or get_config_path()
-        self.config = load_config(self.config_file)
+        # In DB-only mode, defer config loading until a tenant is known
+        self.config = None if db_only else load_config(self.config_file)
         self.logger = Logger()
         self.session_id = session_id or uuid.uuid4()
 
@@ -49,6 +45,13 @@ class SimulationRunner:
         self, scenario: str, session_id=None
     ) -> SimulationApplication:
         """Create a new simulation application instance"""
+        # If config not yet loaded (DB-only), attempt to load strictly from DB using tenant context
+        if self.config is None:
+            from carla_simulator.utils.paths import get_config_path
+            from carla_simulator.utils.config import load_config
+            self.config_file = get_config_path()
+            # load_config now enforces DB-only and will raise if tenant context/config missing
+            self.config = load_config(self.config_file)
         return SimulationApplication(
             self.config_file,
             scenario=scenario,
@@ -59,6 +62,15 @@ class SimulationRunner:
     def setup_components(self, app: SimulationApplication) -> Dict[str, Any]:
         """Setup simulation components and return them"""
         # Create and setup components with required arguments
+        # Import here to avoid eager pygame import at process start
+        from carla_simulator.core.world_manager import WorldManager
+        from carla_simulator.core.sensors import SensorManager
+        from carla_simulator.control.controller import (
+            VehicleController,
+            KeyboardController,
+            AutopilotController,
+        )
+
         world_manager = WorldManager(
             client=app.connection.client,
             config=app.world_config,
@@ -76,10 +88,8 @@ class SimulationRunner:
 
         # Create controller based on config type
         controller_type = getattr(app.controller_config, "type", "autopilot")
-        self.logger.debug(f"Creating controller with type: {controller_type}")
-
-        # Check if we're in web mode
         is_web_mode = getattr(app._config, "web_mode", False)
+        self.logger.debug(f"Creating controller with type: {controller_type}")
         vehicle_controller = VehicleController(
             app.controller_config, headless=is_web_mode
         )
@@ -92,6 +102,11 @@ class SimulationRunner:
             controller = AutopilotController(
                 vehicle, app.controller_config, app.connection.client, world_manager
             )
+            # Ensure autopilot is engaged and traffic manager in sync
+            try:
+                vehicle.set_autopilot(True, world_manager.get_traffic_manager().get_port())
+            except Exception:
+                pass
         else:
             raise ValueError(f"Unsupported controller type: {controller_type}")
 
@@ -186,11 +201,15 @@ class SimulationRunner:
             scenarios: List of scenarios to run
             debug: Whether to enable debug logging
         """
-        # Create reports directory
+        # Respect DB-only/report-toggle: only generate when explicitly enabled
+        if os.getenv("ENABLE_FILE_REPORTS", "false").lower() != "true":
+            # Fallback: just run scenarios without file report
+            self.run_scenarios(scenarios)
+            return
+
         reports_dir = Path("reports")
         reports_dir.mkdir(exist_ok=True)
 
-        # Configure pytest arguments
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_report = reports_dir / f"scenario_report_{timestamp}.html"
 
