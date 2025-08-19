@@ -86,6 +86,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
+    isAdmin: !!(user && (user.is_admin || user.isAdmin)),
     login,
     logout,
     register,

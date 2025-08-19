@@ -42,6 +42,8 @@ import uuid
 import atexit
 import signal
 from fastapi.responses import FileResponse
+from carla_simulator.database.models import Tenant, TenantConfig
+from carla_simulator.database.db_manager import DatabaseManager
 
 # Add monitoring imports
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram, Gauge, Info
@@ -51,6 +53,25 @@ app = FastAPI()
 # Import tenant context for logging and set per-request based on header/query/env
 from carla_simulator.utils.logging import CURRENT_TENANT_ID
 from carla_simulator.utils.auth import verify_jwt_token
+from carla_simulator.database.models import Tenant, TenantConfig
+from carla_simulator.database.db_manager import DatabaseManager
+@app.on_event("startup")
+async def _ensure_global_default_on_startup():
+    try:
+        db = DatabaseManager()
+        t = Tenant.create_if_not_exists(db, name="Global Default", slug="global-default", is_active=True)
+        if not t:
+            return
+        tid = int(t["id"]) if isinstance(t, dict) else None
+        if tid is None:
+            return
+        existing = TenantConfig.get_active_config(db, tid)
+        if not existing:
+            defaults = db.get_carla_metadata("simulation_defaults") or {}
+            if isinstance(defaults, dict) and len(defaults) > 0:
+                TenantConfig.upsert_active_config(db, tid, defaults)
+    except Exception:
+        pass
 
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
@@ -913,6 +934,30 @@ async def get_config_defaults():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/admin/seed-default-config")
+async def admin_seed_default_config(current_user: dict = Depends(get_current_user)):
+    """Ensure a global default tenant exists and seed its config from carla_metadata('simulation_defaults')."""
+    require_admin(current_user)
+    try:
+        db = DatabaseManager()
+        # Ensure global-default tenant exists (id assigned by DB). Use slug for idempotency.
+        tenant = Tenant.create_if_not_exists(db, name="Global Default", slug="global-default", is_active=True)
+        if not tenant:
+            raise HTTPException(status_code=500, detail="Failed to ensure global-default tenant")
+        default_tid = int(tenant["id"]) if isinstance(tenant, dict) else int(tenant.id)
+        # Fetch defaults from metadata
+        defaults = db.get_carla_metadata("simulation_defaults")
+        if not isinstance(defaults, dict) or len(defaults) == 0:
+            raise HTTPException(status_code=400, detail="No defaults configured in DB (simulation_defaults)")
+        # Upsert as active config for global-default tenant
+        TenantConfig.upsert_active_config(db, default_tid, defaults)
+        return {"message": "Seeded default config", "tenant_id": default_tid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error seeding default config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/config")
 async def update_config(request: Request, config_update: ConfigUpdate, tenant_id: Optional[int] = None):
     """Update configuration"""
@@ -1039,7 +1084,9 @@ async def skip_scenario(request: Request, current_user: dict = Depends(get_curre
         try:
             current_scenario = tenant_runner.runner.state["current_scenario"]
             if current_scenario:
-                record_scenario_result(
+                # Offload DB/log write to thread to avoid blocking the event loop
+                await asyncio.to_thread(
+                    record_scenario_result,
                     tenant_runner.runner,
                     current_scenario,
                     "Failed",
@@ -1055,6 +1102,14 @@ async def skip_scenario(request: Request, current_user: dict = Depends(get_curre
                     f"Starting scenario {current_index + 2}/{total_scenarios}: {next_scenario}"
                 )
                 logger.info("================================")
+
+                # Update status message immediately for frontend overlay during skip
+                try:
+                    tenant_runner.runner.state["status_message"] = (
+                        f"Skipping to: {next_scenario} ({current_index + 2}/{total_scenarios})"
+                    )
+                except Exception:
+                    pass
 
                 # Stop current scenario but keep is_running true during transition
                 if hasattr(tenant_runner.runner, "app") and tenant_runner.runner.app and hasattr(tenant_runner.runner.app, "state"):
@@ -1078,8 +1133,9 @@ async def skip_scenario(request: Request, current_user: dict = Depends(get_curre
                             logger.error(f"Background cleanup error during skip (tenant {effective_tid}): {e}")
                     _t.Thread(target=_bg_cleanup, daemon=True).start()
 
-                # Transition to next scenario
-                if transition_to_next_scenario(tenant_runner.runner, next_scenario):
+                # Transition to next scenario without blocking event loop
+                success = await asyncio.to_thread(transition_to_next_scenario, tenant_runner.runner, next_scenario)
+                if success:
                     # Prepare per-tenant events for the new run and mark setup complete
                     tenant_runner.setup_event.clear()
                     tenant_runner.simulation_ready.clear()
@@ -1096,11 +1152,29 @@ async def skip_scenario(request: Request, current_user: dict = Depends(get_curre
                     tenant_runner.setup_event.set()
                     simulation_thread.start()
 
-                    # Reset transition flag and clear skipping flag immediately for better UX
-                    tenant_runner.runner.state["is_transitioning"] = False
-                    tenant_runner.runner.state["is_skipping"] = False
-                    tenant_runner.runner.state["status_message"] = f"Transitioned to: {next_scenario}"
-                    logger.debug(f"Cleared is_skipping flag immediately after starting new scenario thread for tenant {effective_tid}")
+                    # Defer clearing flags until the new scenario signals readiness to avoid UI flicker
+                    import threading as _t2
+                    def _post_transition_finalize():
+                        try:
+                            # Wait up to 10s for simulation_ready; then finalize flags
+                            tenant_runner.simulation_ready.wait(timeout=10.0)
+                        except Exception:
+                            pass
+                        finally:
+                            tenant_runner.runner.state["is_transitioning"] = False
+                            tenant_runner.runner.state["is_skipping"] = False
+                            # Compose a running status including index/total
+                            try:
+                                idx = tenant_runner.runner.state.get("current_scenario_index", 0) + 1
+                                tot = len(tenant_runner.runner.state.get("scenarios_to_run", []))
+                                cur = tenant_runner.runner.state.get("current_scenario")
+                                if cur:
+                                    tenant_runner.runner.state["status_message"] = f"Running: {cur} {idx}/{tot}"
+                                else:
+                                    tenant_runner.runner.state["status_message"] = "Simulation running"
+                            except Exception:
+                                tenant_runner.runner.state["status_message"] = "Simulation running"
+                    _t2.Thread(target=_post_transition_finalize, daemon=True).start()
 
                     return {
                         "success": True,
@@ -1122,6 +1196,14 @@ async def skip_scenario(request: Request, current_user: dict = Depends(get_curre
                 logger.info("================================")
                 logger.info("Last scenario skipped. Simulation complete.")
                 logger.info("================================")
+
+                # Update status for final skip where no next scenario exists
+                try:
+                    tenant_runner.runner.state["status_message"] = (
+                        f"Skipping scenario {current_index + 1}/{total_scenarios}...\nSimulation complete"
+                    )
+                except Exception:
+                    pass
 
                 # Call stop_simulation to handle the cleanup properly
                 stop_result = await stop_simulation(request)
@@ -1505,7 +1587,28 @@ async def websocket_endpoint(websocket: WebSocket):
                 conn_tenant_id = None
 
         await websocket.accept()
-        
+
+        # Require tenant scoping on WebSocket to prevent cross-tenant effects
+        if conn_tenant_id is None:
+            try:
+                await websocket.send_json({
+                    "type": "status",
+                    "is_running": False,
+                    "is_starting": False,
+                    "is_stopping": False,
+                    "is_skipping": False,
+                    "current_scenario": None,
+                    "scenario_index": 0,
+                    "total_scenarios": 0,
+                    "is_transitioning": False,
+                    "status_message": "Tenant context required",
+                    "timestamp": datetime.now().isoformat(),
+                })
+            except Exception:
+                pass
+            await websocket.close(code=1008)
+            return
+
         # Track metrics
         WEBSOCKET_CONNECTIONS_COUNTER.inc()
         ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE.inc()
@@ -1527,21 +1630,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     state = None
                     app = None
-                    if conn_tenant_id is not None:
-                        tr = registry.get(conn_tenant_id)
-                        if tr is not None:
-                            state = tr.runner.state
-                            app = getattr(tr.runner, 'app', None)
-                    else:
-                        # Fallback to global runner for backward compatibility
-                        state = runner.state
-                        app = getattr(runner, 'app', None)
+                    tr = registry.get(conn_tenant_id)
+                    if tr is not None:
+                        state = tr.runner.state
+                        app = getattr(tr.runner, 'app', None)
                     # Enforce tenant: only stream frames if WS tenant matches runner state tenant (when set)
+                    # Keep streaming during skip/transition; only stop when actually stopping
                     if (app and getattr(app, 'display_manager', None) and state and
                         (state.get("tenant_id") is None or conn_tenant_id is None or int(state.get("tenant_id")) == int(conn_tenant_id)) and
-                        not state.get("is_stopping", False) and
-                        not state.get("is_transitioning", False) and
-                        not state.get("is_skipping", False)):
+                        not state.get("is_stopping", False)):
                         frame = app.display_manager.get_current_frame()
                         if frame is not None:
                             # Dedupe by object identity to avoid expensive hashing of raw bytes
@@ -1606,18 +1703,12 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             while True:
                 state = None
-                if conn_tenant_id is not None:
-                    tr = registry.get(conn_tenant_id)
-                    if tr is not None:
-                        state = tr.runner.state
-                        # Debug: Log state changes for this tenant
-                        if state and (state.get("is_skipping") or state.get("is_transitioning") or state.get("is_stopping")):
-                            logger.debug(f"WebSocket state update for tenant {conn_tenant_id}: is_skipping={state.get('is_skipping')}, is_transitioning={state.get('is_transitioning')}, is_stopping={state.get('is_stopping')}")
-                            if state.get("is_transitioning") or state.get("is_skipping"):
-                                logger.debug(f"Pausing video frame sending for tenant {conn_tenant_id} due to transition/skip state")
-                else:
-                    # Fallback to global runner for backward compatibility
-                    state = runner.state
+                tr = registry.get(conn_tenant_id)
+                if tr is not None:
+                    state = tr.runner.state
+                    # Debug: Log state changes for this tenant
+                    if state and (state.get("is_skipping") or state.get("is_transitioning") or state.get("is_stopping")):
+                        logger.debug(f"WebSocket state update for tenant {conn_tenant_id}: is_skipping={state.get('is_skipping')}, is_transitioning={state.get('is_transitioning')}, is_stopping={state.get('is_stopping')}")
                 state_info = {
                     "type": "status",
                     "is_running": False,
@@ -1656,15 +1747,18 @@ async def websocket_endpoint(websocket: WebSocket):
                             status_message = "Hang on,\nLoading Simulation..."
                         elif state["is_stopping"] and not state.get("status_message"):
                             status_message = "Stopping simulation..."
-                        elif state["is_skipping"] and not state.get("status_message"):
-                            current_index = state["current_scenario_index"]
-                            total_scenarios = len(state["scenarios_to_run"])
-
-                            if current_index + 1 < total_scenarios:
-                                next_scenario = state["scenarios_to_run"][current_index + 1]
-                                status_message = f"Skipping scenario {current_index + 1}/{total_scenarios}...\nPreparing: {next_scenario}"
+                        elif state["is_skipping"]:
+                            current_index = state.get("current_scenario_index", 0)
+                            total_scenarios = len(state.get("scenarios_to_run", []))
+                            # Prefer backend-provided message if present
+                            if state.get("status_message"):
+                                status_message = state["status_message"]
                             else:
-                                status_message = f"Skipping scenario {current_index + 1}/{total_scenarios}...\nSimulation complete"
+                                if current_index + 1 < total_scenarios:
+                                    next_scenario = state["scenarios_to_run"][current_index + 1]
+                                    status_message = f"Skipping to: {next_scenario} ({current_index + 2}/{total_scenarios})"
+                                else:
+                                    status_message = f"Skipping scenario {current_index + 1}/{total_scenarios}...\nSimulation complete"
                         elif state["is_running"]:
                             # Prioritize starting state over transitioning state to show correct status during startup
                             if state["is_starting"]:
@@ -1677,10 +1771,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             #     else:
                             #         status_message = state.get("status_message") or "Simulation running"
                             else:
-                                # Prefer showing the running scenario name
+                                # Prefer showing the running scenario name with index/total
                                 current = state.get("current_scenario")
+                                idx = state.get("current_scenario_index", 0) + 1
+                                tot = len(state.get("scenarios_to_run", []))
                                 if current:
-                                    status_message = f"Running: {current}"
+                                    status_message = f"Running: {current} {idx}/{tot}"
                                 else:
                                     status_message = state.get("status_message") or "Simulation running"
                         state_info.update({
@@ -2254,35 +2350,25 @@ async def register(request: RegisterRequest):
             )
         logger.info(f"Register success: username={request.username}, id={new_user['id']}")
 
-        # Seed default config for this user by creating a per-user tenant if none provided
+        # Seed default config for this user by creating a per-user tenant and copying from global defaults/metadata
         try:
-            # Determine tenant to use: if CONFIG_TENANT_ID is set, use it; otherwise create a per-user tenant
-            default_tenant_id: Optional[int] = None
-            env_tid = os.getenv("CONFIG_TENANT_ID")
-            if env_tid is not None:
-                try:
-                    default_tenant_id = int(env_tid)
-                except ValueError:
-                    default_tenant_id = None
-
-            if default_tenant_id is None:
-                from carla_simulator.database.models import Tenant
-                slug = f"user-{new_user['id']}"
-                name = f"User {new_user['username']}"
-                tenant = Tenant.create_if_not_exists(db, name=name, slug=slug, is_active=True)
-                if tenant:
-                    default_tenant_id = tenant["id"]
-
-            if default_tenant_id is not None:
-                # Load defaults from YAML fallback and store as active tenant config
-                from carla_simulator.utils.paths import get_config_path
-                cfg_file = get_config_path("simulation.yaml")
-                try:
-                    with open(cfg_file, "r", encoding="utf-8") as f:
-                        defaults = yaml.safe_load(f) or {}
-                except Exception:
-                    defaults = {}
-                TenantConfig.upsert_active_config(db, default_tenant_id, defaults)
+            # Create a per-user tenant
+            slug = f"user-{new_user['id']}"
+            name = f"User {new_user['username']}"
+            tenant = Tenant.create_if_not_exists(db, name=name, slug=slug, is_active=True)
+            if tenant and isinstance(tenant, dict):
+                user_tid = int(tenant["id"])
+                # Prefer global-default tenant config
+                g = Tenant.create_if_not_exists(db, name="Global Default", slug="global-default", is_active=True)
+                g_tid = int(g["id"]) if isinstance(g, dict) else None
+                defaults = None
+                if g_tid is not None:
+                    defaults = TenantConfig.get_active_config(db, g_tid)
+                if not defaults:
+                    # Fallback to metadata
+                    defaults = db.get_carla_metadata("simulation_defaults") or {}
+                if isinstance(defaults, dict) and len(defaults) > 0:
+                    TenantConfig.upsert_active_config(db, user_tid, defaults)
         except Exception as se:
             logger.warning(f"Failed to seed default config for new user: {se}")
         

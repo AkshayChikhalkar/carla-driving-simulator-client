@@ -359,42 +359,75 @@ class Config:
 
 
 def _load_config_dict(config_path: str) -> Dict[str, Any]:
-    """Load config as raw dict. If CONFIG_TENANT_ID is set, try DB-backed config first."""
-    tenant_id = os.environ.get("CONFIG_TENANT_ID")
-    if tenant_id:
+    """Load config strictly from DB for the current tenant (no file fallback).
+
+    Resolution order for tenant id:
+    1) Request-scoped ContextVar (CURRENT_TENANT_ID)
+    2) CONFIG_TENANT_ID environment variable (legacy)
+
+    If no tenant id is available or no active config is found in DB, raise a RuntimeError.
+    """
+    # Resolve tenant id from request-scoped context first
+    tenant_id: Optional[int] = None
+    try:
+        from carla_simulator.utils.logging import CURRENT_TENANT_ID  # lazy import to avoid cycles
+        ctx_tid = CURRENT_TENANT_ID.get()
+        if ctx_tid is not None:
+            tenant_id = int(ctx_tid)
+    except Exception:
+        tenant_id = tenant_id
+
+    # Fallback to env var if context not present
+    if tenant_id is None:
+        env_tid = os.environ.get("CONFIG_TENANT_ID")
+        if env_tid is not None:
+            try:
+                tenant_id = int(env_tid)
+            except ValueError:
+                tenant_id = None
+
+    if tenant_id is None:
+        raise RuntimeError("Tenant context required to load configuration from DB (no file fallback)")
+
+    # Load strictly from DB for this tenant, with fallback to global default
+    from carla_simulator.database.db_manager import DatabaseManager
+    from carla_simulator.database.models import TenantConfig
+
+    db = DatabaseManager()
+    config_from_db = TenantConfig.get_active_config(db, int(tenant_id))
+    if not config_from_db:
+        # Fallback to global-default tenant by slug, or to metadata if not present
         try:
-            from carla_simulator.database.db_manager import DatabaseManager
-            from carla_simulator.database.models import TenantConfig
-
-            db = DatabaseManager()
-            config_from_db = TenantConfig.get_active_config(db, int(tenant_id))
-            if config_from_db:
-                # Validate critical structure; if incomplete, merge with file defaults
-                try:
-                    has_world = isinstance(config_from_db.get("world"), dict)
-                    world = config_from_db.get("world") or {}
-                    has_wpt = all(k in (world or {}) for k in ("weather", "physics", "traffic"))
-                    if not (has_world and has_wpt):
-                        # Load file defaults and deep-merge DB over them
-                        with open(config_path, "r", encoding="utf-8") as f:
-                            file_defaults = json.load(f) if config_path.lower().endswith(".json") else yaml.safe_load(f)
-                        if isinstance(file_defaults, dict):
-                            return _deep_merge(file_defaults, config_from_db)
-                        # If defaults cannot be loaded, fall through to file load below
-                    else:
-                        return config_from_db
-                except Exception:
-                    # If anything goes wrong, fall through to file load
-                    pass
+            # Resolve global-default tenant id
+            default_tid = None
+            try:
+                tenant_row = Tenant.get_by_slug(db, "global-default")  # type: ignore
+                if tenant_row:
+                    default_tid = int(tenant_row["id"]) if isinstance(tenant_row, dict) else None
+            except Exception:
+                default_tid = None
+            default_cfg = None
+            if default_tid is not None:
+                default_cfg = TenantConfig.get_active_config(db, default_tid)
+            if not default_cfg:
+                # Fallback to metadata
+                from carla_simulator.database.db_manager import DatabaseManager as _DBM
+                md = _DBM()
+                default_cfg = md.get_carla_metadata("simulation_defaults")
         except Exception:
-            # Fallback to file if DB fails
+            default_cfg = None
+        if not isinstance(default_cfg, dict) or len(default_cfg) == 0:
+            raise RuntimeError(
+                f"No active configuration found for tenant {tenant_id} and no global default present"
+            )
+        # Seed this tenant with the default config so subsequent loads are fast
+        try:
+            TenantConfig.upsert_active_config(db, int(tenant_id), default_cfg)
+        except Exception:
             pass
+        return default_cfg
 
-    # Load based on extension; default to YAML for compatibility
-    with open(config_path, "r", encoding="utf-8") as f:
-        if config_path.lower().endswith(".json"):
-            return json.load(f)
-        return yaml.safe_load(f)
+    return config_from_db
 
 
 def load_config(config_path: str) -> Config:

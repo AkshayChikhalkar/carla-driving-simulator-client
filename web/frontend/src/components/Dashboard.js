@@ -23,6 +23,7 @@ import { useWebSocketConnection } from '../hooks/useWebSocketConnection';
 import { useSimulationState } from '../hooks/useSimulationState';
 import { useScenarioSelection } from '../hooks/useScenarioSelection';
 import { getInstructionMessage } from '../utils/uiHelpers';
+import { useAuth } from '../contexts/AuthContext';
 
 // Memoized style computations for better performance
 const computeButtonStates = ({
@@ -532,6 +533,7 @@ const LoadingSpinner = React.memo(() => (
 ));
 
 function Dashboard({ onThemeToggle, isDarkMode }) {
+  const { isAdmin } = useAuth();
   const [debug, setDebug] = useState(false);
   const [report, setReport] = useState(false);
   const [hudData, setHudData] = useState(null);
@@ -709,6 +711,32 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
         margin: 0,
         padding: 0
       }}>
+        {isAdmin && (
+          <Box sx={{ position: 'absolute', top: 8, right: 12, zIndex: 2 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={async () => {
+                try {
+                  const token = sessionStorage.getItem('access_token');
+                  const res = await fetch('/api/admin/seed-default-config', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': token ? `Bearer ${token}` : ''
+                    }
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data?.detail || 'Failed');
+                  alert(`Seeded defaults for tenant ${data.tenant_id}`);
+                } catch (e) {
+                  alert(`Seeding failed: ${e.message || e}`);
+                }
+              }}
+            >
+              Seed Default Config
+            </Button>
+          </Box>
+        )}
         <ControlPanel
           scenarios={scenarios}
           selectedScenarios={selectedScenarios}

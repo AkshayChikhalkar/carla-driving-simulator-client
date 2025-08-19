@@ -45,16 +45,13 @@ class SimulationRunner:
         self, scenario: str, session_id=None
     ) -> SimulationApplication:
         """Create a new simulation application instance"""
-        # If config not yet loaded (DB-only), attempt to load using tenant context
+        # If config not yet loaded (DB-only), attempt to load strictly from DB using tenant context
         if self.config is None:
-            try:
-                from carla_simulator.utils.paths import get_config_path
-                from carla_simulator.utils.config import load_config
-                self.config_file = get_config_path()
-                self.config = load_config(self.config_file)
-            except Exception:
-                # Best-effort: keep None; SimulationApplication will raise if needed
-                pass
+            from carla_simulator.utils.paths import get_config_path
+            from carla_simulator.utils.config import load_config
+            self.config_file = get_config_path()
+            # load_config now enforces DB-only and will raise if tenant context/config missing
+            self.config = load_config(self.config_file)
         return SimulationApplication(
             self.config_file,
             scenario=scenario,
