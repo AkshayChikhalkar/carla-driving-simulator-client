@@ -8,6 +8,7 @@ from web.backend.main import app
 import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+import os
 
 
 # Mock CARLA dependencies
@@ -62,7 +63,59 @@ def mock_carla():
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
+    # Set test environment variables
+    os.environ["TESTING"] = "true"
+    os.environ["CONFIG_TENANT_ID"] = "1"
+    os.environ["DATABASE_URL"] = "sqlite:///test.db"
     return TestClient(app)
+
+@pytest.fixture
+def test_headers():
+    """Headers for authenticated requests."""
+    return {
+        "X-Tenant-Id": "1",
+        "Authorization": "Bearer test_token"
+    }
+
+@pytest.fixture(autouse=True)
+def mock_auth():
+    """Mock authentication dependencies."""
+    with patch("web.backend.main.get_current_user") as mock_get_user:
+        mock_get_user.return_value = {
+            "sub": "1",
+            "username": "test_user",
+            "email": "test@example.com",
+            "is_admin": True,
+            "tenant_id": 1
+        }
+        
+        with patch("web.backend.main.verify_jwt_token") as mock_verify:
+            mock_verify.return_value = {
+                "user_id": 1,
+                "username": "test_user",
+                "tenant_id": 1
+            }
+            
+            with patch("carla_simulator.database.db_manager.DatabaseManager") as mock_db:
+                mock_db_instance = MagicMock()
+                mock_db.return_value = mock_db_instance
+                
+                with patch("carla_simulator.utils.config.ConfigManager") as mock_config:
+                    mock_config_instance = MagicMock()
+                    mock_config.return_value = mock_config_instance
+                    mock_config_instance.get_config.return_value = {
+                        "server": {"host": "localhost", "port": 2000},
+                        "world": {"map": "Town01"},
+                        "simulation": {"timeout": 20.0},
+                        "logging": {"level": "INFO"},
+                        "display": {"width": 800, "height": 600},
+                        "sensors": {"camera": {"enabled": True}},
+                        "controller": {"type": "keyboard"},
+                        "vehicle": {"model": "vehicle.tesla.model3"},
+                        "scenarios": {"enabled": ["follow_route"]}
+                    }
+                    
+                    yield mock_get_user
 
 
 def test_get_scenarios(client, mock_carla):
@@ -77,9 +130,9 @@ def test_get_scenarios(client, mock_carla):
     assert data["scenarios"] == ["follow_route", "avoid_obstacle", "emergency_brake", "vehicle_cutting"]
 
 
-def test_get_config(client):
+def test_get_config(client, test_headers):
     """Test getting simulation configuration."""
-    response = client.get("/api/config")
+    response = client.get("/api/config", headers=test_headers)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
@@ -111,12 +164,13 @@ def test_get_config(client):
 #     assert data["message"] == "Configuration updated successfully"
 
 
-def test_simulation_control(client, mock_carla):
+def test_simulation_control(client, mock_carla, test_headers):
     """Test simulation control endpoints."""
     # Test starting simulation
     start_response = client.post(
         "/api/simulation/start",
         json={"scenarios": ["follow_route"], "debug": True, "report": True},
+        headers=test_headers
     )
     assert start_response.status_code == 200
     # start_data = start_response.json()
@@ -137,19 +191,19 @@ def test_simulation_control(client, mock_carla):
     # assert mock_carla.stop.called
 
 
-def test_skip_scenario(client, mock_carla):
+def test_skip_scenario(client, mock_carla, test_headers):
     """Test skipping current scenario."""
-    response = client.post("/api/simulation/skip")
+    response = client.post("/api/simulation/skip", headers=test_headers)
     assert response.status_code == 200
     data = response.json()
     assert "message" in data
     mock_carla.state["current_scenario_completed"] = True
 
 
-def test_reports_endpoints(client):
+def test_reports_endpoints(client, test_headers):
     """Test report-related endpoints."""
     # List reports
-    list_response = client.get("/api/reports")
+    list_response = client.get("/api/reports", headers=test_headers)
     assert list_response.status_code == 200
     data = list_response.json()
     assert isinstance(data, dict)

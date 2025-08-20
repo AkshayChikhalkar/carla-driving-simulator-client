@@ -175,7 +175,7 @@ jobs:
           # as they're already in requirements-docker.txt
 
       - name: Run Python tests
-        run: pytest --cov=src --cov-branch --cov-report=xml tests/
+        run: pytest --cov=carla_simulator --cov=web --cov-branch --cov-report=xml tests/
         env:
           TESTING: "true"
           PYTHONPATH: ${{ github.workspace }}
