@@ -13,6 +13,24 @@ psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.0
 alembic>=1.13.0
 
+# Web Framework (Backend)
+fastapi==0.95.1
+uvicorn==0.22.0
+pydantic==1.10.7
+python-multipart==0.0.6
+websockets==11.0.3
+
+# File and Image Processing
+aiofiles==23.1.0
+opencv-python==4.8.1.78
+
+# Authentication
+bcrypt>=4.0.1
+PyJWT>=2.8.0
+
+# Testing
+httpx==0.24.1
+
 # Development dependencies
 pytest>=6.0.0
 pytest-cov>=2.10.0
