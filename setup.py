@@ -55,6 +55,7 @@ def read_requirements(filename):
 
 # Base requirements
 install_requires = [
+    "carla==0.10.0",  # Will be satisfied by wheel files
     "pygame>=2.0.0",
     "numpy>=1.19.0",
     "matplotlib>=3.3.0",

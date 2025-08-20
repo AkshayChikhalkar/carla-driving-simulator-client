@@ -1,5 +1,5 @@
 # Install CARLA from local wheel file
-./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
+./deployment/wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
 
 # Production dependencies
 pygame>=2.0.0
