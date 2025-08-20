@@ -1,8 +1,8 @@
 # Install CARLA from local wheel file based on platform
 # Windows
-./wheels/carla-0.10.0-cp311-cp311-win_amd64.whl; platform_system == "Windows"
+./deployment/wheels/carla-0.10.0-cp311-cp311-win_amd64.whl; platform_system == "Windows"
 # Linux
-./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl; platform_system == "Linux"
+./deployment/wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl; platform_system == "Linux"
 
 # Production dependencies
 pygame>=2.0.0
