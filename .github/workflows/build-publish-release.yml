@@ -164,14 +164,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: |
-            requirements/requirements.txt
+            requirements/requirements-docker.txt
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov
           # Install all dependencies including CARLA wheel
-          pip install -r requirements/requirements.txt
+          pip install -r requirements/requirements-docker.txt
           # Don't install duplicate dependencies from web/backend/requirements.txt
           # as they're already in requirements-docker.txt
 
@@ -321,13 +320,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: |
-            requirements/requirements.txt
+            requirements/requirements-docker.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           # Install all dependencies including CARLA wheel
-          pip install -r requirements/requirements.txt
+          pip install -r requirements/requirements-docker.txt
           pip install build twine
         env:
           PIP_CACHE_DIR: ~/.cache/pip
