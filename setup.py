@@ -57,7 +57,7 @@ def read_requirements(filename):
 install_requires = [
     "carla==0.10.0",  # Will be satisfied by wheel files
     "pygame>=2.0.0",
-    "numpy>=1.19.0",
+    "numpy>=1.19.0,<2.0.0",
     "matplotlib>=3.3.0",
     "tabulate>=0.8.7",
     "pyyaml>=5.4.0",
