@@ -58,7 +58,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements/requirements.txt
           pip install pytest-cov pytest-html pytest-xdist
 
       - name: Run Carla Simulator tests
@@ -121,7 +121,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements/requirements.txt
           pip install pytest-cov pytest-html pytest-xdist
 
       - name: Run Web Backend tests
@@ -288,7 +288,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[docs]"
+          pip install -r requirements/requirements.txt
           pip install sphinx sphinx-autodoc-typehints
 
       - name: Install Mermaid CLI
