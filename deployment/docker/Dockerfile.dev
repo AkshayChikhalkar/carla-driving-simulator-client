@@ -3,7 +3,7 @@ FROM python:3.11-slim
 # Install system and Node.js dependencies
 RUN apt-get update && apt-get install -y \
     build-essential libpq-dev curl dos2unix \
-    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgl1-mesa-dev \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
     libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 \
     libfreetype6 fonts-dejavu-core \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     lsof \
     procps \
     libstdc++6 \
-    libgcc1 \
+    libgcc-s1 \
     libx11-6 \
     libpthread-stubs0-dev \
     && rm -rf /var/lib/apt/lists/* \
