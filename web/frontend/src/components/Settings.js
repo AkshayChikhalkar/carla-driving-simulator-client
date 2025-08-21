@@ -76,8 +76,7 @@ function Settings() {
     const load = async () => {
       try {
         logger.info('Fetching current simulation configuration');
-        const res = await fetchJson(`${API_BASE_URL}/config`);
-        const data = await res.json();
+        const data = await fetchJson(`${API_BASE_URL}/config`);
         setConfig(data);
         setEditedConfig(data);
         logger.info('Configuration loaded successfully');
@@ -90,9 +89,8 @@ function Settings() {
     // Load defaults for resetField hints without mutating server state
     const loadDefaults = async () => {
       try {
-        const res = await fetchJson(`${API_BASE_URL}/config/defaults`);
-        if (res.ok) {
-          const data = await res.json();
+        const data = await fetchJson(`${API_BASE_URL}/config/defaults`);
+        if (data) {
           if (data && data.config) setDefaults(data.config);
         }
       } catch {}
@@ -142,22 +140,12 @@ function Settings() {
         return;
       }
 
-      const res = await fetchJson(`${API_BASE_URL}/config`, {
+      const data = await fetchJson(`${API_BASE_URL}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Persist the full edited configuration so out-of-schema keys are not lost
         body: JSON.stringify({ app_config, sim_config: editedConfig })
       });
-      if (!res.ok) {
-        let errMsg = `HTTP ${res.status}`;
-        try {
-          const err = await res.json();
-          errMsg = err?.detail || JSON.stringify(err);
-        } catch {}
-        showNotification(`Save failed: ${errMsg}`, 'error');
-        return;
-      }
-      const data = await res.json();
       const newConfig = data.config ?? editedConfig;
       setConfig(newConfig);
       setEditedConfig(newConfig);

@@ -260,7 +260,8 @@ jobs:
               -v \
               --tb=short
           else
-            echo "No integration tests found"
+            echo "No integration tests found - skipping"
+            exit 0
           fi
         env:
           TESTING: "true"
