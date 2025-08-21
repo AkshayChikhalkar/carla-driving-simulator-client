@@ -99,6 +99,12 @@ testpaths = ["tests", "carla_simulator/tests", "web/backend/tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "timeout: mark test to have a timeout",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]
 
 [tool.mypy]
 python_version = "3.11"
