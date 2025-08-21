@@ -165,6 +165,44 @@ carla-driving-simulator-client/
 └── README.md
 ```
 
+## Testing
+
+This project includes comprehensive testing for both backend (Python) and frontend (React) components.
+
+### Backend Testing
+```bash
+# Run all Python tests
+pytest tests/ --cov=carla_simulator --cov=web --cov-branch
+
+# Run specific test modules
+pytest tests/test_core.py
+pytest tests/test_scenarios.py
+```
+
+### Frontend Testing
+```bash
+# Navigate to frontend directory
+cd web/frontend
+
+# Install dependencies
+npm install
+
+# Run tests in watch mode (development)
+npm test
+
+# Run tests in CI mode (no watch, with coverage)
+npm run test:ci
+```
+
+### CI/CD Pipeline
+The project uses GitHub Actions for automated testing:
+- **Backend Tests**: Python tests with pytest and coverage reporting
+- **Frontend Tests**: React tests with Jest and coverage reporting
+- **Docker Tests**: Build and runtime validation of Docker containers
+- **Integration Tests**: End-to-end testing of the complete system
+
+All tests must pass before code can be merged to the main branch.
+
 ## Contributing
 
 1. Fork the repository
@@ -181,6 +219,8 @@ git commit -m 'Add some amazing feature'
 git push origin feature/amazing-feature
 ```
 5. Open a Pull Request
+
+**Important**: Please ensure all tests pass before submitting a pull request. The CI/CD pipeline will automatically run both backend and frontend tests.
 
 Note: I cannot guarantee response times or implementation of suggested features as this project is maintained in my free time.
 
