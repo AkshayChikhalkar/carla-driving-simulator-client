@@ -630,6 +630,19 @@ jobs:
           name: python-package
           path: dist/
 
+      - name: Check PyPI credentials
+        run: |
+          if [ -z "${{ secrets.PYPI_USERNAME }}" ] || [ -z "${{ secrets.PYPI_PASSWORD }}" ]; then
+            echo "❌ PyPI credentials not configured. Skipping PyPI publish."
+            echo "Please set PYPI_USERNAME and PYPI_PASSWORD secrets in repository settings."
+            exit 1
+          fi
+
+      - name: Install twine
+        run: |
+          python -m pip install --upgrade pip
+          pip install twine
+
       - name: Publish to PyPI
         run: |
           twine check dist/*
@@ -646,6 +659,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Check Docker credentials
+        run: |
+          if [ -z "${{ secrets.DOCKER_USERNAME }}" ] || [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+            echo "❌ Docker Hub credentials not configured. Skipping Docker publish."
+            echo "Please set DOCKER_USERNAME and DOCKER_PASSWORD secrets in repository settings."
+            exit 1
+          fi
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
