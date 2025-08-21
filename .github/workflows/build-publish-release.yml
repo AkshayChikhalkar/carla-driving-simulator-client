@@ -559,6 +559,9 @@ jobs:
 
       - name: Test Docker Compose
         run: |
+          # Change to docker directory where compose files are located
+          cd deployment/docker
+          
           # Test docker compose build with build args
           VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
