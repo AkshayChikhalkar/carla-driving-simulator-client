@@ -26,9 +26,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/frontend/package-lock.json
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
         working-directory: web/frontend
 
       - name: Run frontend tests
