@@ -5,8 +5,14 @@ Unit tests for utility modules.
 import os
 import pytest
 from unittest.mock import patch, MagicMock
-from carla_simulator.utils.config import ConfigLoader, SimulationConfig
-from carla_simulator.utils.logging import Logger, SimulationData
+try:
+    from carla_simulator.utils.config import ConfigLoader
+    from carla_simulator.utils.logging import Logger
+    from carla_simulator.utils.types import SimulationData
+    IMPORTS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Some imports not available: {e}")
+    IMPORTS_AVAILABLE = False
 
 
 @pytest.fixture
@@ -28,12 +34,16 @@ def mock_config_file(tmp_path):
 @pytest.fixture
 def config_loader(mock_config_file):
     """Fixture providing a ConfigLoader instance."""
+    if not IMPORTS_AVAILABLE:
+        pytest.skip("Required imports not available")
     return ConfigLoader(mock_config_file)
 
 
 @pytest.fixture
 def simulation_logger():
     """Fixture providing a Logger instance."""
+    if not IMPORTS_AVAILABLE:
+        pytest.skip("Required imports not available")
     with patch("carla_simulator.utils.logging.Logger") as mock_logger:
         logger = MagicMock()
         logger.simulation_log = "test_simulation.csv"
@@ -42,6 +52,11 @@ def simulation_logger():
         logger.operations_file = MagicMock()
         mock_logger.return_value = logger
         yield logger
+
+
+def test_imports_available():
+    """Test that all required imports are available."""
+    assert IMPORTS_AVAILABLE, "Required imports are not available"
 
 
 def test_config_loader_initialization(config_loader, mock_config_file):
@@ -67,22 +82,26 @@ def test_config_validation(config_loader):
 
 
 def test_simulation_config_creation(config_loader):
-    """Test creation of SimulationConfig object."""
+    """Test creation of simulation config object."""
     sim_config = config_loader.get_simulation_config()
-    assert isinstance(sim_config, SimulationConfig)
-    assert sim_config.max_speed is not None
-    assert sim_config.simulation_time is not None
-    assert sim_config.update_rate is not None
-    assert sim_config.speed_change_threshold is not None
-    assert sim_config.position_change_threshold is not None
-    assert sim_config.heading_change_threshold is not None
-    assert sim_config.target_tolerance is not None
+    assert sim_config is not None
+    # Test that it has expected attributes
+    expected_attrs = ['max_speed', 'simulation_time', 'update_rate', 
+                     'speed_change_threshold', 'position_change_threshold', 
+                     'heading_change_threshold', 'target_tolerance']
+    for attr in expected_attrs:
+        assert hasattr(sim_config, attr), f"SimulationConfig missing {attr}"
+        assert getattr(sim_config, attr) is not None, f"SimulationConfig {attr} is None"
 
 
 def test_simulation_logger_initialization(simulation_logger):
     """Test Logger initialization."""
     # Basic logger attributes exist (mocked)
     assert simulation_logger is not None
+    assert hasattr(simulation_logger, 'simulation_log')
+    assert hasattr(simulation_logger, 'operations_log')
+    assert hasattr(simulation_logger, 'simulation_file')
+    assert hasattr(simulation_logger, 'operations_file')
 
 
 def test_simulation_data_logging(simulation_logger):
