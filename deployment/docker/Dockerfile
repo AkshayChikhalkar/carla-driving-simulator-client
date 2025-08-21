@@ -41,8 +41,7 @@ RUN mkdir -p /app/config /app/logs /app/reports
 # Copy requirements and wheels first for better layer caching
 COPY requirements/requirements-docker.txt ./requirements-docker.txt
 COPY deployment/wheels/ ./wheels/
-RUN pip install --no-cache-dir -r requirements-docker.txt \
-    && pip install --no-cache-dir ./wheels/carla-0.10.0-cp311-cp311-linux_x86_64.whl
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # Copy backend and source code
 COPY carla_simulator/ ./carla_simulator/
