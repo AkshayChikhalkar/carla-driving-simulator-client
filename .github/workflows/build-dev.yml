@@ -328,12 +328,12 @@ jobs:
 
       - name: Validate Dockerfile existence
         run: |
-          if [ ! -f "Dockerfile" ]; then
-            echo "Error: Dockerfile not found"
+          if [ ! -f "deployment/docker/Dockerfile" ]; then
+            echo "Error: Dockerfile not found at deployment/docker/Dockerfile"
             exit 1
           fi
-          if [ ! -f "Dockerfile.dev" ]; then
-            echo "Warning: Dockerfile.dev not found, skipping dev build test"
+          if [ ! -f "deployment/docker/Dockerfile.dev" ]; then
+            echo "Warning: Dockerfile.dev not found at deployment/docker/Dockerfile.dev, skipping dev build test"
             echo "skip_dev_build=true" >> $GITHUB_ENV
           else
             echo "skip_dev_build=false" >> $GITHUB_ENV
@@ -342,7 +342,7 @@ jobs:
       - name: Test Development Dockerfile
         if: env.skip_dev_build != 'true'
         run: |
-          docker build -f Dockerfile.dev -t test-dev \
+          docker build -f deployment/docker/Dockerfile.dev -t test-dev \
             --build-arg VERSION=dev-$(git rev-parse --short HEAD) \
             --build-arg DOCKER_IMAGE_TAG=dev-$(git rev-parse --short HEAD) \
             --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
@@ -354,7 +354,7 @@ jobs:
 
       - name: Test Production Dockerfile (for dev)
         run: |
-          docker build -t test-prod-dev \
+          docker build -f deployment/docker/Dockerfile -t test-prod-dev \
             --build-arg VERSION=dev-$(git rev-parse --short HEAD) \
             --build-arg DOCKER_IMAGE_TAG=dev-$(git rev-parse --short HEAD) \
             --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
@@ -414,7 +414,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile.dev
+          file: deployment/docker/Dockerfile.dev
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:dev

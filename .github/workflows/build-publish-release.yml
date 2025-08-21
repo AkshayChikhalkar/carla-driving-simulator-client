@@ -525,12 +525,12 @@ jobs:
 
       - name: Validate Dockerfile existence
         run: |
-          if [ ! -f "Dockerfile" ]; then
-            echo "Error: Dockerfile not found"
+          if [ ! -f "deployment/docker/Dockerfile" ]; then
+            echo "Error: Dockerfile not found at deployment/docker/Dockerfile"
             exit 1
           fi
-          if [ ! -f "Dockerfile.dev" ]; then
-            echo "Warning: Dockerfile.dev not found, skipping dev build test"
+          if [ ! -f "deployment/docker/Dockerfile.dev" ]; then
+            echo "Warning: Dockerfile.dev not found at deployment/docker/Dockerfile.dev, skipping dev build test"
             echo "skip_dev_build=true" >> $GITHUB_ENV
           else
             echo "skip_dev_build=false" >> $GITHUB_ENV
@@ -538,7 +538,7 @@ jobs:
 
       - name: Test Production Dockerfile
         run: |
-          docker build -t test-prod \
+          docker build -f deployment/docker/Dockerfile -t test-prod \
             --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
@@ -548,7 +548,7 @@ jobs:
       - name: Test Development Dockerfile
         if: env.skip_dev_build != 'true'
         run: |
-          docker build -f Dockerfile.dev -t test-dev \
+          docker build -f deployment/docker/Dockerfile.dev -t test-dev \
             --build-arg VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg DOCKER_IMAGE_TAG=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev") \
             --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
@@ -618,7 +618,7 @@ jobs:
   publish-to-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [build-and-publish]
+    needs: [build-and-publish, version-bump]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.inputs.run_pypi_publish == 'true'
     steps:
       - name: Download build artifacts
@@ -635,7 +635,7 @@ jobs:
   publish-docker:
     name: Publish Production Docker Images
     runs-on: ubuntu-latest
-    needs: [build-and-publish]
+    needs: [build-and-publish, version-bump]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.inputs.run_docker_publish == 'true'
     steps:
       - name: Checkout code
@@ -654,14 +654,15 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: deployment/docker/Dockerfile
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ needs.version-bump.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:${{ needs.version-bump.outputs.version || 'dev' }}
             ${{ env.DOCKER_IMAGE }}:prod-${{ github.sha }}
           build-args: |
-            VERSION=${{ needs.version-bump.outputs.version }}
-            DOCKER_IMAGE_TAG=${{ needs.version-bump.outputs.version }}
+            VERSION=${{ needs.version-bump.outputs.version || 'dev' }}
+            DOCKER_IMAGE_TAG=${{ needs.version-bump.outputs.version || 'dev' }}
             BUILD_TIME=${{ github.event.head_commit.timestamp }}
             ENVIRONMENT=production
 
