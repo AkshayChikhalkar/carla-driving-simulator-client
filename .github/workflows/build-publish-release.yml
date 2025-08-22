@@ -65,7 +65,7 @@ jobs:
   test-backend:
     name: Test Backend (Carla + Web)
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'carla_simulator/') || contains(github.event.head_commit.added, 'carla_simulator/') || contains(github.event.head_commit.removed, 'carla_simulator/') || contains(github.event.head_commit.modified, 'web/backend/') || contains(github.event.head_commit.added, 'web/backend/') || contains(github.event.head_commit.removed, 'web/backend/'))) || github.event.inputs.run_tests == 'true'
+    if: (github.event_name == 'push') || github.event.inputs.run_tests == 'true'
     strategy:
       matrix:
         test-suite: [carla-simulator, web-backend]
@@ -149,7 +149,7 @@ jobs:
   test-frontend:
     name: Test Frontend
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'web/frontend/') || contains(github.event.head_commit.added, 'web/frontend/') || contains(github.event.head_commit.removed, 'web/frontend/'))) || github.event.inputs.run_tests == 'true'
+    if: (github.event_name == 'push') || github.event.inputs.run_tests == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
