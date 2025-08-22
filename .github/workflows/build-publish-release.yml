@@ -630,55 +630,23 @@ jobs:
           name: python-package
           path: dist/
 
-      - name: Verify PyPI token
+      - name: Check PyPI token
         run: |
-          echo "Checking PyPI token..."
           if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
-            echo "Error: PYPI_TOKEN is not set"
+            echo "❌ PyPI token not configured. Skipping PyPI publish."
+            echo "Please set PYPI_TOKEN secret in repository settings."
             exit 1
           fi
-          echo "PyPI token is set"
 
       - name: Install twine
         run: |
           python -m pip install --upgrade pip
           pip install twine
 
-      - name: List files to upload
-        run: ls -la dist/
-
-      - name: Get version from Git tags
-        id: get_version
-        run: |
-          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
-          # Fallback to git describe if no version tags exist
-          if [ -z "$VERSION" ]; then
-            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing version: $VERSION"
-
-      - name: Check if PyPI package already exists
-        id: check_pypi
-        run: |
-          # Check if the specific version already exists on PyPI
-          if python -m twine check dist/* | grep -q "PASSED"; then
-            # Try to check if version exists (this is a simple check)
-            echo "checking_pypi=true" >> $GITHUB_OUTPUT
-            echo "PyPI package version ${{ steps.get_version.outputs.version }} will be checked during upload"
-          else
-            echo "checking_pypi=false" >> $GITHUB_OUTPUT
-            echo "PyPI package validation failed"
-          fi
-
       - name: Publish to PyPI
-        if: steps.check_pypi.outputs.checking_pypi == 'true'
         run: |
-          echo "Uploading to PyPI..."
-          python -m twine upload --skip-existing --verbose dist/*
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          twine check dist/*
+          twine upload --username __token__ --password ${{ secrets.PYPI_TOKEN }} dist/*
 
   publish-docker:
     name: Publish Production Docker Images
