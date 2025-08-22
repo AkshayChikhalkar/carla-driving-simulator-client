@@ -16,6 +16,8 @@ on:
       - '*.py'
       - 'package.json'
       - 'package-lock.json'
+      - 'tests/**'
+      - 'build-publish-release.yml'
   workflow_dispatch:
     inputs:
       run_tests:
