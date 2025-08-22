@@ -2610,7 +2610,7 @@ if __name__ == "__main__":
     try:
         import yaml
         from carla_simulator.utils.paths import get_config_path
-
+        # Load host/port from environment variables (fallback to defaults if missing)
         cfg_host, cfg_port = "0.0.0.0", 8000
         cfg_path = get_config_path("simulation.yaml")
         if os.path.exists(cfg_path):
