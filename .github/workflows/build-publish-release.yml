@@ -218,7 +218,7 @@ jobs:
   version-bump:
     name: Bump Version
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_github_release == 'true')
+    if: (github.event_name == 'push') || github.event.inputs.run_build == 'true'
     outputs:
       version: ${{ steps.bump_version.outputs.newTag }}
     steps:
@@ -295,6 +295,7 @@ jobs:
           echo "New version: $NEW_VERSION"
 
       - name: Create and push tag
+        if: github.ref == 'refs/heads/master'
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.newTag }}"
           TAG_NAME="v$NEW_VERSION"
@@ -354,6 +355,9 @@ jobs:
           pip install -r requirements/requirements.txt
           if [ "${{ matrix.build-type }}" = "documentation" ]; then
             pip install sphinx sphinx-autodoc-typehints
+          fi
+          if [ "${{ matrix.build-type }}" = "package" ]; then
+            pip install build setuptools wheel
           fi
 
       - name: Install Mermaid CLI
