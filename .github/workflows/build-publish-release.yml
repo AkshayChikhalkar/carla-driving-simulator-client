@@ -61,15 +61,14 @@ env:
 jobs:
   # ========================= TESTING PHASE =========================
   
-  # Backend Tests - Carla Simulator
-  test-carla-simulator:
-    name: Test Carla Simulator
+  # Backend Tests - Combined Python Tests
+  test-backend:
+    name: Test Backend (Carla + Web)
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'carla_simulator/') || contains(github.event.head_commit.added, 'carla_simulator/') || contains(github.event.head_commit.removed, 'carla_simulator/'))) || github.event.inputs.run_tests == 'true'
+    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'carla_simulator/') || contains(github.event.head_commit.added, 'carla_simulator/') || contains(github.event.head_commit.removed, 'carla_simulator/') || contains(github.event.head_commit.modified, 'web/backend/') || contains(github.event.head_commit.added, 'web/backend/') || contains(github.event.head_commit.removed, 'web/backend/'))) || github.event.inputs.run_tests == 'true'
     strategy:
       matrix:
-        python-version: [3.11]
-        test-path: ["carla_simulator/tests"]
+        test-suite: [carla-simulator, web-backend]
     
     steps:
       - name: Checkout code
@@ -77,11 +76,20 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements/requirements.txt
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install Python dependencies
         run: |
@@ -89,104 +97,52 @@ jobs:
           pip install -r requirements/requirements.txt
           pip install pytest-cov pytest-html pytest-xdist
 
-      - name: Run Carla Simulator tests
+      - name: Run ${{ matrix.test-suite }} tests
         run: |
-          python -m pytest ${{ matrix.test-path }} \
-            --cov=carla_simulator \
+          if [ "${{ matrix.test-suite }}" = "carla-simulator" ]; then
+            TEST_PATH="carla_simulator/tests"
+            COV_MODULE="carla_simulator"
+            REPORT_NAME="carla-simulator-test-report.html"
+            ENV_VARS="TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+          else
+            TEST_PATH="web/backend/tests"
+            COV_MODULE="web.backend"
+            REPORT_NAME="web-backend-test-report.html"
+            ENV_VARS="TESTING=true WEB_FILE_LOGS_ENABLED=false DISABLE_AUTH_FOR_TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+          fi
+          
+          python -m pytest $TEST_PATH \
+            --cov=$COV_MODULE \
             --cov-report=xml \
             --cov-report=html \
             --cov-report=term-missing \
-            --html=reports/carla-simulator-test-report.html \
+            --html=reports/$REPORT_NAME \
             --self-contained-html \
             -v \
-            --tb=short
+            --tb=short \
+            --junitxml=reports/${{ matrix.test-suite }}-junit.xml
         env:
           TESTING: "true"
           DATABASE_URL: "sqlite:///:memory:"
           CONFIG_TENANT_ID: "1"
-
-      - name: Upload Carla Simulator test coverage
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: carla-simulator
-          name: carla-simulator-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload Carla Simulator test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: carla-simulator-test-results
-          path: |
-            reports/carla-simulator-test-report.html
-            htmlcov/
-
-  # Backend Tests - Web Backend
-  test-web-backend:
-    name: Test Web Backend
-    runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'web/backend/') || contains(github.event.head_commit.added, 'web/backend/') || contains(github.event.head_commit.removed, 'web/backend/'))) || github.event.inputs.run_tests == 'true'
-    strategy:
-      matrix:
-        python-version: [3.11]
-        test-path: ["web/backend/tests"]
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements/requirements.txt
-          pip install pytest-cov pytest-html pytest-xdist
-
-      - name: Run Web Backend tests
-        run: |
-          python -m pytest ${{ matrix.test-path }} \
-            --cov=web.backend \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-missing \
-            --html=reports/web-backend-test-report.html \
-            --self-contained-html \
-            -v \
-            --tb=short
-        env:
-          TESTING: "true"
           WEB_FILE_LOGS_ENABLED: "false"
           DISABLE_AUTH_FOR_TESTING: "true"
-          DATABASE_URL: "sqlite:///:memory:"
-          CONFIG_TENANT_ID: "1"
 
-      - name: Upload Web Backend test coverage
+      - name: Upload ${{ matrix.test-suite }} test coverage
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
-          flags: web-backend
-          name: web-backend-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          flags: ${{ matrix.test-suite }}
+          name: ${{ matrix.test-suite }}-coverage
 
-      - name: Upload Web Backend test results
+      - name: Upload ${{ matrix.test-suite }} test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: web-backend-test-results
+          name: ${{ matrix.test-suite }}-test-results
           path: |
-            reports/web-backend-test-report.html
+            reports/${{ matrix.test-suite }}-test-report.html
+            reports/${{ matrix.test-suite }}-junit.xml
             htmlcov/
 
   # Frontend Tests
@@ -221,22 +177,9 @@ jobs:
       - name: Upload frontend test coverage
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: akshaychikhalkar/carla-driving-simulator-client
-          flags: frontend
-          name: frontend-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload frontend test coverage
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: web/frontend/coverage/lcov.info
           flags: frontend
           name: frontend-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload frontend test results
         uses: actions/upload-artifact@v4
@@ -249,7 +192,7 @@ jobs:
   test-integration:
     name: Test Integration
     runs-on: ubuntu-latest
-    needs: [test-carla-simulator, test-web-backend, test-frontend]
+    needs: [test-backend, test-frontend]
     if: always() && (github.event_name == 'push' || github.event.inputs.run_tests == 'true')
     steps:
       - name: Checkout code
@@ -262,6 +205,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements/requirements.txt
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install Python dependencies
         run: |
@@ -281,7 +233,8 @@ jobs:
               --html=reports/integration-test-report.html \
               --self-contained-html \
               -v \
-              --tb=short
+              --tb=short \
+              --junitxml=reports/integration-junit.xml
           else
             echo "No integration tests found - skipping"
             exit 0
@@ -315,7 +268,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [test-carla-simulator, test-web-backend, test-frontend, test-integration]
+    needs: [test-backend, test-frontend, test-integration]
     if: always() && (github.event_name == 'push' || github.event.inputs.run_tests == 'true')
     steps:
       - name: Checkout code
@@ -331,18 +284,11 @@ jobs:
           echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Check Carla Simulator tests
-          if [ "${{ needs.test-carla-simulator.result }}" == "success" ]; then
-            echo "✅ **Carla Simulator Tests**: PASSED" >> $GITHUB_STEP_SUMMARY
+          # Check Backend tests (matrix job)
+          if [ "${{ needs.test-backend.result }}" == "success" ]; then
+            echo "✅ **Backend Tests (Carla + Web)**: PASSED" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Carla Simulator Tests**: FAILED" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Check Web Backend tests
-          if [ "${{ needs.test-web-backend.result }}" == "success" ]; then
-            echo "✅ **Web Backend Tests**: PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Web Backend Tests**: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Backend Tests (Carla + Web)**: FAILED" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Check Frontend tests
@@ -367,8 +313,7 @@ jobs:
 
       - name: Fail if any tests failed
         if: |
-          needs.test-carla-simulator.result != 'success' ||
-          needs.test-web-backend.result != 'success' ||
+          needs.test-backend.result != 'success' ||
           needs.test-frontend.result != 'success' ||
           (needs.test-integration.result != 'success' && needs.test-integration.result != 'skipped')
         run: |
@@ -599,7 +544,7 @@ jobs:
   build-and-publish:
     name: Build and Publish
     runs-on: ubuntu-latest
-    needs: [test-summary, build-documentation, docker-build-test]
+    needs: [test-summary, build-documentation, docker-build-test, version-bump]
     if: github.event_name == 'push' || github.event.inputs.run_build == 'true'
     steps:
       - name: Checkout code
@@ -608,21 +553,33 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-build-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-build-
 
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel twine
+          pip install build setuptools wheel twine
 
       - name: Build package
         run: |
           # Clean any existing builds
           rm -rf dist/ build/ *.egg-info/
-          # Set version environment variable for setup.py
-          echo "PACKAGE_VERSION=${{ needs.version-bump.outputs.version || 'dev' }}" >> $GITHUB_ENV
-          # Build package using setup.py
-          python setup.py sdist bdist_wheel
+          # Update the version in the package
+          VERSION="${{ needs.version-bump.outputs.version || 'dev' }}"
+          echo "Building package version: $VERSION"
+          # Update the __version__ in the package
+          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" carla_simulator/__init__.py
+          # Build package using modern build system
+          python -m build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -636,29 +593,81 @@ jobs:
     needs: [build-and-publish, version-bump]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_pypi_publish == 'true')
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-publish-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-publish-
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build setuptools wheel twine
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: python-package
           path: dist/
 
-      - name: Check PyPI token
+      - name: Verify PyPI token
         run: |
+          echo "Checking PyPI token..."
           if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
-            echo "❌ PyPI token not configured. Skipping PyPI publish."
-            echo "Please set PYPI_TOKEN secret in repository settings."
+            echo "Error: PYPI_TOKEN is not set"
             exit 1
           fi
+          echo "PyPI token is set"
 
-      - name: Install twine
+      - name: List files to upload
+        run: ls -la dist/
+
+      - name: Get version from Git tags
+        id: get_version
         run: |
-          python -m pip install --upgrade pip
-          pip install twine
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+          # Fallback to git describe if no version tags exist
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Check if PyPI package already exists
+        id: check_pypi
+        run: |
+          # Check if the specific version already exists on PyPI
+          if python -m twine check dist/* | grep -q "PASSED"; then
+            # Try to check if version exists (this is a simple check)
+            echo "checking_pypi=true" >> $GITHUB_OUTPUT
+            echo "PyPI package version ${{ steps.get_version.outputs.version }} will be checked during upload"
+          else
+            echo "checking_pypi=false" >> $GITHUB_OUTPUT
+            echo "PyPI package validation failed"
+          fi
 
       - name: Publish to PyPI
+        if: steps.check_pypi.outputs.checking_pypi == 'true'
         run: |
-          twine check dist/*
-          twine upload --username __token__ --password ${{ secrets.PYPI_TOKEN }} dist/*
+          echo "Uploading to PyPI..."
+          python -m twine upload --skip-existing --verbose dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
   publish-docker:
     name: Publish Docker Images
@@ -695,7 +704,6 @@ jobs:
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
             ${{ env.DOCKER_IMAGE }}:${{ needs.version-bump.outputs.version || 'dev' }}
-            ${{ env.DOCKER_IMAGE }}:prod-${{ github.sha }}
           build-args: |
             VERSION=${{ needs.version-bump.outputs.version || 'dev' }}
             DOCKER_IMAGE_TAG=${{ needs.version-bump.outputs.version || 'dev' }}

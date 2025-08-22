@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carla-driving-simulator-client"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A comprehensive CARLA client for autonomous driving simulation"
 readme = "README.md"
 license = {text = "MIT"}
@@ -70,6 +70,9 @@ Repository = "https://github.com/akshaychikhalkar/carla-driving-simulator-client
 [project.scripts]
 carla-simulator-client = "carla_simulator.cli:main"
 csc = "carla_simulator.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "carla_simulator.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["carla_simulator*", "web*"]
