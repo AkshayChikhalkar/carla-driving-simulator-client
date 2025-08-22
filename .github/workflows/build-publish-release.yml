@@ -9,7 +9,6 @@ on:
       - 'docs/**'
       - 'deployment/docker/**'
       - 'requirements/**'
-      - 'setup.py'
       - 'pyproject.toml'
       - 'Dockerfile*'
       - 'docker-compose*.yml'

@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir -r requirements-docker.txt
 # Copy backend and source code
 COPY carla_simulator/ ./carla_simulator/
 COPY web/backend/ ./web/backend/
-COPY setup.py pyproject.toml README.md ./
+COPY pyproject.toml README.md ./
 RUN pip install -e .
 
 # Copy frontend source
