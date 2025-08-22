@@ -757,6 +757,8 @@ jobs:
         continue-on-error: true
 
       - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Upload test reports if available
           if [ -d "artifacts" ]; then
