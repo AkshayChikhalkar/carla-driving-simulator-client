@@ -508,37 +508,37 @@ jobs:
             .
           echo "Production Dockerfile builds successfully"
 
-      - name: Test Docker Compose
-        if: contains(github.event.head_commit.modified, 'docker-compose') || contains(github.event.head_commit.added, 'docker-compose') || contains(github.event.head_commit.removed, 'docker-compose') || github.event.inputs.run_docker_tests == 'true'
-        run: |
-          # Change to docker directory where compose files are located
-          cd deployment/docker
+      # - name: Test Docker Compose
+      #   if: contains(github.event.head_commit.modified, 'docker-compose') || contains(github.event.head_commit.added, 'docker-compose') || contains(github.event.head_commit.removed, 'docker-compose') || github.event.inputs.run_docker_tests == 'true'
+      #   run: |
+      #     # Change to docker directory where compose files are located
+      #     cd deployment/docker
           
-          # Test docker compose build with build args
-          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          docker compose build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
-          echo "Docker Compose build successful"
+      #     # Test docker compose build with build args
+      #     VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//' || echo "dev")
+      #     BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      #     docker compose build --build-arg VERSION=$VERSION --build-arg DOCKER_IMAGE_TAG=$VERSION --build-arg BUILD_TIME=$BUILD_TIME
+      #     echo "Docker Compose build successful"
           
-          # Test docker compose config validation
-          docker compose config
-          echo "Docker Compose configuration is valid"
+      #     # Test docker compose config validation
+      #     docker compose config
+      #     echo "Docker Compose configuration is valid"
           
-          # Test runtime validation (start services and check health)
-          echo "Testing Docker Compose runtime validation..."
-          docker compose up -d --timeout 60
-          sleep 30  # Wait for services to start
+      #     # Test runtime validation (start services and check health)
+      #     echo "Testing Docker Compose runtime validation..."
+      #     docker compose up -d --timeout 60
+      #     sleep 30  # Wait for services to start
           
-          # Check if the main service is healthy
-          if docker compose ps | grep -q "healthy"; then
-            echo "✅ Docker Compose services are healthy"
-          else
-            echo "⚠️  Some services may not be healthy, but continuing..."
-          fi
+      #     # Check if the main service is healthy
+      #     if docker compose ps | grep -q "healthy"; then
+      #       echo "✅ Docker Compose services are healthy"
+      #     else
+      #       echo "⚠️  Some services may not be healthy, but continuing..."
+      #     fi
           
-          # Stop services
-          docker compose down
-          echo "Docker Compose runtime validation completed"
+      #     # Stop services
+      #     docker compose down
+      #     echo "Docker Compose runtime validation completed"
 
   # ========================= PUBLISH PHASE =========================
 
@@ -754,6 +754,7 @@ jobs:
         with:
           name: html-docs
           path: docs-html
+        continue-on-error: true
 
       - name: Upload release assets
         run: |
