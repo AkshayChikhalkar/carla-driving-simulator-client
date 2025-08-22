@@ -377,11 +377,18 @@ jobs:
           VERSION="${{ needs.version-bump.outputs.version }}"
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
-          # Build production image
+          # Create a temporary requirements file without the local wheel
+          cp requirements/requirements.txt /tmp/requirements-docker.txt
+          # Remove any local wheel references and add CARLA from PyPI
+          sed -i '/\.\/wheels\/carla/d' /tmp/requirements-docker.txt
+          echo "carla==0.10.0" >> /tmp/requirements-docker.txt
+          
+          # Build production image with fixed requirements
           docker build -f deployment/docker/Dockerfile -t ${{ env.DOCKER_IMAGE }}:$VERSION \
             --build-arg VERSION=$VERSION \
             --build-arg DOCKER_IMAGE_TAG=$VERSION \
             --build-arg BUILD_TIME=$BUILD_TIME \
+            --build-arg REQUIREMENTS_FILE=/tmp/requirements-docker.txt \
             .
           
           # Tag as latest
@@ -428,69 +435,11 @@ jobs:
 
   # ========================= PUBLISH PHASE =========================
 
-  # Build and Publish Package
-  build-and-publish:
-    name: Build and Publish Package
-    runs-on: ubuntu-latest
-    needs: [test-all, build-all, version-bump]
-    if: (github.event_name == 'push') || github.event.inputs.run_build == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Validate all required jobs passed
-        run: |
-          echo "🔍 Validating all required jobs..."
-          
-          # Check test jobs
-          if [ "${{ needs.test-all.result }}" != "success" ]; then
-            echo "❌ Tests failed"
-            exit 1
-          fi
-          
-          # Check build jobs (optional - only if they ran)
-          if [ "${{ needs.build-all.result }}" != "success" ] && [ "${{ needs.build-all.result }}" != "skipped" ]; then
-            echo "❌ Build failed"
-            exit 1
-          fi
-          
-          # Check version bump (optional - only if it ran)
-          if [ "${{ needs.version-bump.result }}" != "success" ] && [ "${{ needs.version-bump.result }}" != "skipped" ]; then
-            echo "❌ Version bump failed"
-            exit 1
-          fi
-          
-          echo "✅ All required jobs passed successfully!"
-          echo "🚀 Proceeding with build and publish..."
-
-      - name: Final Codecov upload
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Download Python package artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package
-          path: dist/
-
-      - name: List package contents
-        run: |
-          echo "📦 Package contents:"
-          ls -la dist/
-          echo "✅ Package downloaded successfully"
-
   # Publish to PyPI
   publish-to-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [build-and-publish, version-bump]
+    needs: [validate-and-prepare, version-bump]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_pypi_publish == 'true')
     steps:
       - name: Checkout code
@@ -562,7 +511,7 @@ jobs:
   publish-docker:
     name: Publish Docker Images
     runs-on: ubuntu-latest
-    needs: [build-and-publish, version-bump]
+    needs: [build-all, version-bump]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_docker_publish == 'true')
     steps:
       - name: Checkout code
@@ -590,6 +539,12 @@ jobs:
           VERSION="${{ needs.version-bump.outputs.version }}"
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
+          # Create a temporary requirements file without the local wheel
+          cp requirements/requirements.txt /tmp/requirements-docker.txt
+          # Remove any local wheel references and add CARLA from PyPI
+          sed -i '/\.\/wheels\/carla/d' /tmp/requirements-docker.txt
+          echo "carla==0.10.0" >> /tmp/requirements-docker.txt
+          
           # Build and push in one step using buildx with caching
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
@@ -602,6 +557,7 @@ jobs:
             --build-arg VERSION=$VERSION \
             --build-arg DOCKER_IMAGE_TAG=$VERSION \
             --build-arg BUILD_TIME=$BUILD_TIME \
+            --build-arg REQUIREMENTS_FILE=/tmp/requirements-docker.txt \
             .
           
           echo "✅ Docker images pushed successfully: ${{ env.DOCKER_IMAGE }}:latest and ${{ env.DOCKER_IMAGE }}:$VERSION"
@@ -611,7 +567,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-and-publish, build-all]
+    needs: [build-all]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_github_release == 'true')
     steps:
       - name: Checkout code
@@ -622,22 +578,24 @@ jobs:
         with:
           name: html-docs
           path: docs-html
+        continue-on-error: true
 
       - name: Download Python package artifacts
         uses: actions/download-artifact@v4
         with:
           name: python-package
           path: python-pkg
+        continue-on-error: true
 
       - name: Create Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ needs.version-bump.outputs.version }}
-          release_name: Release v${{ needs.version-bump.outputs.version }}
+          tag_name: v${{ needs.build-all.outputs.version }}
+          release_name: Release v${{ needs.build-all.outputs.version }}
           body: |
-            ## Release v${{ needs.version-bump.outputs.version }}
+            ## Release v${{ needs.build-all.outputs.version }}
             
             ### Changes
             - Automated release from master branch
@@ -658,16 +616,115 @@ jobs:
             for file in python-pkg/*; do
               if [ -f "$file" ]; then
                 echo "Uploading $file to release..."
-                gh release upload v${{ needs.version-bump.outputs.version }} "$file"
+                gh release upload v${{ needs.build-all.outputs.version }} "$file"
               fi
             done
+          else
+            echo "⚠️  Python package artifacts not found, skipping upload"
           fi
           
           # Upload documentation if available
           if [ -d "docs-html" ]; then
             echo "Uploading documentation to release..."
             tar -czf docs.tar.gz -C docs-html .
-            gh release upload v${{ needs.version-bump.outputs.version }} docs.tar.gz
+            gh release upload v${{ needs.build-all.outputs.version }} docs.tar.gz
+          else
+            echo "⚠️  Documentation artifacts not found, skipping upload"
           fi
           
-          echo "✅ Release assets uploaded successfully" 
+          echo "✅ Release assets uploaded successfully"
+
+  # ========================= CLEANUP PHASE =========================
+  
+  # Cleanup on failure
+  cleanup-on-failure:
+    name: Cleanup on Failure
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/master'
+    needs: [version-bump]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Delete git tag on failure
+        run: |
+          NEW_VERSION="${{ needs.version-bump.outputs.version }}"
+          TAG_NAME="v$NEW_VERSION"
+          
+          # Check if tag exists and delete it
+          if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
+            echo "Deleting tag $TAG_NAME due to workflow failure"
+            git tag -d "$TAG_NAME"
+            git push origin ":refs/tags/$TAG_NAME"
+            echo "✅ Tag $TAG_NAME deleted successfully"
+          else
+            echo "Tag $TAG_NAME does not exist, nothing to delete"
+          fi
+
+  # ========================= VALIDATION PHASE =========================
+  
+  # Validate and Prepare for Publishing
+  validate-and-prepare:
+    name: Validate and Prepare
+    runs-on: ubuntu-latest
+    needs: [test-all, build-all, version-bump]
+    if: (github.event_name == 'push') || github.event.inputs.run_build == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate all required jobs passed
+        run: |
+          echo "🔍 Validating all required jobs..."
+          
+          # Check test jobs
+          if [ "${{ needs.test-all.result }}" != "success" ]; then
+            echo "❌ Tests failed"
+            exit 1
+          fi
+          
+          # Check build jobs
+          if [ "${{ needs.build-all.result }}" != "success" ]; then
+            echo "❌ Build failed"
+            exit 1
+          fi
+          
+          # Check version bump
+          if [ "${{ needs.version-bump.result }}" != "success" ]; then
+            echo "❌ Version bump failed"
+            exit 1
+          fi
+          
+          echo "✅ All required jobs passed successfully!"
+          echo "🚀 Ready for publishing..."
+
+      - name: Final Codecov upload
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Download Python package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package
+          path: dist/
+
+      - name: List package contents
+        run: |
+          echo "📦 Package contents:"
+          ls -la dist/
+          echo "✅ Package downloaded successfully" 
