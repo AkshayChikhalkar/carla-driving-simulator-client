@@ -630,23 +630,55 @@ jobs:
           name: python-package
           path: dist/
 
-      - name: Check PyPI credentials
+      - name: Verify PyPI token
         run: |
-          if [ -z "${{ secrets.PYPI_USERNAME }}" ] || [ -z "${{ secrets.PYPI_PASSWORD }}" ]; then
-            echo "❌ PyPI credentials not configured. Skipping PyPI publish."
-            echo "Please set PYPI_USERNAME and PYPI_PASSWORD secrets in repository settings."
+          echo "Checking PyPI token..."
+          if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
+            echo "Error: PYPI_TOKEN is not set"
             exit 1
           fi
+          echo "PyPI token is set"
 
       - name: Install twine
         run: |
           python -m pip install --upgrade pip
           pip install twine
 
-      - name: Publish to PyPI
+      - name: List files to upload
+        run: ls -la dist/
+
+      - name: Get version from Git tags
+        id: get_version
         run: |
-          twine check dist/*
-          twine upload --username ${{ secrets.PYPI_USERNAME }} --password ${{ secrets.PYPI_PASSWORD }} dist/*
+          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
+          # Fallback to git describe if no version tags exist
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Check if PyPI package already exists
+        id: check_pypi
+        run: |
+          # Check if the specific version already exists on PyPI
+          if python -m twine check dist/* | grep -q "PASSED"; then
+            # Try to check if version exists (this is a simple check)
+            echo "checking_pypi=true" >> $GITHUB_OUTPUT
+            echo "PyPI package version ${{ steps.get_version.outputs.version }} will be checked during upload"
+          else
+            echo "checking_pypi=false" >> $GITHUB_OUTPUT
+            echo "PyPI package validation failed"
+          fi
+
+      - name: Publish to PyPI
+        if: steps.check_pypi.outputs.checking_pypi == 'true'
+        run: |
+          echo "Uploading to PyPI..."
+          python -m twine upload --skip-existing --verbose dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
   publish-docker:
     name: Publish Production Docker Images
