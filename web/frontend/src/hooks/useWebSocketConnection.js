@@ -1,6 +1,40 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import logger from '../utils/logger';
 
+// Helper function to extract clean error messages without stack traces
+const extractCleanErrorMessage = (errorMessage) => {
+  if (!errorMessage || typeof errorMessage !== 'string') {
+    return errorMessage;
+  }
+  
+  // Remove common stack trace patterns
+  const lines = errorMessage.split('\n');
+  const cleanLines = [];
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    
+    // Skip stack trace lines
+    if (trimmedLine.startsWith('File "') || 
+        trimmedLine.startsWith('  File "') ||
+        trimmedLine.startsWith('Traceback') ||
+        (trimmedLine.startsWith('  ') && trimmedLine.includes('.py')) ||
+        trimmedLine.includes('Traceback (most recent call last):') ||
+        trimmedLine.startsWith('raise ') ||
+        trimmedLine.startsWith('    raise ')) {
+      continue;
+    }
+    
+    // Keep meaningful error messages
+    if (trimmedLine && !trimmedLine.startsWith('  ')) {
+      cleanLines.push(trimmedLine);
+    }
+  }
+  
+  // Return the first meaningful error message
+  return cleanLines[0] || errorMessage;
+};
+
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
 // Build WS URL using per-tab storage for strict isolation between tabs/tenants
 const getWebSocketUrl = () => {
@@ -29,6 +63,7 @@ export const useWebSocketConnection = ({
   backendState,
   setHudData,
   canvasRef,
+  setError,
 }) => {
   const wsRef = useRef(null);
   const backendStateRef = useRef(backendState);
@@ -54,10 +89,20 @@ export const useWebSocketConnection = ({
       is_skipping: data.is_skipping || false,
       is_transitioning: data.is_transitioning || false,
       current_scenario: data.current_scenario,
+      controller_type: data.controller_type || 'autopilot',
       scenario_index: data.scenario_index || 0,
       total_scenarios: data.total_scenarios || 0,
       status_message: data.status_message || 'Ready to Start'
     });
+
+    // Handle error from backend
+    if (data.error) {
+      // Extract clean error message without stack trace
+      const cleanError = extractCleanErrorMessage(data.error);
+      setError(cleanError);
+    } else {
+      setError(null);
+    }
 
     // Only log significant state changes (major transitions only)
     const currentBackendState = backendStateRef.current;

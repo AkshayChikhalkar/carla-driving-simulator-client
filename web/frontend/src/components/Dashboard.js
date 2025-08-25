@@ -24,6 +24,7 @@ import { useSimulationState } from '../hooks/useSimulationState';
 import { useScenarioSelection } from '../hooks/useScenarioSelection';
 import { getInstructionMessage } from '../utils/uiHelpers';
 import { useAuth } from '../contexts/AuthContext';
+import WebControlPanel from './ControlPanel';
 
 // Memoized style computations for better performance
 const computeButtonStates = ({
@@ -558,6 +559,7 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setHasReceivedFrame,
     setStatus,
     setBackendState,
+    setError,
     startSimulation,
     stopSimulation,
     skipScenario,
@@ -586,7 +588,8 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
     setIsSkipping,
     isSkipping,
     backendState,
-    canvasRef
+    canvasRef,
+    setError
   });
 
   // Memoized button states with debounce to prevent flickering
@@ -761,6 +764,13 @@ function Dashboard({ onThemeToggle, isDarkMode }) {
           onPause={handlePause}
           onSkip={handleSkip}
         />
+        {/* Web Control Panel - only show when using web controllers */}
+        {(backendState.controller_type && (backendState.controller_type === 'keyboard' || backendState.controller_type === 'gamepad')) && (
+          <WebControlPanel
+            isRunning={isRunning}
+            controllerType={backendState.controller_type === 'keyboard' ? 'web_keyboard' : 'web_gamepad'}
+          />
+        )}
         <SimulationView
           canvasRef={canvasRef}
           canvasStyle={canvasStyle}

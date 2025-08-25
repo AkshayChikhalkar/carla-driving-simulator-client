@@ -60,8 +60,13 @@ class KeyboardController(ControllerStrategy):
         )  # True for keyboard, False for autopilot
         self.logger = logger
 
-        # Initialize Pygame
-        pygame.init()
+        # Initialize Pygame with error handling
+        try:
+            pygame.init()
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Failed to initialize pygame for keyboard controller: {str(e)}")
+            raise RuntimeError(f"Keyboard controller cannot be initialized in this environment: {str(e)}")
 
         # Create key mapping dictionary
         key_map = {

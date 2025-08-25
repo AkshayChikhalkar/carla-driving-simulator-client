@@ -701,6 +701,11 @@ def transition_to_next_scenario(runner, next_scenario):
 
         # Update runner state
         runner.state["current_scenario"] = next_scenario
+        # Get controller type from the new application configuration
+        controller_type = new_app._config.controller_config.type if hasattr(new_app, '_config') and hasattr(new_app._config, 'controller_config') else "autopilot"
+        
+        # Store controller type in state
+        runner.state["controller_type"] = controller_type
         runner.state["current_scenario_index"] += 1
         runner.state["scenario_start_time"] = datetime.now()
         runner.app = new_app
@@ -1336,6 +1341,12 @@ async def start_simulation(request: SimulationRequest, http_request: Request, cu
             tenant_runner.runner.app = tenant_runner.runner.create_application(
                 scenarios_to_run[0], session_id=session_id
             )
+            
+            # Store controller type separately for frontend use
+            controller_type = tenant_runner.runner.app._config.controller_config.type if hasattr(tenant_runner.runner.app, '_config') and hasattr(tenant_runner.runner.app._config, 'controller_config') else "autopilot"
+            
+            # Store controller type in state
+            tenant_runner.runner.state["controller_type"] = controller_type
 
             # Set web mode in configuration
             tenant_runner.runner.app._config.web_mode = True
@@ -1720,6 +1731,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "total_scenarios": 0,
                     "is_transitioning": False,
                     "status_message": "Ready to Start",
+                    "error": None,
                     "timestamp": datetime.now().isoformat(),
                 }
                 if state:
@@ -1737,6 +1749,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "total_scenarios": 0,
                                 "is_transitioning": False,
                                 "status_message": "Not authorized for this tenant",
+                                "error": None,
                                 "timestamp": datetime.now().isoformat(),
                             })
                             await websocket.close(code=1008)
@@ -1785,10 +1798,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             "is_stopping": state["is_stopping"],
                             "is_skipping": state["is_skipping"],
                             "current_scenario": state["current_scenario"],
+                            "controller_type": state.get("controller_type", "autopilot"),
                             "scenario_index": state["current_scenario_index"] + 1,
                             "total_scenarios": len(state["scenarios_to_run"]),
                             "is_transitioning": state["is_transitioning"],
                             "status_message": status_message,
+                            "error": state.get("error"),
                         })
                         current_state_key = (
                             state_info["is_running"],
@@ -1854,6 +1869,112 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         # Track metrics for connection cleanup
         ACTIVE_WEBSOCKET_CONNECTIONS_GAUGE.dec()
+
+
+@app.websocket("/ws/control")
+async def control_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for receiving control commands from web interface"""
+    try:
+        # Authenticate and scope by tenant via query params
+        query = websocket.query_params
+        token_q = query.get("token")
+        q_tid = query.get("tenant_id")
+        conn_tenant_id: Optional[int] = None
+        if q_tid is not None:
+            try:
+                conn_tenant_id = int(q_tid)
+            except ValueError:
+                conn_tenant_id = None
+        jwt_payload = None
+        if token_q:
+            try:
+                jwt_payload = verify_jwt_token(token_q)
+            except Exception:
+                jwt_payload = None
+        if conn_tenant_id is None and isinstance(jwt_payload, dict):
+            try:
+                claim_tid = jwt_payload.get("tenant_id")
+                if claim_tid is not None:
+                    conn_tenant_id = int(claim_tid)
+            except Exception:
+                conn_tenant_id = None
+
+        await websocket.accept()
+
+        # Require tenant scoping on WebSocket to prevent cross-tenant effects
+        if conn_tenant_id is None:
+            await websocket.close(code=1008)
+            return
+
+        logger.debug(f"Control WebSocket connection established for tenant {conn_tenant_id}")
+        
+        while True:
+            try:
+                # Receive control command from frontend
+                data = await websocket.receive_json()
+                
+                # Validate command structure
+                if not isinstance(data, dict):
+                    continue
+                
+                # Extract control data
+                control_data = data.get("control", {})
+                controller_type = data.get("controller_type", "web_keyboard")
+                
+                # Update controller command if runner exists and simulation is running
+                tr = registry.get(conn_tenant_id)
+                if tr and hasattr(tr.runner, 'app') and tr.runner.app:
+                    app = tr.runner.app
+                    # Check if simulation is still running
+                    if hasattr(tr.runner, 'state') and tr.runner.state.get("is_running", False):
+                        if hasattr(app, 'vehicle_controller') and app.vehicle_controller:
+                            vehicle_controller = app.vehicle_controller
+                            if hasattr(vehicle_controller, '_strategy') and vehicle_controller._strategy:
+                                strategy = vehicle_controller._strategy
+                                if hasattr(strategy, 'update_command'):
+                                    # Create WebControlCommand from data
+                                    from carla_simulator.control.web_controller import WebControlCommand
+                                    command = WebControlCommand(
+                                        throttle=float(control_data.get("throttle", 0.0)),
+                                        brake=float(control_data.get("brake", 0.0)),
+                                        steer=float(control_data.get("steer", 0.0)),
+                                        hand_brake=bool(control_data.get("hand_brake", False)),
+                                        reverse=bool(control_data.get("reverse", False)),
+                                        manual_gear_shift=bool(control_data.get("manual_gear_shift", False)),
+                                        gear=int(control_data.get("gear", 1)),
+                                        quit=bool(control_data.get("quit", False)),
+                                        gamepad_index=int(control_data.get("gamepad_index", 0))
+                                    )
+                                    
+                                    # Handle multiple gamepads for WebGamepadController
+                                    if controller_type == "web_gamepad" and hasattr(strategy, 'update_gamepad_command'):
+                                        strategy.update_gamepad_command(command.gamepad_index, command)
+                                    else:
+                                        strategy.update_command(command)
+                                    
+                                    logger.debug(f"Updated {controller_type} command: {command}")
+                    else:
+                        # Simulation is not running, close connection gracefully
+                        logger.debug("Simulation stopped, closing control WebSocket")
+                        await websocket.close(code=1000, reason="Simulation stopped")
+                        break
+                
+            except asyncio.CancelledError:
+                break
+            except websockets.exceptions.ConnectionClosed:
+                logger.debug("Control WebSocket connection closed by client")
+                break
+            except Exception as e:
+                logger.error(f"Error processing control command: {e}")
+                # Don't break on general errors, just log them
+                continue
+                
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.critical(f"Uncaught exception in control websocket endpoint: {e}", exc_info=True)
+    finally:
+        logger.debug(f"Control WebSocket connection closed for tenant {conn_tenant_id}")
 
 
 @app.get("/api/reports")

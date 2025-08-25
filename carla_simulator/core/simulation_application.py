@@ -377,11 +377,26 @@ class SimulationApplication:
                     # Update HUD snapshot (best-effort)
                     try:
                         ctrl = vehicle.get_control()
+                        
+                        # Determine control type from configuration
+                        control_type = "Autopilot"
+                        scenario_name = getattr(self.current_scenario, "name", "Unknown")
+                        
+                        # Get controller type from configuration
+                        if hasattr(self, '_config') and hasattr(self._config, 'controller_config'):
+                            config_type = self._config.controller_config.type
+                            if config_type == "keyboard":
+                                control_type = "Keyboard"
+                            elif config_type == "gamepad":
+                                control_type = "Gamepad"
+                            elif config_type == "autopilot":
+                                control_type = "Autopilot"
+                        
                         payload = {
-                            "scenarioName": getattr(self.current_scenario, "name", "Unknown"),
+                            "scenarioName": scenario_name,
                             "speedKmh": float(vehicle_state["velocity"].length() * 3.6) if isinstance(vehicle_state.get("velocity"), carla.Vector3D) else 0.0,
                             "gear": int(getattr(ctrl, "gear", 1)),
-                            "controlType": "Autopilot",
+                            "controlType": control_type,
                             "fps": float(self.metrics.metrics.get("fps", 0.0)) if self.metrics else 0.0,
                         }
                         with self._hud_lock:

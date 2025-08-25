@@ -76,7 +76,8 @@ function Settings() {
     const load = async () => {
       try {
         logger.info('Fetching current simulation configuration');
-        const data = await fetchJson(`${API_BASE_URL}/config`);
+        const response = await fetchJson(`${API_BASE_URL}/config`);
+        const data = await response.json();
         setConfig(data);
         setEditedConfig(data);
         logger.info('Configuration loaded successfully');
@@ -89,7 +90,8 @@ function Settings() {
     // Load defaults for resetField hints without mutating server state
     const loadDefaults = async () => {
       try {
-        const data = await fetchJson(`${API_BASE_URL}/config/defaults`);
+        const response = await fetchJson(`${API_BASE_URL}/config/defaults`);
+        const data = await response.json();
         if (data) {
           if (data && data.config) setDefaults(data.config);
         }
@@ -140,12 +142,13 @@ function Settings() {
         return;
       }
 
-      const data = await fetchJson(`${API_BASE_URL}/config`, {
+              const response = await fetchJson(`${API_BASE_URL}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Persist the full edited configuration so out-of-schema keys are not lost
         body: JSON.stringify({ app_config, sim_config: editedConfig })
       });
+      const data = await response.json();
       const newConfig = data.config ?? editedConfig;
       setConfig(newConfig);
       setEditedConfig(newConfig);
@@ -165,12 +168,6 @@ function Settings() {
       }
       logger.info('Resetting configuration to defaults from DB');
       const res = await fetchJson(`${API_BASE_URL}/config/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-      if (!res.ok) {
-        let errMsg = `HTTP ${res.status}`;
-        try { const err = await res.json(); errMsg = err?.detail || JSON.stringify(err); } catch {}
-        showNotification(`Error resetting configuration: ${errMsg}`, 'error');
-        return;
-      }
       const data = await res.json();
       const newCfg = (data && data.config && Object.keys(data.config).length > 0) ? data.config : editedConfig;
       setConfig(newCfg);

@@ -85,7 +85,10 @@ describe('fetchJson Utility', () => {
 
     const result = await fetchJson('/api/test');
     
-    expect(result).toEqual({ data: 'test' });
+    expect(result).toHaveProperty('ok', true);
+    expect(result).toHaveProperty('json');
+    const data = await result.json();
+    expect(data).toEqual({ data: 'test' });
     const [url, options] = fetch.mock.calls[0];
     expect(url).toBe('/api/test');
     expect(options.headers).toBeInstanceOf(Headers);
@@ -104,7 +107,10 @@ describe('fetchJson Utility', () => {
       body: JSON.stringify(body)
     });
     
-    expect(result).toEqual({ success: true });
+    expect(result).toHaveProperty('ok', true);
+    expect(result).toHaveProperty('json');
+    const data = await result.json();
+    expect(data).toEqual({ success: true });
     const [url, options] = fetch.mock.calls[0];
     expect(url).toBe('/api/test');
     expect(options.method).toBe('POST');
@@ -156,7 +162,10 @@ describe('fetchJson Utility', () => {
       json: () => Promise.reject(new Error('Invalid JSON'))
     });
 
-    await expect(fetchJson('/api/test')).rejects.toThrow('Invalid JSON');
+    const result = await fetchJson('/api/test');
+    expect(result).toHaveProperty('ok', true);
+    expect(result).toHaveProperty('json');
+    await expect(result.json()).rejects.toThrow('Invalid JSON');
   });
 
   test('handles network error', async () => {

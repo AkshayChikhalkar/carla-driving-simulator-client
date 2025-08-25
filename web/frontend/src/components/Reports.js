@@ -62,7 +62,6 @@ function Reports() {
     const fetchReports = async () => {
       try {
         const response = await fetchJson(`${API_BASE_URL}/api/reports`);
-        if (!response.ok) throw new Error('Failed to fetch reports');
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
           const text = await response.text();

@@ -36,7 +36,7 @@ export async function fetchJson(url, options = {}) {
       throw new Error(errorMessage);
     }
     
-    return resp.json();
+    return resp;
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);
     

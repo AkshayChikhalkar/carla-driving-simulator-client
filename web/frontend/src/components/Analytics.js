@@ -3,7 +3,8 @@ import {
   Box,
   Tabs,
   Tab,
-  Paper
+  Paper,
+  Typography
 } from '@mui/material';
 import {
   Timeline as TimelineIcon,
@@ -21,6 +22,8 @@ const GRAFANA_PARAMS = '?orgId=1&kiosk';
 // Fallbacks: REACT_APP_GRAFANA_BASE_URL env, then proxied same-origin path
 const useGrafanaBaseUrl = () => {
   const [grafanaBaseUrl, setGrafanaBaseUrl] = useState(process.env.REACT_APP_GRAFANA_BASE_URL || '/grafana/d');
+  const [configError, setConfigError] = useState(null);
+  
   useEffect(() => {
     const fetchConfig = async () => {
       try {
@@ -31,14 +34,17 @@ const useGrafanaBaseUrl = () => {
         const data = await resp.json();
         if (data && data.analytics && data.analytics.grafana_base_url) {
           setGrafanaBaseUrl(data.analytics.grafana_base_url);
+          setConfigError(null);
         }
-      } catch (_) {
+      } catch (error) {
+        console.warn('Failed to load Grafana config:', error.message);
+        setConfigError('Grafana configuration not available. Using default URL.');
         // keep default fallback
       }
     };
     fetchConfig();
   }, []);
-  return grafanaBaseUrl;
+  return { grafanaBaseUrl, configError };
 };
 
 function TabPanel({ children, value, index, ...other }) {
@@ -61,7 +67,7 @@ function TabPanel({ children, value, index, ...other }) {
 
 const Analytics = () => {
   const [selectedTab, setSelectedTab] = useState(0);
-  const grafanaBaseUrl = useGrafanaBaseUrl();
+  const { grafanaBaseUrl, configError } = useGrafanaBaseUrl();
 
   const handleTabChange = (event, newValue) => {
     setSelectedTab(newValue);
@@ -99,6 +105,14 @@ const Analytics = () => {
   ];
   return (
     <Box sx={{ p: 0.5 }}>
+      {configError && (
+        <Paper sx={{ mb: 1, p: 2, bgcolor: 'warning.light' }}>
+          <Typography variant="body2" color="warning.contrastText">
+            ⚠️ {configError} If Grafana dashboards are not loading, please check if Grafana is running and accessible.
+          </Typography>
+        </Paper>
+      )}
+      
       <Paper sx={{ mb: 0.5 }}>
         <Tabs
           value={selectedTab}
@@ -137,6 +151,9 @@ const Analytics = () => {
               allowFullScreen
               allow="fullscreen"
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+              onError={() => {
+                console.error(`Failed to load ${config.label} dashboard`);
+              }}
             />
           </Box>
         </TabPanel>

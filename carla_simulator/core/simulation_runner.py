@@ -68,6 +68,7 @@ class SimulationRunner:
         from carla_simulator.control.controller import (
             VehicleController,
             KeyboardController,
+            GamepadController,
             AutopilotController,
         )
 
@@ -97,6 +98,19 @@ class SimulationRunner:
         if controller_type == "keyboard" and not is_web_mode:
             self.logger.debug("Initializing keyboard controller")
             controller = KeyboardController(app.controller_config)
+        elif controller_type == "keyboard" and is_web_mode:
+            # Use web-based keyboard controller for web mode
+            from carla_simulator.control.web_controller import WebKeyboardController
+            self.logger.debug("Initializing web keyboard controller")
+            controller = WebKeyboardController(app.controller_config, self.logger)
+        elif controller_type == "gamepad" and not is_web_mode:
+            self.logger.debug("Initializing gamepad controller")
+            controller = GamepadController(app.controller_config)
+        elif controller_type == "gamepad" and is_web_mode:
+            # Use web-based gamepad controller for web mode
+            from carla_simulator.control.web_controller import WebGamepadController
+            self.logger.debug("Initializing web gamepad controller")
+            controller = WebGamepadController(app.controller_config, self.logger)
         elif controller_type == "autopilot":
             self.logger.debug("Initializing autopilot controller")
             controller = AutopilotController(
