@@ -1051,13 +1051,29 @@ def test_keyboard_controller():
 def test_keyboard_controller_error_handling():
     """Test keyboard controller error handling for web mode."""
     from carla_simulator.control.controller import KeyboardController
-    from carla_simulator.utils.config import ControllerConfig
+    from carla_simulator.utils.config import ControllerConfig, KeyboardConfig
     
     # Test that KeyboardController properly handles web mode errors
     try:
-        # Create a mock controller config
-        mock_config = ControllerConfig()
-        mock_config.type = "keyboard"
+        # Create a mock controller config with required parameters
+        keyboard_config = KeyboardConfig(
+            forward=["w", "up"],
+            backward=["s", "down"],
+            left=["a", "left"],
+            right=["d", "right"],
+            brake=["space"],
+            hand_brake=["q"],
+            reverse=["r"],
+            quit=["escape"]
+        )
+        
+        mock_config = ControllerConfig(
+            type="keyboard",
+            steer_speed=1.0,
+            throttle_speed=1.0,
+            brake_speed=1.0,
+            keyboard=keyboard_config
+        )
         
         # Test that the error message is clear for web mode
         # This test verifies that the error handling is in place
