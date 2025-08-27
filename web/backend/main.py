@@ -6,10 +6,10 @@ if "XDG_RUNTIME_DIR" not in os.environ:
     if not os.path.exists("/tmp/xdg"):
         os.makedirs("/tmp/xdg", exist_ok=True)
 
-# Ensure headless-friendly SDL drivers for pygame on servers without display/audio, and hide support prompt
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+# # Ensure headless-friendly SDL drivers for pygame on servers without display/audio, and hide support prompt
+# os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+# os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+# os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status, websockets
 from fastapi.middleware.cors import CORSMiddleware
