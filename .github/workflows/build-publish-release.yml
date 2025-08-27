@@ -24,24 +24,13 @@ on:
         required: false
         default: true
         type: boolean
-
       run_build:
         description: 'Run build job'
         required: false
         default: true
         type: boolean
-      run_docker_publish:
-        description: 'Run docker publish'
-        required: false
-        default: true
-        type: boolean
-      run_pypi_publish:
-        description: 'Run PyPI publish'
-        required: false
-        default: true
-        type: boolean
-      run_github_release:
-        description: 'Run GitHub release'
+      run_publish:
+        description: 'Run publish job'
         required: false
         default: true
         type: boolean
@@ -56,16 +45,36 @@ env:
   NODE_VERSION: "18"
 
 jobs:
-  # ========================= TESTING PHASE =========================
+  # ========================= TESTING MATRIX =========================
   
-  # Backend Tests - Combined Python Tests
-  test-backend:
-    name: Test Backend (Carla + Web)
+  test:
+    name: Test ${{ matrix.test-suite }}
     runs-on: ubuntu-latest
     if: (github.event_name == 'push') || github.event.inputs.run_tests == 'true'
     strategy:
       matrix:
-        test-suite: [carla-simulator, web-backend]
+        test-suite: [carla-simulator, web-backend, frontend, integration]
+        include:
+          - test-suite: carla-simulator
+            test-path: carla_simulator/tests
+            cov-module: carla_simulator
+            report-name: carla-simulator-test-report.html
+            env-vars: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+          - test-suite: web-backend
+            test-path: web/backend/tests
+            cov-module: web.backend
+            report-name: web-backend-test-report.html
+            env-vars: "TESTING=true WEB_FILE_LOGS_ENABLED=false DISABLE_AUTH_FOR_TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+          - test-suite: frontend
+            test-path: web/frontend
+            cov-module: frontend
+            report-name: frontend-test-report.html
+            env-vars: "CI=true NODE_ENV=test"
+          - test-suite: integration
+            test-path: tests
+            cov-module: integration
+            report-name: integration-test-report.html
+            env-vars: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
     
     steps:
       - name: Checkout code
@@ -74,13 +83,23 @@ jobs:
           fetch-depth: 2
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
+        if: matrix.test-suite != 'frontend'
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
           cache-dependency-path: requirements/requirements.txt
 
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        if: matrix.test-suite == 'frontend'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/frontend/package-lock.json
+
       - name: Cache pip dependencies
+        if: matrix.test-suite != 'frontend'
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -89,31 +108,26 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install Python dependencies
+        if: matrix.test-suite != 'frontend'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements/requirements.txt
           pip install pytest-cov pytest-html pytest-xdist
 
+      - name: Install frontend dependencies
+        if: matrix.test-suite == 'frontend'
+        run: npm install
+        working-directory: web/frontend
+
       - name: Run ${{ matrix.test-suite }} tests
+        if: matrix.test-suite != 'frontend' && matrix.test-suite != 'integration'
         run: |
-          if [ "${{ matrix.test-suite }}" = "carla-simulator" ]; then
-            TEST_PATH="carla_simulator/tests"
-            COV_MODULE="carla_simulator"
-            REPORT_NAME="carla-simulator-test-report.html"
-            ENV_VARS="TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
-          else
-            TEST_PATH="web/backend/tests"
-            COV_MODULE="web.backend"
-            REPORT_NAME="web-backend-test-report.html"
-            ENV_VARS="TESTING=true WEB_FILE_LOGS_ENABLED=false DISABLE_AUTH_FOR_TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
-          fi
-          
-          python -m pytest $TEST_PATH \
-            --cov=$COV_MODULE \
+          python -m pytest ${{ matrix.test-path }} \
+            --cov=${{ matrix.cov-module }} \
             --cov-report=xml \
             --cov-report=html \
             --cov-report=term-missing \
-            --html=reports/$REPORT_NAME \
+            --html=reports/${{ matrix.report-name }} \
             --self-contained-html \
             -v \
             --tb=short \
@@ -125,7 +139,40 @@ jobs:
           WEB_FILE_LOGS_ENABLED: "false"
           DISABLE_AUTH_FOR_TESTING: "true"
 
+      - name: Run frontend tests
+        if: matrix.test-suite == 'frontend'
+        run: npm run test:ci
+        working-directory: web/frontend
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: Run integration tests
+        if: matrix.test-suite == 'integration'
+        run: |
+          # Check if there are any integration tests
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            python -m pytest tests \
+              --cov=. \
+              --cov-report=xml \
+              --cov-report=html \
+              --cov-report=term-missing \
+              --html=reports/${{ matrix.report-name }} \
+              --self-contained-html \
+              -v \
+              --tb=short \
+              --junitxml=reports/${{ matrix.test-suite }}-junit.xml
+          else
+            echo "No integration tests found - skipping"
+            exit 0
+          fi
+        env:
+          TESTING: "true"
+          DATABASE_URL: "sqlite:///:memory:"
+          CONFIG_TENANT_ID: "1"
+
       - name: Upload ${{ matrix.test-suite }} test coverage
+        if: matrix.test-suite != 'integration' || success()
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
@@ -138,194 +185,147 @@ jobs:
         with:
           name: ${{ matrix.test-suite }}-test-results
           path: |
-            reports/${{ matrix.test-suite }}-test-report.html
+            reports/${{ matrix.report-name }}
             reports/${{ matrix.test-suite }}-junit.xml
             htmlcov/
 
-  # Frontend Tests
-  test-frontend:
-    name: Test Frontend
+  # ========================= BUILD MATRIX =========================
+
+  build:
+    name: Build ${{ matrix.build-component }}
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push') || github.event.inputs.run_tests == 'true'
+    needs: [test, version-bump]
+    if: (github.event_name == 'push') || github.event.inputs.run_build == 'true'
+    strategy:
+      matrix:
+        build-component: [python-package, docker-image, documentation]
+        include:
+          - build-component: python-package
+            description: "Python Package"
+          - build-component: docker-image
+            description: "Docker Image"
+          - build-component: documentation
+            description: "Documentation"
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: web/frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm install
-        working-directory: web/frontend
-
-      - name: Run frontend tests
-        run: npm run test:ci
-        working-directory: web/frontend
-        env:
-          CI: true
-          NODE_ENV: test
-
-      - name: Upload frontend test coverage
-        uses: codecov/codecov-action@v5
-        with:
-          files: web/frontend/coverage/lcov.info
-          flags: frontend
-          name: frontend-coverage
-
-      - name: Upload frontend test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: frontend-test-results
-          path: web/frontend/coverage/
-
-  # Integration Tests (if any)
-  test-integration:
-    name: Test Integration
-    runs-on: ubuntu-latest
-    needs: [test-backend, test-frontend]
-    if: always() && (github.event_name == 'push' || github.event.inputs.run_tests == 'true')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
+        if: matrix.build-component != 'docker-image'
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: requirements/requirements.txt
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        if: matrix.build-component == 'documentation'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up Docker Buildx
+        if: matrix.build-component == 'docker-image'
+        uses: docker/setup-buildx-action@v3
 
       - name: Cache pip dependencies
+        if: matrix.build-component != 'docker-image'
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/requirements.txt') }}
+          key: ${{ runner.os }}-pip-build-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip-build-
 
       - name: Install Python dependencies
+        if: matrix.build-component != 'docker-image'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements/requirements.txt
-          pip install pytest-cov pytest-html pytest-xdist
+          pip install build setuptools wheel twine
 
-      - name: Run integration tests (if any)
+      - name: Install Mermaid CLI
+        if: matrix.build-component == 'documentation'
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: Build Python package
+        if: matrix.build-component == 'python-package'
         run: |
-          # Check if there are any integration tests
-          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
-            python -m pytest tests \
-              --cov=. \
-              --cov-report=xml \
-              --cov-report=html \
-              --cov-report=term-missing \
-              --html=reports/integration-test-report.html \
-              --self-contained-html \
-              -v \
-              --tb=short \
-              --junitxml=reports/integration-junit.xml
-          else
-            echo "No integration tests found - skipping"
-            exit 0
+          # Clean any existing builds
+          rm -rf dist/ build/ *.egg-info/
+          # Build package using modern build system
+          python -m build
+
+      - name: Build Docker image
+        if: matrix.build-component == 'docker-image'
+        run: |
+          # Validate Dockerfile existence
+          if [ ! -f "deployment/docker/Dockerfile" ]; then
+            echo "Error: Dockerfile not found at deployment/docker/Dockerfile"
+            exit 1
           fi
-        env:
-          TESTING: "true"
-          DATABASE_URL: "sqlite:///:memory:"
-          CONFIG_TENANT_ID: "1"
+          
+          # Use centralized version and build time
+          VERSION="${{ needs.version-bump.outputs.version }}"
+          DOCKER_TAG="${{ needs.version-bump.outputs.docker_tag }}"
+          BUILD_TIME="${{ needs.version-bump.outputs.build_time }}"
+          
+          # Build Docker image with centralized values
+          docker build -f deployment/docker/Dockerfile -t ${{ env.DOCKER_IMAGE }}:$VERSION \
+            --build-arg VERSION=$VERSION \
+            --build-arg DOCKER_TAG=$DOCKER_TAG \
+            --build-arg BUILD_TIME=$BUILD_TIME \
+            --build-arg ENVIRONMENT=production \
+            .
+          
+          echo "Docker image built successfully with version: $VERSION"
 
-      - name: Upload integration test coverage
-        uses: codecov/codecov-action@v5
-        if: success()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: integration
-          name: integration-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Build documentation
+        if: matrix.build-component == 'documentation'
+        run: |
+          # Run the comprehensive documentation automation script
+          python docs/auto_generate_docs.py
 
-      - name: Upload integration test results
+      - name: Upload Python package artifact
+        if: matrix.build-component == 'python-package'
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: integration-test-results
-          path: |
-            reports/integration-test-report.html
-            htmlcov/
+          name: python-package
+          path: dist/
 
-  # Test Summary
-  test-summary:
-    name: Test Summary
-    runs-on: ubuntu-latest
-    needs: [test-backend, test-frontend, test-integration]
-    if: always() && (github.event_name == 'push' || github.event.inputs.run_tests == 'true')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Save Docker image
+        if: matrix.build-component == 'docker-image'
+        run: |
+          # Use centralized version
+          VERSION="${{ needs.version-bump.outputs.version }}"
+          docker save ${{ env.DOCKER_IMAGE }}:$VERSION | gzip > docker-image.tar.gz
 
-      - name: Download all test results
-        uses: actions/download-artifact@v4
+      - name: Upload Docker image artifact
+        if: matrix.build-component == 'docker-image'
+        uses: actions/upload-artifact@v4
         with:
-          path: test-results
+          name: docker-image
+          path: docker-image.tar.gz
 
-      - name: Generate test summary
-        run: |
-          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check Backend tests (matrix job)
-          if [ "${{ needs.test-backend.result }}" == "success" ]; then
-            echo "✅ **Backend Tests (Carla + Web)**: PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Backend Tests (Carla + Web)**: FAILED" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Check Frontend tests
-          if [ "${{ needs.test-frontend.result }}" == "success" ]; then
-            echo "✅ **Frontend Tests**: PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Frontend Tests**: FAILED" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Check Integration tests
-          if [ "${{ needs.test-integration.result }}" == "success" ]; then
-            echo "✅ **Integration Tests**: PASSED" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.test-integration.result }}" == "skipped" ]; then
-            echo "⏭️ **Integration Tests**: SKIPPED (no tests found)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Integration Tests**: FAILED" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📊 **Coverage Reports**: Available in the artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "📋 **Test Reports**: Available in the artifacts" >> $GITHUB_STEP_SUMMARY
+      - name: Upload documentation artifact
+        if: matrix.build-component == 'documentation'
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-docs
+          path: docs/_build/html/
 
-      - name: Fail if any tests failed
-        if: |
-          needs.test-backend.result != 'success' ||
-          needs.test-frontend.result != 'success' ||
-          (needs.test-integration.result != 'success' && needs.test-integration.result != 'skipped')
-        run: |
-          echo "❌ Some tests failed. Please check the test results above."
-          exit 1
-
-  # ========================= VERSION BUMP PHASE =========================
+  # ========================= VERSION BUMP (Before build) =========================
   
   version-bump:
     name: Bump version and create tag
     runs-on: ubuntu-latest
-    needs: [test-summary]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_github_release == 'true')
+    needs: [test]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_build == 'true')
     outputs:
       version: ${{ steps.bump_version.outputs.newTag }}
+      tag_created: ${{ steps.create_tag.outputs.created }}
+      docker_tag: ${{ steps.bump_version.outputs.dockerTag }}
+      build_time: ${{ steps.build_time.outputs.buildTime }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -396,10 +396,14 @@ jobs:
           esac
           
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          DOCKER_TAG="v$NEW_VERSION"
           echo "newTag=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "dockerTag=$DOCKER_TAG" >> $GITHUB_OUTPUT
           echo "New version: $NEW_VERSION"
+          echo "Docker tag: $DOCKER_TAG"
 
       - name: Create and push tag
+        id: create_tag
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.newTag }}"
           TAG_NAME="v$NEW_VERSION"
@@ -407,6 +411,7 @@ jobs:
           # Check if tag already exists
           if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
             echo "Tag $TAG_NAME already exists, skipping tag creation"
+            echo "created=false" >> $GITHUB_OUTPUT
           else
             # Create tag
             git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
@@ -415,122 +420,34 @@ jobs:
             # Push tag
             git push origin "$TAG_NAME"
             echo "Pushed tag: $TAG_NAME"
+            echo "created=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Set build time
         id: build_time
         run: |
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "buildTime=$BUILD_TIME" >> $GITHUB_OUTPUT
           echo "Build time: $BUILD_TIME"
 
-  # ========================= BUILD PHASE =========================
+  # ========================= PUBLISH MATRIX =========================
 
-  build-documentation:
-    name: Build Documentation
+  publish:
+    name: Publish ${{ matrix.publish-target }}
     runs-on: ubuntu-latest
-    needs: [test-summary]
-    if: (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'docs/') || contains(github.event.head_commit.added, 'docs/') || contains(github.event.head_commit.removed, 'docs/') || contains(github.event.head_commit.modified, 'carla_simulator/') || contains(github.event.head_commit.added, 'carla_simulator/') || contains(github.event.head_commit.removed, 'carla_simulator/'))) || github.event.inputs.run_build == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements/requirements.txt
-          pip install sphinx sphinx-autodoc-typehints
-
-      - name: Install Mermaid CLI
-        run: npm install -g @mermaid-js/mermaid-cli
-
-      - name: Run documentation automation
-        run: |
-          # Run the comprehensive documentation automation script
-          # This handles: mmd generation, image conversion, API docs, and HTML build
-          python docs/auto_generate_docs.py
-
-      - name: Upload built docs as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: html-docs
-          path: docs/_build/html/
-
-      - name: Upload documentation source
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-source
-          path: |
-            docs/
-            mmd/
-            .readthedocs.yaml
-
-  # Removed redundant docker-build-test job - Docker build validation is handled in publish-docker job
-
-  # ========================= PUBLISH PHASE =========================
-
-  build-and-publish:
-    name: Build and Publish
-    runs-on: ubuntu-latest
-    needs: [test-summary, version-bump]
-    if: github.event_name == 'push' || github.event.inputs.run_build == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-build-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-build-
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build setuptools wheel twine
-
-      - name: Build package
-        run: |
-          # Clean any existing builds
-          rm -rf dist/ build/ *.egg-info/
-          # Update the version in the package
-          VERSION="${{ needs.version-bump.outputs.version || 'dev' }}"
-          echo "Building package version: $VERSION"
-          # Update the __version__ in the package
-          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" carla_simulator/__init__.py
-          # Build package using modern build system
-          python -m build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package
-          path: dist/
-
-  publish-to-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: [build-and-publish, version-bump]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_pypi_publish == 'true')
+    needs: [build, version-bump]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_publish == 'true')
+    strategy:
+      matrix:
+        publish-target: [pypi, docker, github-release]
+        include:
+          - publish-target: pypi
+            description: "PyPI Package"
+          - publish-target: docker
+            description: "Docker Image"
+          - publish-target: github-release
+            description: "GitHub Release"
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -539,141 +456,99 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
+        if: matrix.publish-target == 'pypi'
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-publish-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-publish-
+      - name: Set up Docker Buildx
+        if: matrix.publish-target == 'docker'
+        uses: docker/setup-buildx-action@v3
 
       - name: Install build dependencies
+        if: matrix.publish-target == 'pypi'
         run: |
           python -m pip install --upgrade pip
-          pip install build setuptools wheel twine
+          pip install build twine
 
-      - name: Download build artifacts
+      - name: Download Python package artifact
+        if: matrix.publish-target == 'pypi'
         uses: actions/download-artifact@v4
         with:
           name: python-package
           path: dist/
 
-      - name: Verify PyPI token
+      - name: Download Docker image artifact
+        if: matrix.publish-target == 'docker'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: ./
+
+      - name: Download documentation artifact
+        if: matrix.publish-target == 'github-release'
+        uses: actions/download-artifact@v4
+        with:
+          name: html-docs
+          path: docs-html
+        continue-on-error: true
+
+      - name: Download test results
+        if: matrix.publish-target == 'github-release'
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+        continue-on-error: true
+
+      - name: Publish to PyPI
+        if: matrix.publish-target == 'pypi'
         run: |
-          echo "Checking PyPI token..."
+          # Verify PyPI token
           if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
             echo "Error: PYPI_TOKEN is not set"
             exit 1
           fi
-          echo "PyPI token is set"
-
-      - name: List files to upload
-        run: ls -la dist/
-
-      - name: Get version from Git tags
-        id: get_version
-        run: |
-          VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 | sed 's/^v//')
-          # Fallback to git describe if no version tags exist
-          if [ -z "$VERSION" ]; then
-            VERSION=$(git describe --tags --always | sed 's/^v//' | sed 's/-.*$//')
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Use centralized version
+          VERSION="${{ needs.version-bump.outputs.version }}"
           echo "Publishing version: $VERSION"
-
-      - name: Check if PyPI package already exists
-        id: check_pypi
-        run: |
-          # Check if the specific version already exists on PyPI
-          if python -m twine check dist/* | grep -q "PASSED"; then
-            # Try to check if version exists (this is a simple check)
-            echo "checking_pypi=true" >> $GITHUB_OUTPUT
-            echo "PyPI package version ${{ steps.get_version.outputs.version }} will be checked during upload"
-          else
-            echo "checking_pypi=false" >> $GITHUB_OUTPUT
-            echo "PyPI package validation failed"
-          fi
-
-      - name: Publish to PyPI
-        if: steps.check_pypi.outputs.checking_pypi == 'true'
-        run: |
-          echo "Uploading to PyPI..."
+          
+          # Upload to PyPI
           python -m twine upload --skip-existing --verbose dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
-  publish-docker:
-    name: Publish Docker Images
-    runs-on: ubuntu-latest
-    needs: [build-and-publish, version-bump]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_docker_publish == 'true')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Check Docker credentials
+      - name: Publish to Docker Hub
+        if: matrix.publish-target == 'docker'
         run: |
+          # Check Docker credentials
           if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "❌ Docker Hub credentials not configured. Skipping Docker publish."
-            echo "Please set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets in repository settings."
             exit 1
           fi
+          
+          # Login to Docker Hub
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+          
+          # Use centralized version and build time
+          VERSION="${{ needs.version-bump.outputs.version }}"
+          DOCKER_TAG="${{ needs.version-bump.outputs.docker_tag }}"
+          
+          # Load and tag Docker image
+          gunzip -c docker-image.tar.gz | docker load
+          docker tag ${{ env.DOCKER_IMAGE }}:$VERSION ${{ env.DOCKER_IMAGE }}:latest
+          docker tag ${{ env.DOCKER_IMAGE }}:$VERSION ${{ env.DOCKER_IMAGE }}:$VERSION
+          
+          # Push to Docker Hub
+          docker push ${{ env.DOCKER_IMAGE }}:latest
+          docker push ${{ env.DOCKER_IMAGE }}:$VERSION
+          
+          echo "Docker image published successfully: $VERSION"
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Validate Dockerfile existence
-        run: |
-          if [ ! -f "deployment/docker/Dockerfile" ]; then
-            echo "Error: Dockerfile not found at deployment/docker/Dockerfile"
-            exit 1
-          fi
-          echo "✅ Dockerfile validation passed"
-
-      - name: Build and push production image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deployment/docker/Dockerfile
-          push: true
-          tags: |
-            ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ needs.version-bump.outputs.version || 'dev' }}
-          build-args: |
-            VERSION=${{ needs.version-bump.outputs.version || 'dev' }}
-            DOCKER_IMAGE_TAG=${{ needs.version-bump.outputs.version || 'dev' }}
-            BUILD_TIME=${{ github.event.head_commit.timestamp }}
-            ENVIRONMENT=production
-
-  # ========================= RELEASE PHASE =========================
-
-  create-release:
-    name: Create GitHub Release
-    runs-on: ubuntu-latest
-    needs: [version-bump, publish-to-pypi, publish-docker]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_github_release == 'true')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
+      - name: Create GitHub Release
+        if: matrix.publish-target == 'github-release'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -695,20 +570,14 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Download documentation artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: html-docs
-          path: docs-html
-        continue-on-error: true
-
       - name: Upload release assets
+        if: matrix.publish-target == 'github-release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Upload test reports if available
-          if [ -d "artifacts" ]; then
-            for file in artifacts/*/reports/*.html; do
+          if [ -d "test-results" ]; then
+            for file in test-results/*/reports/*.html; do
               if [ -f "$file" ]; then
                 gh release upload v${{ needs.version-bump.outputs.version }} "$file" --clobber
               fi
@@ -724,4 +593,38 @@ jobs:
             cd ..
             gh release upload v${{ needs.version-bump.outputs.version }} documentation.zip --clobber
             echo "✅ Documentation uploaded successfully"
-          fi 
+          fi
+
+  # ========================= CLEANUP ON FAILURE =========================
+
+  cleanup-on-failure:
+    name: Cleanup on failure
+    runs-on: ubuntu-latest
+    needs: [version-bump, publish]
+    if: always() && (needs.version-bump.result == 'failure' || needs.publish.result == 'failure') && needs.version-bump.outputs.tag_created == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Remove created tag on failure
+        run: |
+          VERSION="${{ needs.version-bump.outputs.version }}"
+          TAG_NAME="v$VERSION"
+          
+          echo "Workflow failed, removing tag: $TAG_NAME"
+          
+          # Delete tag locally
+          git tag -d "$TAG_NAME" || echo "Tag not found locally"
+          
+          # Delete tag from remote
+          git push origin ":refs/tags/$TAG_NAME" || echo "Tag not found on remote"
+          
+          echo "Tag $TAG_NAME removed successfully" 

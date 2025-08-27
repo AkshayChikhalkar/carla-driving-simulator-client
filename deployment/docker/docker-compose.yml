@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: deployment/docker/Dockerfile
-    image: carla-simulator-client:dev_vMT1.5
+    image: carla-simulator-client:dev_vMT1.9
     environment:
       - PYTHONPATH=/app
       - REACT_APP_API_URL=http://localhost:8000
