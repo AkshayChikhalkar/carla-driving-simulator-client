@@ -11,7 +11,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status, websockets
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles

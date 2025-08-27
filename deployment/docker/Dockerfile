@@ -1,8 +1,34 @@
-FROM python:3.11-slim
+# Multi-stage build for smaller final image
+FROM python:3.11-slim AS builder
 
-# Install system and Node.js dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
+    libpq-dev \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies including CARLA wheel
+COPY requirements/requirements-docker.txt ./requirements-docker.txt
+COPY deployment/wheels/ ./wheels/
+RUN pip install --no-cache-dir -r requirements-docker.txt
+
+# Build frontend
+COPY web/frontend/package*.json web/frontend/craco.config.js ./web/frontend/
+COPY web/frontend/src/ ./web/frontend/src/
+COPY web/frontend/public/ ./web/frontend/public/
+WORKDIR /app/web/frontend
+RUN npm install --production=true && npm run build
+
+# Final stage
+FROM python:3.11-slim
+
+# Install only essential runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     dos2unix \
     fonts-dejavu-core \
@@ -10,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgcc-s1 \
     libgl1 \
     libglib2.0-0 \
-    libpq-dev \
+    libpq5 \
     libsm6 \
     libsdl2-2.0-0 \
     libsdl2-image-2.0-0 \
@@ -21,8 +47,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     lsof \
     procps \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 ARG DOCKER_IMAGE_TAG
@@ -35,30 +59,20 @@ ENV DOCKER_IMAGE_TAG=$DOCKER_IMAGE_TAG \
 
 WORKDIR /app
 
-# Create necessary directories
-RUN mkdir -p /app/config /app/logs /app/reports
+# Copy Python packages from builder (including CARLA)
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy requirements and wheels first for better layer caching
-COPY requirements/requirements-docker.txt ./requirements-docker.txt
-COPY deployment/wheels/ ./wheels/
-RUN pip install --no-cache-dir -r requirements-docker.txt
+# Copy built frontend
+COPY --from=builder /app/web/frontend/build ./web/frontend/build
 
-# Copy backend and source code
+# Copy application code
 COPY carla_simulator/ ./carla_simulator/
 COPY web/backend/ ./web/backend/
 COPY pyproject.toml README.md ./
-RUN pip install -e .
 
-# Copy frontend source
-COPY web/frontend/package*.json web/frontend/craco.config.js ./web/frontend/
-COPY web/frontend/src/ ./web/frontend/src/
-COPY web/frontend/public/ ./web/frontend/public/
-
-# Install frontend dependencies
-WORKDIR /app/web/frontend
-RUN npm install --production=true && npm run build
-
-WORKDIR /app
+# Create necessary directories
+RUN mkdir -p /app/config /app/logs /app/reports
 
 # Set environment variables
 ENV PYTHONPATH=/app \
