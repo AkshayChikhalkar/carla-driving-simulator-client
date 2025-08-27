@@ -119,6 +119,17 @@ jobs:
         run: npm install
         working-directory: web/frontend
 
+      - name: Cache npm dependencies
+        if: matrix.test-suite == 'frontend'
+        uses: actions/cache@v4
+        with:
+          path: |
+            web/frontend/node_modules
+            ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('web/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Run ${{ matrix.test-suite }} tests
         if: matrix.test-suite != 'frontend' && matrix.test-suite != 'integration'
         run: |
@@ -165,9 +176,12 @@ jobs:
             echo '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="frontend" tests="0" failures="0" errors="0" skipped="0"></testsuite></testsuites>' > reports/frontend-junit.xml
           fi
           
-          # Copy coverage directory
+          # Ensure coverage directory is in the right place
           if [ -d "coverage" ]; then
-            cp -r coverage htmlcov
+            echo "Coverage directory found:"
+            ls -la coverage/
+          else
+            echo "No coverage directory found"
           fi
         working-directory: web/frontend
         env:
@@ -214,7 +228,7 @@ jobs:
           path: |
             reports/${{ matrix.report-name }}
             reports/${{ matrix.test-suite }}-junit.xml
-            htmlcov/
+            coverage/
           if-no-files-found: warn
 
   # ========================= BUILD MATRIX =========================
@@ -258,6 +272,7 @@ jobs:
         with:
           driver-opts: |
             image=moby/buildkit:v0.12.0
+          buildkitd-flags: --debug
 
       - name: Cache pip dependencies
         if: matrix.build-component != 'docker-image'
@@ -301,10 +316,12 @@ jobs:
           DOCKER_TAG="${{ needs.version-bump.outputs.docker_tag }}"
           BUILD_TIME="${{ needs.version-bump.outputs.build_time }}"
           
-          # Build Docker image with centralized values and caching
+          # Build Docker image with centralized values and optimized caching
           docker buildx build \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
+            --cache-from type=registry,ref=${{ env.DOCKER_IMAGE }}:cache \
+            --cache-to type=registry,ref=${{ env.DOCKER_IMAGE }}:cache,mode=max \
             -f deployment/docker/Dockerfile \
             -t ${{ env.DOCKER_IMAGE }}:$VERSION \
             --build-arg VERSION=$VERSION \
@@ -312,6 +329,7 @@ jobs:
             --build-arg BUILD_TIME=$BUILD_TIME \
             --build-arg ENVIRONMENT=production \
             --load \
+            --progress=plain \
             .
           
           echo "Docker image built successfully with version: $VERSION"
@@ -606,12 +624,10 @@ jobs:
 
       - name: Create GitHub Release
         if: matrix.publish-target == 'github-release'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version-bump.outputs.version }}
-          release_name: Release v${{ needs.version-bump.outputs.version }}
+          name: Release v${{ needs.version-bump.outputs.version }}
           body: |
             ## Release v${{ needs.version-bump.outputs.version }}
             
@@ -626,6 +642,9 @@ jobs:
             All tests passed successfully before release.
           draft: false
           prerelease: false
+          files: |
+            test-results/*/reports/*.html
+            documentation.zip
 
       - name: Upload release assets
         if: matrix.publish-target == 'github-release'
