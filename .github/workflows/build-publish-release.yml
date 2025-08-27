@@ -351,12 +351,12 @@ jobs:
       - name: Check for documentation changes
         id: docs-changes
         run: |
-          if git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep -E '(docs/|\.md$|\.rst$)' > /dev/null; then
+          if git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep -E '(docs/|\.md$|\.rst$|\.py$|web/frontend/src/|carla_simulator/)' > /dev/null; then
             echo "docs_changed=true" >> $GITHUB_OUTPUT
-            echo "Documentation files changed, will build docs"
+            echo "Documentation-related files changed, will build docs"
           else
             echo "docs_changed=false" >> $GITHUB_OUTPUT
-            echo "No documentation files changed, skipping docs build"
+            echo "No documentation-related files changed, skipping docs build"
           fi
 
       - name: Skip build if no changes
@@ -737,7 +737,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-package
-          path: dist/
+          path: ./
 
       - name: Download Docker image artifact
         if: matrix.publish-target == 'docker'
@@ -788,9 +788,9 @@ jobs:
           VERSION="${{ needs.version-bump.outputs.version }}"
           echo "Publishing version: $VERSION"
           
-          # Retry PyPI upload with exponential backoff
+          # Retry PyPI upload with exponential backoff (only upload actual package files)
           for i in 1 2 3; do
-            python -m twine upload --skip-existing --verbose dist/* && break
+            python -m twine upload --skip-existing --verbose dist/*.whl dist/*.tar.gz && break
             echo "PyPI upload attempt $i failed, retrying in $((i*5)) seconds..."
             sleep $((i*5))
           done
