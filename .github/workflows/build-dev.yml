@@ -145,27 +145,28 @@ jobs:
           # Run tests with coverage and generate reports
           npm run test:ci
           
-          # Create reports directory if it doesn't exist
-          mkdir -p reports
+          # Create reports directory in root if it doesn't exist
+          mkdir -p ../../reports
           
-          # Generate test report in HTML format
+          # Generate test report in HTML format and copy to root
           if [ -f "coverage/lcov-report/index.html" ]; then
-            cp coverage/lcov-report/index.html reports/frontend-test-report.html
+            cp coverage/lcov-report/index.html ../../reports/frontend-test-report.html
           else
-            echo "<html><body><h1>Frontend Test Report</h1><p>No coverage data available</p></body></html>" > reports/frontend-test-report.html
+            echo "<html><body><h1>Frontend Test Report</h1><p>No coverage data available</p></body></html>" > ../../reports/frontend-test-report.html
           fi
           
-          # Generate JUnit XML report if available
+          # Generate JUnit XML report if available and copy to root
           if [ -f "coverage/cobertura-coverage.xml" ]; then
-            cp coverage/cobertura-coverage.xml reports/frontend-junit.xml
+            cp coverage/cobertura-coverage.xml ../../reports/frontend-junit.xml
           else
-            echo '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="frontend" tests="0" failures="0" errors="0" skipped="0"></testsuite></testsuites>' > reports/frontend-junit.xml
+            echo '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="frontend" tests="0" failures="0" errors="0" skipped="0"></testsuite></testsuites>' > ../../reports/frontend-junit.xml
           fi
           
-          # Ensure coverage directory is in the right place
+          # Copy coverage directory to root
           if [ -d "coverage" ]; then
-            echo "Coverage directory found:"
-            ls -la coverage/
+            echo "Coverage directory found, copying to root..."
+            cp -r coverage ../../coverage
+            ls -la ../../coverage/
           else
             echo "No coverage directory found"
           fi
@@ -327,12 +328,10 @@ jobs:
           DOCKER_TAG="${{ needs.version.outputs.docker_tag }}"
           BUILD_TIME="${{ needs.version.outputs.build_time }}"
           
-          # Build Docker image with centralized values and optimized caching
+          # Build Docker image with centralized values and GitHub Actions caching
           docker buildx build \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
-            --cache-from type=registry,ref=${{ env.DOCKER_IMAGE }}:cache \
-            --cache-to type=registry,ref=${{ env.DOCKER_IMAGE }}:cache,mode=max \
             -f deployment/docker/Dockerfile \
             -t ${{ env.DOCKER_IMAGE }}:$VERSION \
             --build-arg VERSION=$VERSION \
