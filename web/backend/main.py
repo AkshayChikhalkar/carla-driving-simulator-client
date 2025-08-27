@@ -765,36 +765,6 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = handle_uncaught_exception
 
-
-# Remove the custom root and catch-all routes since StaticFiles will handle them
-# @app.get("/")
-# async def root():
-#     """Serve React app index.html for root and non-API routes"""
-#     if os.path.exists(frontend_build_dir):
-#         index_path = os.path.join(frontend_build_dir, "index.html")
-#         if os.path.exists(index_path):
-#             return FileResponse(index_path, media_type="text/html")
-#     
-#     # Fallback if React build doesn't exist
-#     return {"message": "CARLA Simulator Backend is running", "status": "healthy"}
-
-# # Catch-all route for React client-side routing
-# @app.get("/{full_path:path}")
-# async def catch_all(full_path: str):
-#     """Serve React app for all non-API routes to support client-side routing"""
-#     # Don't serve React app for API routes
-#     if full_path.startswith("api/") or full_path.startswith("health") or full_path.startswith("metrics"):
-#         raise HTTPException(status_code=404, detail="Not found")
-#     
-#     # Serve React app for all other routes
-#     if os.path.exists(frontend_build_dir):
-#         index_path = os.path.join(frontend_build_dir, "index.html")
-#         if os.path.exists(index_path):
-#             return FileResponse(index_path, media_type="text/html")
-#     
-#     raise HTTPException(status_code=404, detail="Not found")
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint - always returns 200 if process is alive"""
@@ -1776,13 +1746,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Prioritize starting state over transitioning state to show correct status during startup
                             if state["is_starting"]:
                                 status_message = state.get("status_message") or "Hang on,\nLoading Simulation..."
-                            # elif state["is_transitioning"]:
-                            #     # Don't show "Transitioning between scenarios..." - just show the current scenario or default message
-                            #     current = state.get("current_scenario")
-                            #     if current:
-                            #         status_message = f"Running: {current}"
-                            #     else:
-                            #         status_message = state.get("status_message") or "Simulation running"
                             else:
                                 # Prefer showing the running scenario name with index/total
                                 current = state.get("current_scenario")
