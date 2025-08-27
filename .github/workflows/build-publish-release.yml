@@ -440,6 +440,11 @@ jobs:
       - name: Build Python package
         if: matrix.build-component == 'python-package' && steps.python-changes.outputs.python_changed == 'true'
         run: |
+          # Update version in __init__.py
+          VERSION="${{ needs.version-bump.outputs.version }}"
+          echo "Updating package version to: $VERSION"
+          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" carla_simulator/__init__.py
+          
           # Clean any existing builds
           rm -rf dist/ build/ *.egg-info/
           # Build package using modern build system
