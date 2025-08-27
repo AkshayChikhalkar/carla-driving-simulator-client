@@ -25,7 +25,7 @@
     "start": "craco start",
     "build": "craco build",
     "test": "craco test",
-    "test:ci": "craco test --no-watch --coverage --watchAll=false --passWithNoTests",
+    "test:ci": "craco test --no-watch --coverage --watchAll=false --passWithNoTests --coverageReporters=html --coverageReporters=text --coverageReporters=lcov --coverageReporters=cobertura",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

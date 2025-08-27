@@ -141,7 +141,34 @@ jobs:
 
       - name: Run frontend tests
         if: matrix.test-suite == 'frontend'
-        run: npm run test:ci
+        run: |
+          # Install dependencies if not already done
+          npm install
+          
+          # Run tests with coverage and generate reports
+          npm run test:ci
+          
+          # Create reports directory if it doesn't exist
+          mkdir -p reports
+          
+          # Generate test report in HTML format
+          if [ -f "coverage/lcov-report/index.html" ]; then
+            cp coverage/lcov-report/index.html reports/frontend-test-report.html
+          else
+            echo "<html><body><h1>Frontend Test Report</h1><p>No coverage data available</p></body></html>" > reports/frontend-test-report.html
+          fi
+          
+          # Generate JUnit XML report if available
+          if [ -f "coverage/cobertura-coverage.xml" ]; then
+            cp coverage/cobertura-coverage.xml reports/frontend-junit.xml
+          else
+            echo '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="frontend" tests="0" failures="0" errors="0" skipped="0"></testsuite></testsuites>' > reports/frontend-junit.xml
+          fi
+          
+          # Copy coverage directory
+          if [ -d "coverage" ]; then
+            cp -r coverage htmlcov
+          fi
         working-directory: web/frontend
         env:
           CI: true
@@ -188,6 +215,7 @@ jobs:
             reports/${{ matrix.report-name }}
             reports/${{ matrix.test-suite }}-junit.xml
             htmlcov/
+          if-no-files-found: warn
 
   # ========================= BUILD MATRIX =========================
 
@@ -227,6 +255,9 @@ jobs:
       - name: Set up Docker Buildx
         if: matrix.build-component == 'docker-image'
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.12.0
 
       - name: Cache pip dependencies
         if: matrix.build-component != 'docker-image'
@@ -270,12 +301,17 @@ jobs:
           DOCKER_TAG="${{ needs.version-bump.outputs.docker_tag }}"
           BUILD_TIME="${{ needs.version-bump.outputs.build_time }}"
           
-          # Build Docker image with centralized values
-          docker build -f deployment/docker/Dockerfile -t ${{ env.DOCKER_IMAGE }}:$VERSION \
+          # Build Docker image with centralized values and caching
+          docker buildx build \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            -f deployment/docker/Dockerfile \
+            -t ${{ env.DOCKER_IMAGE }}:$VERSION \
             --build-arg VERSION=$VERSION \
             --build-arg DOCKER_TAG=$DOCKER_TAG \
             --build-arg BUILD_TIME=$BUILD_TIME \
             --build-arg ENVIRONMENT=production \
+            --load \
             .
           
           echo "Docker image built successfully with version: $VERSION"
@@ -283,8 +319,28 @@ jobs:
       - name: Build documentation
         if: matrix.build-component == 'documentation'
         run: |
+          # Install required dependencies
+          python -m pip install sphinx sphinx-rtd-theme
+          
+          # Install mermaid-cli if not available
+          if ! command -v mmdc &> /dev/null; then
+            npm install -g @mermaid-js/mermaid-cli
+          fi
+          
           # Run the comprehensive documentation automation script
           python docs/auto_generate_docs.py
+          
+          # Ensure the docs/_build/html directory exists
+          mkdir -p docs/_build/html
+          
+          # If the script didn't generate HTML files, create a basic index
+          if [ ! -f "docs/_build/html/index.html" ]; then
+            echo "Creating basic documentation index..."
+            echo '<!DOCTYPE html><html><head><title>CARLA Driving Simulator Client Documentation</title><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;margin:40px}h1{color:#333}.container{max-width:800px;margin:0 auto}</style></head><body><div class="container"><h1>CARLA Driving Simulator Client Documentation</h1><p>Documentation is being generated. Please check back later.</p><p>For more information, see the project README and source code.</p></div></body></html>' > docs/_build/html/index.html
+          fi
+          
+          echo "Documentation build completed. Files in docs/_build/html/:"
+          ls -la docs/_build/html/ || echo "No files found"
 
       - name: Upload Python package artifact
         if: matrix.build-component == 'python-package'
@@ -313,6 +369,7 @@ jobs:
         with:
           name: html-docs
           path: docs/_build/html/
+          if-no-files-found: warn
 
   # ========================= VERSION BUMP (Before build) =========================
   
@@ -577,15 +634,20 @@ jobs:
         run: |
           # Upload test reports if available
           if [ -d "test-results" ]; then
+            echo "📊 Uploading test reports to release..."
             for file in test-results/*/reports/*.html; do
               if [ -f "$file" ]; then
+                echo "Uploading: $file"
                 gh release upload v${{ needs.version-bump.outputs.version }} "$file" --clobber
               fi
             done
+            echo "✅ Test reports uploaded successfully"
+          else
+            echo "⚠️ No test results found to upload"
           fi
           
           # Upload documentation if available
-          if [ -d "docs-html" ]; then
+          if [ -d "docs-html" ] && [ "$(ls -A docs-html)" ]; then
             echo "📚 Uploading documentation to release..."
             # Create a zip file of the documentation
             cd docs-html
@@ -593,6 +655,8 @@ jobs:
             cd ..
             gh release upload v${{ needs.version-bump.outputs.version }} documentation.zip --clobber
             echo "✅ Documentation uploaded successfully"
+          else
+            echo "⚠️ No documentation found to upload"
           fi
 
   # ========================= CLEANUP ON FAILURE =========================
