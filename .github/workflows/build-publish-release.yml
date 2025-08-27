@@ -367,6 +367,9 @@ jobs:
         run: |
           echo "::notice::No relevant changes detected for ${{ matrix.build-component }}, skipping build"
           echo "::notice::This saves build time and resources"
+          
+          # Create a marker file to indicate this build was skipped
+          echo "SKIPPED_$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > .build-skipped-${{ matrix.build-component }}
           exit 0
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -432,8 +435,7 @@ jobs:
           echo "::notice::- Component: ${{ matrix.build-component }}"
           echo "::notice::- Duration: $(( $(date +%s) - $(date -d "${{ steps.build-start.outputs.build_start_time }}" +%s) ))s"
           echo "::notice::- Runner: ${{ runner.os }}"
-          echo "::notice::- CPU: ${{ runner.cpu }}"
-          echo "::notice::- Memory: ${{ runner.memory }}"
+          echo "::notice::- Runner: ${{ runner.name }}"
 
       - name: Build Python package
         if: matrix.build-component == 'python-package' && steps.python-changes.outputs.python_changed == 'true'
@@ -442,6 +444,13 @@ jobs:
           rm -rf dist/ build/ *.egg-info/
           # Build package using modern build system
           python -m build
+
+      - name: Handle skipped Python package build
+        if: matrix.build-component == 'python-package' && steps.python-changes.outputs.python_changed == 'false'
+        run: |
+          echo "::notice::Python package build was skipped due to no changes"
+          echo "::notice::Creating empty marker file for artifact upload"
+          touch python-package-skipped.txt
 
       - name: Build Docker image
         if: matrix.build-component == 'docker-image' && (steps.python-changes.outputs.python_changed == 'true' || steps.frontend-changes.outputs.frontend_changed == 'true')
@@ -501,16 +510,34 @@ jobs:
           echo "Documentation build completed. Files in docs/_build/html/:"
           ls -la docs/_build/html/ || echo "No files found"
 
+      - name: Handle skipped documentation build
+        if: matrix.build-component == 'documentation' && steps.docs-changes.outputs.docs_changed == 'false'
+        run: |
+          echo "::notice::Documentation build was skipped due to no changes"
+          echo "::notice::Creating empty marker file for artifact upload"
+          touch docs-skipped.txt
+
       - name: Upload Python package artifact
         if: matrix.build-component == 'python-package'
         uses: actions/upload-artifact@v4
         with:
           name: python-package
-          path: dist/
+          path: |
+            dist/
+            python-package-skipped.txt
+          if-no-files-found: warn
 
       - name: Save Docker image
         if: matrix.build-component == 'docker-image'
         run: |
+          # Check if build was skipped
+          if [ -f ".build-skipped-docker-image" ]; then
+            echo "::notice::Docker build was skipped due to no changes"
+            echo "::notice::Creating empty marker file for artifact upload"
+            touch docker-image-skipped.txt
+            exit 0
+          fi
+          
           # Use centralized version
           VERSION="${{ needs.version-bump.outputs.version }}"
           docker save ${{ env.DOCKER_IMAGE }}:$VERSION | gzip > docker-image.tar.gz
@@ -520,14 +547,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
-          path: docker-image.tar.gz
+          path: |
+            docker-image.tar.gz
+            docker-image-skipped.txt
+          if-no-files-found: warn
 
       - name: Upload documentation artifact
         if: matrix.build-component == 'documentation'
         uses: actions/upload-artifact@v4
         with:
           name: html-docs
-          path: docs/_build/html/
+          path: |
+            docs/_build/html/
+            docs-skipped.txt
           if-no-files-found: warn
 
       - name: Cache build artifacts
@@ -738,6 +770,20 @@ jobs:
             exit 1
           fi
           
+          # Check if Python package build was skipped
+          if [ -f "python-package-skipped.txt" ]; then
+            echo "::notice::Python package build was skipped due to no changes"
+            echo "::notice::Skipping PyPI publish - no new package to publish"
+            exit 0
+          fi
+          
+          # Check if Python package artifacts exist
+          if [ ! -d "dist" ] || [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
+            echo "❌ Python package artifacts not found in dist/"
+            echo "::warning::Python package was not built or artifact upload failed"
+            exit 1
+          fi
+          
           # Use centralized version
           VERSION="${{ needs.version-bump.outputs.version }}"
           echo "Publishing version: $VERSION"
@@ -758,6 +804,20 @@ jobs:
           # Check Docker credentials
           if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "❌ Docker Hub credentials not configured. Skipping Docker publish."
+            exit 1
+          fi
+          
+          # Check if Docker build was skipped
+          if [ -f "docker-image-skipped.txt" ]; then
+            echo "::notice::Docker build was skipped due to no changes"
+            echo "::notice::Skipping Docker Hub publish - no new image to publish"
+            exit 0
+          fi
+          
+          # Check if Docker image artifact exists
+          if [ ! -f "docker-image.tar.gz" ]; then
+            echo "❌ Docker image artifact not found: docker-image.tar.gz"
+            echo "::warning::Docker image was not built or artifact upload failed"
             exit 1
           fi
           
@@ -830,7 +890,10 @@ jobs:
           fi
           
           # Upload documentation if available
-          if [ -d "docs-html" ] && [ "$(ls -A docs-html)" ]; then
+          if [ -f "docs-skipped.txt" ]; then
+            echo "::notice::Documentation build was skipped due to no changes"
+            echo "::notice::Skipping documentation upload to release"
+          elif [ -d "docs-html" ] && [ "$(ls -A docs-html)" ]; then
             echo "📚 Uploading documentation to release..."
             # Create a zip file of the documentation
             cd docs-html
