@@ -60,22 +60,26 @@ jobs:
             cov-module: carla_simulator
             report-name: carla-simulator-test-report.html
             env-vars: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+            timeout: 10
           - test-suite: web-backend
             test-path: web/backend/tests
             cov-module: web.backend
             report-name: web-backend-test-report.html
             env-vars: "TESTING=true WEB_FILE_LOGS_ENABLED=false DISABLE_AUTH_FOR_TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+            timeout: 8
           - test-suite: frontend
             test-path: web/frontend
             cov-module: frontend
             report-name: frontend-test-report.html
             env-vars: "CI=true NODE_ENV=test"
+            timeout: 5
           - test-suite: integration
             test-path: tests
             cov-module: integration
             report-name: integration-test-report.html
             env-vars: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
-      # Optimize parallel execution
+            timeout: 15
+      # Optimize parallel execution with resource allocation
       fail-fast: false
       max-parallel: 4
     
@@ -247,6 +251,51 @@ jobs:
             coverage/
           if-no-files-found: warn
 
+  # ========================= TEST AGGREGATION =========================
+
+  test-aggregation:
+    name: Aggregate Test Results
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+          pattern: "*-test-results"
+
+      - name: Aggregate coverage reports
+        run: |
+          mkdir -p aggregated-coverage
+          
+          # Find and copy all coverage files
+          find test-results -name "coverage.xml" -exec cp {} aggregated-coverage/ \;
+          find test-results -name "htmlcov" -exec cp -r {} aggregated-coverage/ \;
+          
+          echo "Aggregated coverage files:"
+          ls -la aggregated-coverage/
+
+      - name: Generate unified test report
+        run: |
+          mkdir -p aggregated-reports
+          
+          # Combine all HTML test reports
+          echo '<!DOCTYPE html><html><head><title>Unified Test Report</title></head><body><h1>Test Results Summary</h1>' > aggregated-reports/unified-report.html
+          
+          find test-results -name "*.html" -exec echo '<h2>{}</h2><iframe src="../{}" width="100%" height="600"></iframe>' \; >> aggregated-reports/unified-report.html
+          
+          echo '</body></html>' >> aggregated-reports/unified-report.html
+
+      - name: Upload aggregated results
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggregated-test-results
+          path: |
+            aggregated-coverage/
+            aggregated-reports/
+          if-no-files-found: warn
+
   # ========================= BUILD MATRIX =========================
 
   build:
@@ -260,14 +309,65 @@ jobs:
         include:
           - build-component: python-package
             description: "Python Package"
+            timeout: 5
           - build-component: docker-image
             description: "Docker Image"
+            timeout: 15
           - build-component: documentation
             description: "Documentation"
+            timeout: 8
+      # Optimize build parallelization
+      fail-fast: false
+      max-parallel: 3
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for Python changes
+        id: python-changes
+        run: |
+          if git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep -E '\.(py|txt|toml)$' | grep -v 'web/frontend/' > /dev/null; then
+            echo "python_changed=true" >> $GITHUB_OUTPUT
+            echo "Python files changed, will build Python package"
+          else
+            echo "python_changed=false" >> $GITHUB_OUTPUT
+            echo "No Python files changed, skipping Python package build"
+          fi
+
+      - name: Check for frontend changes
+        id: frontend-changes
+        run: |
+          if git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep 'web/frontend/' > /dev/null; then
+            echo "frontend_changed=true" >> $GITHUB_OUTPUT
+            echo "Frontend files changed, will build frontend"
+          else
+            echo "frontend_changed=false" >> $GITHUB_OUTPUT
+            echo "No frontend files changed, skipping frontend build"
+          fi
+
+      - name: Check for documentation changes
+        id: docs-changes
+        run: |
+          if git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep -E '(docs/|\.md$|\.rst$)' > /dev/null; then
+            echo "docs_changed=true" >> $GITHUB_OUTPUT
+            echo "Documentation files changed, will build docs"
+          else
+            echo "docs_changed=false" >> $GITHUB_OUTPUT
+            echo "No documentation files changed, skipping docs build"
+          fi
+
+      - name: Skip build if no changes
+        if: |
+          (matrix.build-component == 'python-package' && steps.python-changes.outputs.python_changed == 'false') ||
+          (matrix.build-component == 'docker-image' && steps.python-changes.outputs.python_changed == 'false' && steps.frontend-changes.outputs.frontend_changed == 'false') ||
+          (matrix.build-component == 'documentation' && steps.docs-changes.outputs.docs_changed == 'false')
+        run: |
+          echo "::notice::No relevant changes detected for ${{ matrix.build-component }}, skipping build"
+          echo "::notice::This saves build time and resources"
+          exit 0
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         if: matrix.build-component != 'docker-image'
@@ -311,6 +411,7 @@ jobs:
         run: npm install -g @mermaid-js/mermaid-cli
 
       - name: Record build start time
+        id: build-start
         run: |
           echo "build_start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
           echo "::notice::Build started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -319,11 +420,23 @@ jobs:
         if: always()
         run: |
           echo "build_end_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "build_component=${{ matrix.build-component }}" >> $GITHUB_OUTPUT
+          echo "build_duration=$(( $(date +%s) - $(date -d "${{ steps.build-start.outputs.build_start_time }}" +%s) ))" >> $GITHUB_OUTPUT
+          
           echo "::notice::Build completed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           echo "::notice::Build component: ${{ matrix.build-component }}"
+          echo "::notice::Build duration: $(( $(date +%s) - $(date -d "${{ steps.build-start.outputs.build_start_time }}" +%s) )) seconds"
+          
+          # Log performance metrics
+          echo "::notice::Performance metrics:"
+          echo "::notice::- Component: ${{ matrix.build-component }}"
+          echo "::notice::- Duration: $(( $(date +%s) - $(date -d "${{ steps.build-start.outputs.build_start_time }}" +%s) ))s"
+          echo "::notice::- Runner: ${{ runner.os }}"
+          echo "::notice::- CPU: ${{ runner.cpu }}"
+          echo "::notice::- Memory: ${{ runner.memory }}"
 
       - name: Build Python package
-        if: matrix.build-component == 'python-package'
+        if: matrix.build-component == 'python-package' && steps.python-changes.outputs.python_changed == 'true'
         run: |
           # Clean any existing builds
           rm -rf dist/ build/ *.egg-info/
@@ -331,7 +444,7 @@ jobs:
           python -m build
 
       - name: Build Docker image
-        if: matrix.build-component == 'docker-image'
+        if: matrix.build-component == 'docker-image' && (steps.python-changes.outputs.python_changed == 'true' || steps.frontend-changes.outputs.frontend_changed == 'true')
         run: |
           # Validate Dockerfile existence
           if [ ! -f "deployment/docker/Dockerfile" ]; then
@@ -361,7 +474,7 @@ jobs:
           echo "Docker image built successfully with version: $VERSION"
 
       - name: Build documentation
-        if: matrix.build-component == 'documentation'
+        if: matrix.build-component == 'documentation' && steps.docs-changes.outputs.docs_changed == 'true'
         run: |
           # Install required dependencies
           python -m pip install sphinx sphinx-rtd-theme
@@ -416,6 +529,18 @@ jobs:
           name: html-docs
           path: docs/_build/html/
           if-no-files-found: warn
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist/
+            build/
+            *.egg-info/
+            docs/_build/
+          key: ${{ runner.os }}-build-${{ matrix.build-component }}-${{ hashFiles('**/*.py', '**/*.js', '**/*.json', '**/*.md', '**/*.rst') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ matrix.build-component }}- 
 
   # ========================= VERSION BUMP (Before build) =========================
   

@@ -1,7 +1,7 @@
 # Multi-stage build for smaller final image
 FROM python:3.11-slim AS builder
 
-# Install build dependencies
+# Install build dependencies (cache this layer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -12,22 +12,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies including CARLA wheel
+# Copy and install Python dependencies first (cache this layer)
 COPY requirements/requirements-docker.txt ./requirements-docker.txt
 COPY deployment/wheels/ ./wheels/
 RUN pip install --no-cache-dir -r requirements-docker.txt
 
-# Build frontend
+# Copy package files for npm install (cache this layer)
 COPY web/frontend/package*.json web/frontend/craco.config.js ./web/frontend/
-COPY web/frontend/src/ ./web/frontend/src/
-COPY web/frontend/public/ ./web/frontend/public/
+
+# Install npm dependencies (cache this layer)
 WORKDIR /app/web/frontend
-RUN npm install --production=true && npm run build
+RUN npm ci --only=production --no-audit --no-fund
+
+# Copy source files and build frontend
+COPY web/frontend/src/ ./src/
+COPY web/frontend/public/ ./public/
+RUN npm run build
 
 # Final stage
 FROM python:3.11-slim
 
-# Install only essential runtime dependencies
+# Install only essential runtime dependencies (cache this layer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     dos2unix \
