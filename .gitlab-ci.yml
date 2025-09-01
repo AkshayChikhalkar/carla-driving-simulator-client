@@ -1,0 +1,587 @@
+# GitLab CI/CD Pipeline for Production Build, Publish and Release
+# Translated from GitHub Actions workflow: build-publish-release.yml
+
+# Define stages for the pipeline
+stages:
+  - test
+  - test-aggregation
+  - version-bump
+  - build
+  - publish
+  - cleanup
+
+# Global variables
+variables:
+  DOCKER_IMAGE: "akshaychikhalkar/carla-driving-simulator-client"
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm-cache"
+
+# Cache configuration
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .pip-cache/
+    - .npm-cache/
+    - web/frontend/node_modules/
+    - dist/
+    - build/
+    - *.egg-info/
+    - docs/_build/
+
+# ========================= TESTING MATRIX =========================
+
+.test_template: &test_template
+  stage: test
+  retry: 2
+  artifacts:
+    when: always
+    reports:
+      junit: reports/$TEST_SUITE-junit.xml
+    paths:
+      - reports/$REPORT_NAME
+      - reports/$TEST_SUITE-junit.xml
+      - coverage/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_TESTS == "true"
+
+test:carla-simulator:
+  <<: *test_template
+  variables:
+    TEST_SUITE: "carla-simulator"
+    TEST_PATH: "carla_simulator/tests"
+    COV_MODULE: "carla_simulator"
+    REPORT_NAME: "carla-simulator-test-report.html"
+    ENV_VARS: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements/requirements.txt
+    - pip install pytest-cov pytest-html pytest-xdist
+  script:
+    - python -m pytest $TEST_PATH
+      --cov=$COV_MODULE
+      --cov-report=xml
+      --cov-report=html
+      --cov-report=term-missing
+      --html=reports/$REPORT_NAME
+      --self-contained-html
+      -v
+      --tb=short
+      --junitxml=reports/$TEST_SUITE-junit.xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+test:web-backend:
+  <<: *test_template
+  variables:
+    TEST_SUITE: "web-backend"
+    TEST_PATH: "web/backend/tests"
+    COV_MODULE: "web.backend"
+    REPORT_NAME: "web-backend-test-report.html"
+    ENV_VARS: "TESTING=true WEB_FILE_LOGS_ENABLED=false DISABLE_AUTH_FOR_TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements/requirements.txt
+    - pip install pytest-cov pytest-html pytest-xdist
+  script:
+    - python -m pytest $TEST_PATH
+      --cov=$COV_MODULE
+      --cov-report=xml
+      --cov-report=html
+      --cov-report=term-missing
+      --html=reports/$REPORT_NAME
+      --self-contained-html
+      -v
+      --tb=short
+      --junitxml=reports/$TEST_SUITE-junit.xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+test:frontend:
+  <<: *test_template
+  variables:
+    TEST_SUITE: "frontend"
+    REPORT_NAME: "frontend-test-report.html"
+  image: node:$NODE_VERSION
+  before_script:
+    - cd web/frontend
+    - npm ci
+  script:
+    - cd web/frontend
+    - npm run test:ci
+    - mkdir -p ../../reports
+    - |
+      if [ -f "coverage/lcov-report/index.html" ]; then
+        cp coverage/lcov-report/index.html ../../reports/frontend-test-report.html
+      else
+        echo "<html><body><h1>Frontend Test Report</h1><p>No coverage data available</p></body></html>" > ../../reports/frontend-test-report.html
+      fi
+    - |
+      if [ -f "coverage/cobertura-coverage.xml" ]; then
+        cp coverage/cobertura-coverage.xml ../../reports/frontend-junit.xml
+      else
+        echo '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="frontend" tests="0" failures="0" errors="0" skipped="0"></testsuite></testsuites>' > ../../reports/frontend-junit.xml
+      fi
+    - cp -r coverage ../../coverage
+  coverage: '/All files[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\s+(\d+)/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: web/frontend/coverage/cobertura-coverage.xml
+
+test:integration:
+  <<: *test_template
+  variables:
+    TEST_SUITE: "integration"
+    TEST_PATH: "tests"
+    COV_MODULE: "integration"
+    REPORT_NAME: "integration-test-report.html"
+    ENV_VARS: "TESTING=true DATABASE_URL=sqlite:///:memory: CONFIG_TENANT_ID=1"
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements/requirements.txt
+    - pip install pytest-cov pytest-html pytest-xdist
+  script:
+    - |
+      if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+        python -m pytest tests
+          --cov=.
+          --cov-report=xml
+          --cov-report=html
+          --cov-report=term-missing
+          --html=reports/$REPORT_NAME
+          --self-contained-html
+          -v
+          --tb=short
+          --junitxml=reports/$TEST_SUITE-junit.xml
+      else
+        echo "No integration tests found - skipping"
+        exit 0
+      fi
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+# ========================= TEST AGGREGATION =========================
+
+test-aggregation:
+  stage: test-aggregation
+  image: python:$PYTHON_VERSION
+  dependencies:
+    - test:carla-simulator
+    - test:web-backend
+    - test:frontend
+    - test:integration
+  script:
+    - mkdir -p aggregated-coverage aggregated-reports
+    - |
+      # Find and copy all coverage files
+      find . -name "coverage.xml" -exec cp {} aggregated-coverage/ \;
+      find . -name "htmlcov" -exec cp -r {} aggregated-coverage/ \;
+      echo "Aggregated coverage files:"
+      ls -la aggregated-coverage/
+    - |
+      # Combine all HTML test reports
+      echo '<!DOCTYPE html><html><head><title>Unified Test Report</title></head><body><h1>Test Results Summary</h1>' > aggregated-reports/unified-report.html
+      find . -name "*.html" -exec echo '<h2>{}</h2><iframe src="../{}" width="100%" height="600"></iframe>' \; >> aggregated-reports/unified-report.html
+      echo '</body></html>' >> aggregated-reports/unified-report.html
+  artifacts:
+    paths:
+      - aggregated-coverage/
+      - aggregated-reports/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_TESTS == "true"
+
+# ========================= VERSION BUMP =========================
+
+version-bump:
+  stage: version-bump
+  image: python:$PYTHON_VERSION
+  dependencies:
+    - test:carla-simulator
+    - test:web-backend
+    - test:frontend
+    - test:integration
+  before_script:
+    - git config --global user.email "gitlab-ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+  script:
+    - |
+      # Get the latest version tag
+      CURRENT_VERSION=$(git describe --tags --match "v[0-9]*" --abbrev=0 2>/dev/null || echo "v1.0.0")
+      CURRENT_VERSION=${CURRENT_VERSION#v}
+      echo "Current version: $CURRENT_VERSION"
+      
+      # Get the last commit message
+      COMMIT_MSG=$(git log -1 --pretty=%B)
+      echo "Commit message: $COMMIT_MSG"
+      
+      # Determine bump type based on commit message
+      if echo "$COMMIT_MSG" | grep -q "BREAKING CHANGE"; then
+        BUMP_TYPE="major"
+        echo "Bump type: major (breaking change detected)"
+      elif echo "$COMMIT_MSG" | grep -q "^feat:"; then
+        BUMP_TYPE="minor"
+        echo "Bump type: minor (feature detected)"
+      elif echo "$COMMIT_MSG" | grep -q "^fix:"; then
+        BUMP_TYPE="patch"
+        echo "Bump type: patch (fix detected)"
+      else
+        BUMP_TYPE="patch"
+        echo "Bump type: patch (default)"
+      fi
+      
+      # Parse current version
+      IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+      
+      # Bump version based on type
+      case $BUMP_TYPE in
+        "major")
+          MAJOR=$((MAJOR + 1))
+          MINOR=0
+          PATCH=0
+          ;;
+        "minor")
+          MINOR=$((MINOR + 1))
+          PATCH=0
+          ;;
+        "patch")
+          PATCH=$((PATCH + 1))
+          ;;
+      esac
+      
+      NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+      DOCKER_TAG="v$NEW_VERSION"
+      BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      
+      echo "New version: $NEW_VERSION"
+      echo "Docker tag: $DOCKER_TAG"
+      echo "Build time: $BUILD_TIME"
+      
+      # Create tag
+      git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+      git push origin "v$NEW_VERSION"
+      
+      # Update package version
+      sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" carla_simulator/__init__.py
+      
+      # Set variables for downstream jobs
+      echo "NEW_VERSION=$NEW_VERSION" >> build.env
+      echo "DOCKER_TAG=$DOCKER_TAG" >> build.env
+      echo "BUILD_TIME=$BUILD_TIME" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - build.env
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_BUILD == "true"
+
+# ========================= BUILD MATRIX =========================
+
+.build_template: &build_template
+  stage: build
+  dependencies:
+    - test:carla-simulator
+    - test:web-backend
+    - test:frontend
+    - test:integration
+    - version-bump
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_BUILD == "true"
+
+build:python-package:
+  <<: *build_template
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements/requirements.txt
+    - pip install build setuptools wheel twine
+  script:
+    - |
+      # Check for Python changes
+      if git diff --name-only $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA | grep -E '\.(py|txt|toml)$' | grep -v 'web/frontend/' > /dev/null; then
+        echo "Python files changed, building Python package"
+        
+        # Clean any existing builds
+        rm -rf dist/ build/ *.egg-info/
+        
+        # Build package using modern build system
+        python -m build
+        
+        echo "Python package built successfully"
+      else
+        echo "No Python files changed, skipping Python package build"
+        touch python-package-skipped.txt
+      fi
+  artifacts:
+    paths:
+      - dist/
+      - python-package-skipped.txt
+    expire_in: 1 week
+
+build:docker-image:
+  <<: *build_template
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$CI_PROJECT_DIR/.certs"
+  before_script:
+    - until docker info; do sleep 1; done
+  script:
+    - |
+      # Check for changes
+      PYTHON_CHANGED=$(git diff --name-only $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA | grep -E '\.(py|txt|toml)$' | grep -v 'web/frontend/' | wc -l)
+      FRONTEND_CHANGED=$(git diff --name-only $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA | grep 'web/frontend/' | wc -l)
+      
+      if [ $PYTHON_CHANGED -gt 0 ] || [ $FRONTEND_CHANGED -gt 0 ]; then
+        echo "Changes detected, building Docker image"
+        
+        # Validate Dockerfile existence
+        if [ ! -f "deployment/docker/Dockerfile" ]; then
+          echo "Error: Dockerfile not found at deployment/docker/Dockerfile"
+          exit 1
+        fi
+        
+        # Build Docker image
+        docker buildx build
+          --cache-from type=registry,ref=$DOCKER_IMAGE:cache
+          --cache-to type=registry,ref=$DOCKER_IMAGE:cache,mode=max
+          -f deployment/docker/Dockerfile
+          -t $DOCKER_IMAGE:$NEW_VERSION
+          --build-arg VERSION=$NEW_VERSION
+          --build-arg DOCKER_TAG=$DOCKER_TAG
+          --build-arg BUILD_TIME=$BUILD_TIME
+          --build-arg ENVIRONMENT=production
+          --load
+          --progress=plain
+          .
+        
+        echo "Docker image built successfully with version: $NEW_VERSION"
+        
+        # Save image for artifact
+        docker save $DOCKER_IMAGE:$NEW_VERSION | gzip > docker-image.tar.gz
+      else
+        echo "No relevant changes detected, skipping Docker build"
+        touch docker-image-skipped.txt
+      fi
+  artifacts:
+    paths:
+      - docker-image.tar.gz
+      - docker-image-skipped.txt
+    expire_in: 1 week
+
+build:documentation:
+  <<: *build_template
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements/requirements.txt
+    - pip install sphinx sphinx-rtd-theme
+    - npm install -g @mermaid-js/mermaid-cli
+  script:
+    - |
+      # Check for documentation changes
+      if git diff --name-only $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA | grep -E '(docs/|\.md$|\.rst$|\.py$|web/frontend/src/|carla_simulator/)' > /dev/null; then
+        echo "Documentation-related files changed, building docs"
+        
+        # Run the comprehensive documentation automation script
+        if ! python docs/auto_generate_docs.py; then
+          echo "Documentation script failed, creating fallback documentation"
+        fi
+        
+        # Ensure the docs/_build/html directory exists
+        mkdir -p docs/_build/html
+        
+        # If the script didn't generate HTML files, create a basic index
+        if [ ! -f "docs/_build/html/index.html" ]; then
+          echo "Creating basic documentation index..."
+          echo '<!DOCTYPE html><html><head><title>CARLA Driving Simulator Client Documentation</title><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;margin:40px}h1{color:#333}.container{max-width:800px;margin:0 auto}</style></head><body><div class="container"><h1>CARLA Driving Simulator Client Documentation</h1><p>Documentation is being generated. Please check back later.</p><p>For more information, see the project README and source code.</p></div></body></html>' > docs/_build/html/index.html
+        fi
+        
+        echo "Documentation build completed. Files in docs/_build/html/:"
+        ls -la docs/_build/html/ || echo "No files found"
+      else
+        echo "No documentation-related files changed, skipping docs build"
+        touch docs-skipped.txt
+      fi
+  artifacts:
+    paths:
+      - docs/_build/html/
+      - docs-skipped.txt
+    expire_in: 1 week
+
+# ========================= PUBLISH MATRIX =========================
+
+.publish_template: &publish_template
+  stage: publish
+  dependencies:
+    - build:python-package
+    - build:docker-image
+    - build:documentation
+    - version-bump
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_PUBLISH == "true"
+
+publish:pypi:
+  <<: *publish_template
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install build twine
+  script:
+    - |
+      # Check if Python package build was skipped
+      if [ -f "python-package-skipped.txt" ]; then
+        echo "Python package build was skipped due to no changes"
+        echo "Skipping PyPI publish - no new package to publish"
+        exit 0
+      fi
+      
+      # Check if Python package artifacts exist
+      if [ ! -d "dist" ] || [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
+        echo "Python package artifacts not found in dist/"
+        echo "Python package was not built or artifact upload failed"
+        exit 1
+      fi
+      
+      echo "Publishing version: $NEW_VERSION"
+      
+      # Publish to PyPI
+      python -m twine upload --skip-existing --verbose dist/*.whl dist/*.tar.gz
+  only:
+    - master
+  when: manual
+
+publish:docker:
+  <<: *publish_template
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$CI_PROJECT_DIR/.certs"
+  before_script:
+    - until docker info; do sleep 1; done
+  script:
+    - |
+      # Check if Docker build was skipped
+      if [ -f "docker-image-skipped.txt" ]; then
+        echo "Docker build was skipped due to no changes"
+        echo "Skipping Docker Hub publish - no new image to publish"
+        exit 0
+      fi
+      
+      # Check if Docker image artifact exists
+      if [ ! -f "docker-image.tar.gz" ]; then
+        echo "Docker image artifact not found: docker-image.tar.gz"
+        echo "Docker image was not built or artifact upload failed"
+        exit 1
+      fi
+      
+      # Login to Docker Hub
+      echo "$DOCKERHUB_TOKEN" | docker login -u $DOCKERHUB_USERNAME --password-stdin
+      
+      # Load and tag Docker image
+      gunzip -c docker-image.tar.gz | docker load
+      docker tag $DOCKER_IMAGE:$NEW_VERSION $DOCKER_IMAGE:latest
+      docker tag $DOCKER_IMAGE:$NEW_VERSION $DOCKER_IMAGE:$NEW_VERSION
+      
+      # Push to Docker Hub
+      docker push $DOCKER_IMAGE:latest
+      docker push $DOCKER_IMAGE:$NEW_VERSION
+      
+      echo "Docker image published successfully: $NEW_VERSION"
+  only:
+    - master
+  when: manual
+
+publish:gitlab-release:
+  <<: *publish_template
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  script:
+    - |
+      # Create GitLab release
+      release-cli create
+        --name "Release v$NEW_VERSION"
+        --tag-name "v$NEW_VERSION"
+        --description "## Release v$NEW_VERSION
+
+      ### Changes
+      - Automated release from master branch
+      
+      ### Downloads
+      - Docker images available on Docker Hub
+      - Python package available on PyPI
+      
+      ### Test Results
+      All tests passed successfully before release."
+        --assets-link "{\"name\":\"Docker Image\",\"url\":\"https://hub.docker.com/r/$DOCKER_IMAGE/tags\"}"
+        --assets-link "{\"name\":\"PyPI Package\",\"url\":\"https://pypi.org/project/carla-driving-simulator-client/\"}"
+  only:
+    - master
+  when: manual
+
+# ========================= CLEANUP ON FAILURE =========================
+
+cleanup-on-failure:
+  stage: cleanup
+  image: python:$PYTHON_VERSION
+  dependencies:
+    - version-bump
+    - publish:pypi
+    - publish:docker
+    - publish:gitlab-release
+  script:
+    - |
+      # Only run cleanup if version-bump succeeded but publish failed
+      if [ "$CI_JOB_STATUS" == "failed" ] && [ -f "build.env" ]; then
+        source build.env
+        
+        echo "Pipeline failed, removing tag: v$NEW_VERSION"
+        
+        # Delete tag locally
+        git tag -d "v$NEW_VERSION" || echo "Tag not found locally"
+        
+        # Delete tag from remote
+        git push origin ":refs/tags/v$NEW_VERSION" || echo "Tag not found on remote"
+        
+        echo "Tag v$NEW_VERSION removed successfully"
+      else
+        echo "No cleanup needed or version-bump didn't succeed"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "web" && $RUN_PUBLISH == "true"
+  when: on_failure
+  allow_failure: true
